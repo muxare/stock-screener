@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  @keyframes sd-fade { from { opacity: 0 } to { opacity: 1 } }
+</style>
+</helmet>
+<div style="display:flex; flex-direction:column; height:100%; background:#ffffff; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; color:#15171a; overflow:hidden;">
+
+  <!-- header -->
+  <div style="display:flex; align-items:center; gap:16px; padding:18px 22px; border-bottom:1px solid #ececef; flex:none;">
+    <div style="display:flex; flex-direction:column; gap:2px;">
+      <div style="display:flex; align-items:baseline; gap:10px;">
+        <span style="font-size:26px; font-weight:700; letter-spacing:-0.02em;">{{ stock.ticker }}</span>
+        <span style="font-size:13px; color:#6b7280;">{{ stock.name }}</span>
+      </div>
+      <div style="font-size:11px; color:#98a0a8; text-transform:uppercase; letter-spacing:0.08em;">{{ stock.sector }}</div>
+    </div>
+    <div style="flex:1;"></div>
+    <div style="display:flex; flex-direction:column; align-items:flex-end; gap:2px;">
+      <span style="font-size:24px; font-weight:700; font-variant-numeric:tabular-nums;">{{ priceStr }}</span>
+      <span style="font-size:13px; font-weight:600; font-variant-numeric:tabular-nums; color:{{ chgColor }};">{{ chgStr }}</span>
+    </div>
+    <button onClick="{{ onClose }}" style="margin-left:8px; width:34px; height:34px; border:1px solid #ececef; background:#fff; border-radius:8px; cursor:pointer; font-size:16px; color:#6b7280; display:flex; align-items:center; justify-content:center;" style-hover="background:#f5f6f7;">✕</button>
+  </div>
+
+  <!-- stat tiles -->
+  <div style="display:grid; grid-template-columns:repeat(6,1fr); gap:1px; background:#ececef; border-bottom:1px solid #ececef; flex:none;">
+    <sc-for list="{{ tiles }}" as="t" hint-placeholder-count="6">
+      <div style="background:#fff; padding:11px 14px; display:flex; flex-direction:column; gap:3px;">
+        <span style="font-size:10px; color:#98a0a8; text-transform:uppercase; letter-spacing:0.06em;">{{ t.label }}</span>
+        <span style="font-size:15px; font-weight:600; font-variant-numeric:tabular-nums; color:{{ t.color }};">{{ t.value }}</span>
+      </div>
+    </sc-for>
+  </div>
+
+  <!-- panel toggles -->
+  <div style="display:flex; gap:8px; padding:12px 22px; flex-wrap:wrap; border-bottom:1px solid #f2f3f4; flex:none;">
+    <sc-for list="{{ toggles }}" as="tg" hint-placeholder-count="6">
+      <button onClick="{{ tg.onClick }}" style="display:flex; align-items:center; gap:7px; padding:6px 12px; border-radius:7px; border:1px solid {{ tg.border }}; background:{{ tg.bg }}; color:{{ tg.fg }}; font-size:12px; font-weight:500; cursor:pointer; font-family:inherit;">
+        <span style="width:9px; height:9px; border-radius:2px; background:{{ tg.dot }}; display:inline-block;"></span>
+        {{ tg.label }}
+      </button>
+    </sc-for>
+  </div>
+
+  <!-- chart + matches, scrollable -->
+  <div style="flex:1; overflow-y:auto; display:flex; flex-direction:column;">
+    <div style="position:relative; padding:8px 14px 0 14px;">
+      <canvas ref="{{ setCanvas }}" style="display:block; width:100%;"></canvas>
+    </div>
+
+    <div style="padding:16px 22px 22px 22px;">
+      <div style="font-size:11px; color:#98a0a8; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:10px;">Screen criteria — this stock</div>
+      <sc-if value="{{ hasRules }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex; flex-direction:column; gap:7px;">
+          <sc-for list="{{ matches }}" as="m" hint-placeholder-count="3">
+            <div style="display:flex; align-items:center; gap:10px; font-size:13px;">
+              <span style="width:18px; height:18px; border-radius:5px; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; color:#fff; background:{{ m.color }}; flex:none;">{{ m.icon }}</span>
+              <span style="color:{{ m.text }}; flex:1; min-width:0;">{{ m.label }}</span>
+              <span style="flex:none; opacity:0.92;">{{ m.spark }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+      <sc-if value="{{ noRules }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:13px; color:#98a0a8;">No filters active — showing the full chart with overlays.</div>
+      </sc-if>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:900,&quot;height&quot;:760}}">
+class Component extends DCLogic {
+  state = { ready: false };
+
+  async componentDidMount() {
+    this.M = await import('./market.js');
+    this.setState({ ready: true });
+  }
+  componentDidUpdate() { this.draw(); }
+  componentWillUnmount() { if (this._ro) this._ro.disconnect(); }
+
+  setCanvas = (el) => {
+    this.canvas = el;
+    if (el) {
+      if (!this._ro) {
+        this._ro = new ResizeObserver(() => this.draw());
+        this._ro.observe(el.parentElement);
+      }
+      if (!this._wired) {
+        el.style.cursor = 'grab'; el.style.touchAction = 'none';
+        el.addEventListener('wheel', this.onWheel, { passive: false });
+        el.addEventListener('pointerdown', this.onPointerDown);
+        el.addEventListener('pointermove', this.onPointerMove);
+        el.addEventListener('pointerup', this.onPointerUp);
+        el.addEventListener('pointerleave', this.onPointerUp);
+        el.addEventListener('dblclick', this.resetView);
+        this._wired = true;
+      }
+      this.draw();
+    }
+  };
+
+  panels() {
+    return this.props.panels || { ema: true, volume: true, macd: true, rsi: true, stoch: true, markers: true };
+  }
+
+  // weekday dates across the FULL history, ending "today"
+  datesFull(L) {
+    if (this._dates && this._dates.length === L) return this._dates;
+    const out = []; let d = new Date(2026, 5, 19);
+    while (out.length < L) { const day = d.getDay(); if (day !== 0 && day !== 6) out.push(new Date(d)); d.setDate(d.getDate() - 1); }
+    this._dates = out.reverse();
+    return this._dates;
+  }
+
+  // full-history indicator arrays, computed once per stock
+  ensureFull(s) {
+    if (this._fullKey === s.ticker && this._full) return this._full;
+    const M = this.M, c = s.full.c, v = s.full.v;
+    const f = { ema9: M.ema(c, 9), ema20: M.ema(c, 20), ema50: M.ema(c, 50), ema200: M.ema(c, 200), rsi: M.rsi(c, 14), volAvg20: M.sma(v, 20) };
+    const mac = M.macd(c); f.macdLine = mac.line; f.macdSignal = mac.signal; f.macdHist = mac.hist;
+    const sr = M.stochRsi(f.rsi, 14, 3, 3); f.stochK = sr.k; f.stochD = sr.d;
+    this._full = f; this._fullKey = s.ticker;
+    return f;
+  }
+
+  // ----- viewport (pan / zoom over time) -----
+  initView(s) {
+    const L = s.full.c.length;
+    this._L = L;
+    if (this._viewKey !== s.ticker || !this.view) {
+      const count = Math.min(s.visStart != null ? (L - s.visStart) : 130, L);
+      this.view = { start: Math.max(0, L - count), count };
+      this._viewKey = s.ticker;
+    }
+  }
+  clampView() {
+    const L = this._L;
+    this.view.count = Math.max(15, Math.min(L, Math.round(this.view.count)));
+    this.view.start = Math.max(0, Math.min(L - this.view.count, Math.round(this.view.start)));
+  }
+  _plotW() { const cssW = Math.max(320, this.canvas.parentElement.clientWidth - 28); return cssW - 6 - 58; }
+  _barAtX(clientX) {
+    const rect = this.canvas.getBoundingClientRect();
+    const frac = Math.max(0, Math.min(1, (clientX - rect.left - 6) / this._plotW()));
+    return this.view.start + frac * this.view.count;
+  }
+  onWheel = (e) => {
+    e.preventDefault();
+    if (!this.view) return;
+    const anchor = this._barAtX(e.clientX);
+    const fracPos = (anchor - this.view.start) / this.view.count;
+    this.view.count *= (e.deltaY > 0 ? 1.18 : 1 / 1.18);
+    this.view.start = anchor - fracPos * this.view.count;
+    this.clampView();
+    this.draw();
+  };
+  onPointerDown = (e) => {
+    if (!this.view) return;
+    this._drag = { x: e.clientX, start: this.view.start };
+    this.canvas.style.cursor = 'grabbing';
+    if (this.canvas.setPointerCapture) { try { this.canvas.setPointerCapture(e.pointerId); } catch (err) {} }
+  };
+  onPointerMove = (e) => {
+    if (!this._drag) return;
+    const barsPerPx = this.view.count / this._plotW();
+    this.view.start = this._drag.start - (e.clientX - this._drag.x) * barsPerPx;
+    this.clampView();
+    this.draw();
+  };
+  onPointerUp = () => { this._drag = null; if (this.canvas) this.canvas.style.cursor = 'grab'; };
+  resetView = () => { this._viewKey = null; this.view = null; this.draw(); };
+
+  draw() {
+    const cv = this.canvas, s = this.props.stock;
+    if (!cv || !s || !this.M) return;
+    this.initView(s); this.clampView();
+    const F = this.ensureFull(s);
+    const o = s.full.o, h = s.full.h, l = s.full.l, c = s.full.c, vol = s.full.v;
+    const start = this.view.start, N = this.view.count;
+
+    const wrap = cv.parentElement;
+    const cssW = Math.max(320, wrap.clientWidth - 28);
+    const P = this.panels();
+    const bands = [['price', 290]];
+    if (P.volume) bands.push(['volume', 78]);
+    if (P.macd) bands.push(['macd', 110]);
+    if (P.rsi) bands.push(['rsi', 96]);
+    if (P.stoch) bands.push(['stoch', 96]);
+    const gap = 16, padT = 6, padB = 22;
+    const cssH = padT + padB + bands.reduce((a, b) => a + b[1], 0) + gap * (bands.length - 1);
+    const dpr = window.devicePixelRatio || 1;
+    cv.width = cssW * dpr; cv.height = cssH * dpr;
+    cv.style.height = cssH + 'px';
+    const ctx = cv.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
+
+    const padL = 6, padR = 58, plotW = cssW - padL - padR;
+
+    // price-scale custom indicators referenced by rules -> full overlay series
+    const ovDefs = []; const ovFull = new Map();
+    {
+      const seenSig = new Set();
+      for (const rr of (this.props.rules || [])) {
+        let cand = [];
+        if (rr.kind === 'ind') { cand = [rr.left]; if (rr.rhs && rr.rhs.type === 'ind') cand.push(rr.rhs.def); }
+        else if (rr.kind === 'chain') { cand = (rr.operands || []).filter(op => op.type === 'ind').map(op => op.def); }
+        else continue;
+        for (const d of cand) {
+          if (!this.M.isPriceScale(d)) continue;
+          const sg = this.M.defSig(d);
+          if (seenSig.has(sg)) continue; seenSig.add(sg);
+          ovDefs.push(d); ovFull.set(sg, this.M.indSeries(s, d));
+        }
+      }
+    }
+
+    const x = (i) => padL + (i + 0.5) * (plotW / N);
+    const cw = Math.max(1.5, (plotW / N) * 0.62);
+    const UP = '#06a96b', DN = '#e23d3d', GRID = '#eef0f1', TXT = '#9aa1a8';
+    const dates = this.datesFull(this._L);
+
+    // month separators within view
+    const monthX = [];
+    for (let i = 1; i < N; i++) { const a = start + i; if (dates[a].getMonth() !== dates[a - 1].getMonth()) monthX.push([i, dates[a]]); }
+
+    let y0 = padT;
+    const band = (hh) => { const r = { top: y0, h: hh }; y0 += hh + gap; return r; };
+
+    ctx.font = "11px 'Helvetica Neue',Helvetica,Arial,sans-serif";
+    ctx.textBaseline = 'middle';
+
+    const mNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const drawMonthLines = (b) => {
+      ctx.strokeStyle = '#f4f5f6'; ctx.lineWidth = 1;
+      monthX.forEach(([i]) => { ctx.beginPath(); ctx.moveTo(x(i), b.top); ctx.lineTo(x(i), b.top + b.h); ctx.stroke(); });
+    };
+
+    // ---------- PRICE ----------
+    const pb = band(bands[0][1]);
+    let hi = -Infinity, lo = Infinity;
+    for (let i = 0; i < N; i++) { const a = start + i; if (h[a] > hi) hi = h[a]; if (l[a] < lo) lo = l[a]; }
+    if (P.ema) for (const k of ['ema9', 'ema20', 'ema50', 'ema200']) for (let i = 0; i < N; i++) { const v = F[k][start + i]; if (v != null) { if (v > hi) hi = v; if (v < lo) lo = v; } }
+    for (const od of ovDefs) { const arr = ovFull.get(this.M.defSig(od)); if (!arr) continue; for (let i = 0; i < N; i++) { const v = arr[start + i]; if (v != null && !isNaN(v)) { if (v > hi) hi = v; if (v < lo) lo = v; } } }
+    const pad = (hi - lo) * 0.06 || 1; hi += pad; lo -= pad;
+    const py = (v) => pb.top + (1 - (v - lo) / (hi - lo)) * pb.h;
+    drawMonthLines(pb);
+    // gridlines + right axis
+    ctx.strokeStyle = GRID; ctx.fillStyle = TXT; ctx.lineWidth = 1; ctx.textAlign = 'left';
+    for (let g = 0; g <= 4; g++) {
+      const val = lo + (hi - lo) * (g / 4); const yy = py(val);
+      ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(padL + plotW, yy); ctx.stroke();
+      ctx.fillText(val.toFixed(val < 50 ? 2 : 1), padL + plotW + 6, yy);
+    }
+    // candles
+    for (let i = 0; i < N; i++) {
+      const a = start + i, up = c[a] >= o[a], col = up ? UP : DN, cx = x(i);
+      ctx.strokeStyle = col; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(cx, py(h[a])); ctx.lineTo(cx, py(l[a])); ctx.stroke();
+      const yo = py(o[a]), yc = py(c[a]);
+      ctx.fillStyle = col;
+      ctx.fillRect(cx - cw / 2, Math.min(yo, yc), cw, Math.max(1.2, Math.abs(yc - yo)));
+    }
+    // EMA overlays
+    if (P.ema) {
+      const emas = [['ema9', '#2b6cff'], ['ema20', '#f5a623'], ['ema50', '#9b51e0'], ['ema200', '#8a929a']];
+      for (const [k, col] of emas) {
+        ctx.strokeStyle = col; ctx.lineWidth = 1.6; ctx.beginPath();
+        let started = false;
+        for (let i = 0; i < N; i++) { const v = F[k][start + i]; if (v == null) continue; const px = x(i), pyy = py(v); if (!started) { ctx.moveTo(px, pyy); started = true; } else ctx.lineTo(px, pyy); }
+        ctx.stroke();
+      }
+      ctx.textAlign = 'left'; let lx = padL + 4;
+      for (const [k, col] of emas) { const lbl = k.replace('ema', 'EMA '); ctx.fillStyle = col; ctx.fillRect(lx, pb.top + 6, 12, 3); ctx.fillStyle = '#6b7280'; ctx.fillText(lbl, lx + 16, pb.top + 8); lx += ctx.measureText(lbl).width + 34; }
+    }
+
+    // custom saved-indicator overlays (price-scale) — dashed
+    if (ovDefs.length) {
+      ctx.textAlign = 'left'; let lx2 = padL + 4; const ly = P.ema ? pb.top + 24 : pb.top + 8;
+      for (const od of ovDefs) {
+        const arr = ovFull.get(this.M.defSig(od)); if (!arr) continue;
+        const col = od.color || '#e2649b';
+        ctx.strokeStyle = col; ctx.lineWidth = 1.6; ctx.setLineDash([5, 3]); ctx.beginPath();
+        let st2 = false;
+        for (let i = 0; i < N; i++) { const v = arr[start + i]; if (v == null) continue; const px = x(i), pyy = py(v); if (!st2) { ctx.moveTo(px, pyy); st2 = true; } else ctx.lineTo(px, pyy); }
+        ctx.stroke(); ctx.setLineDash([]);
+        const lbl = od.name || this.M.autoIndName(od);
+        ctx.fillStyle = col; ctx.fillRect(lx2, ly - 2, 12, 3); ctx.fillStyle = '#6b7280'; ctx.fillText(lbl, lx2 + 16, ly); lx2 += ctx.measureText(lbl).width + 34;
+      }
+    }
+    // markers where screen criteria met
+    if (P.markers && this.props.rules && this.props.rules.length) {
+      ctx.fillStyle = UP;
+      for (let i = 0; i < N; i++) {
+        const a = start + i;
+        if (this.M.evalGroupedRules(s, this.props.rules, a)) {
+          const cx = x(i), yy = py(l[a]) + 10;
+          ctx.beginPath(); ctx.moveTo(cx, yy); ctx.lineTo(cx - 4, yy + 7); ctx.lineTo(cx + 4, yy + 7); ctx.closePath(); ctx.fill();
+        }
+      }
+    }
+
+    // ---------- VOLUME ----------
+    if (P.volume) {
+      const vb = band(78);
+      let vmax = 0; for (let i = 0; i < N; i++) { const v = vol[start + i]; if (v > vmax) vmax = v; }
+      vmax = vmax || 1;
+      drawMonthLines(vb);
+      for (let i = 0; i < N; i++) {
+        const a = start + i, up = c[a] >= o[a];
+        const hh = (vol[a] / vmax) * (vb.h - 4);
+        ctx.fillStyle = up ? 'rgba(6,169,107,0.45)' : 'rgba(226,61,61,0.4)';
+        ctx.fillRect(x(i) - cw / 2, vb.top + vb.h - hh, cw, hh);
+      }
+      ctx.strokeStyle = '#f5a623'; ctx.lineWidth = 1.4; ctx.beginPath(); let st = false;
+      for (let i = 0; i < N; i++) { const v = F.volAvg20[start + i]; if (v == null) continue; const yy = vb.top + vb.h - (v / vmax) * (vb.h - 4); if (!st) { ctx.moveTo(x(i), yy); st = true; } else ctx.lineTo(x(i), yy); }
+      ctx.stroke();
+      ctx.fillStyle = TXT; ctx.textAlign = 'left'; ctx.fillText('Volume', padL + 4, vb.top + 9);
+    }
+
+    // ---------- MACD ----------
+    if (P.macd) {
+      const mb = band(110);
+      let mx = 0; for (let i = 0; i < N; i++) { const a = start + i; mx = Math.max(mx, Math.abs(F.macdLine[a]), Math.abs(F.macdSignal[a]), Math.abs(F.macdHist[a])); }
+      mx = mx || 1;
+      const my = (v) => mb.top + (1 - (v + mx) / (2 * mx)) * mb.h;
+      drawMonthLines(mb);
+      ctx.strokeStyle = GRID; ctx.beginPath(); ctx.moveTo(padL, my(0)); ctx.lineTo(padL + plotW, my(0)); ctx.stroke();
+      for (let i = 0; i < N; i++) { const hh = F.macdHist[start + i]; if (hh == null) continue; ctx.fillStyle = hh >= 0 ? 'rgba(6,169,107,0.55)' : 'rgba(226,61,61,0.5)'; const y1 = my(0), y2 = my(hh); ctx.fillRect(x(i) - cw / 2, Math.min(y1, y2), cw, Math.max(1, Math.abs(y2 - y1))); }
+      const line = (arr, col) => { ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.beginPath(); let st = false; for (let i = 0; i < N; i++) { const v = arr[start + i]; if (v == null) continue; if (!st) { ctx.moveTo(x(i), my(v)); st = true; } else ctx.lineTo(x(i), my(v)); } ctx.stroke(); };
+      line(F.macdLine, '#2b6cff'); line(F.macdSignal, '#f5a623');
+      ctx.fillStyle = TXT; ctx.textAlign = 'left'; ctx.fillText('MACD 12,26,9', padL + 4, mb.top + 9);
+    }
+
+    // ---------- RSI ----------
+    if (P.rsi) {
+      const rb = band(96);
+      const ry = (v) => rb.top + (1 - v / 100) * rb.h;
+      drawMonthLines(rb);
+      ctx.strokeStyle = '#f0e2e2'; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(padL, ry(70)); ctx.lineTo(padL + plotW, ry(70)); ctx.stroke();
+      ctx.strokeStyle = '#dceee0'; ctx.beginPath(); ctx.moveTo(padL, ry(30)); ctx.lineTo(padL + plotW, ry(30)); ctx.stroke(); ctx.setLineDash([]);
+      ctx.strokeStyle = '#9b51e0'; ctx.lineWidth = 1.6; ctx.beginPath(); let st = false;
+      for (let i = 0; i < N; i++) { const v = F.rsi[start + i]; if (v == null) continue; if (!st) { ctx.moveTo(x(i), ry(v)); st = true; } else ctx.lineTo(x(i), ry(v)); } ctx.stroke();
+      ctx.fillStyle = TXT; ctx.textAlign = 'left'; ctx.fillText('RSI 14', padL + 4, rb.top + 9);
+      ctx.fillStyle = '#c0b3c9'; ctx.fillText('70', padL + plotW + 6, ry(70)); ctx.fillText('30', padL + plotW + 6, ry(30));
+    }
+
+    // ---------- STOCH RSI ----------
+    if (P.stoch) {
+      const sb = band(96);
+      const sy = (v) => sb.top + (1 - v / 100) * sb.h;
+      drawMonthLines(sb);
+      ctx.strokeStyle = '#eef0f1'; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(padL, sy(80)); ctx.lineTo(padL + plotW, sy(80)); ctx.stroke(); ctx.beginPath(); ctx.moveTo(padL, sy(20)); ctx.lineTo(padL + plotW, sy(20)); ctx.stroke(); ctx.setLineDash([]);
+      const sl = (arr, col) => { ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.beginPath(); let st = false; for (let i = 0; i < N; i++) { const v = arr[start + i]; if (v == null) continue; if (!st) { ctx.moveTo(x(i), sy(v)); st = true; } else ctx.lineTo(x(i), sy(v)); } ctx.stroke(); };
+      sl(F.stochK, '#2b6cff'); sl(F.stochD, '#f5a623');
+      ctx.fillStyle = TXT; ctx.textAlign = 'left'; ctx.fillText('Stoch RSI 14,3,3', padL + 4, sb.top + 9);
+    }
+
+    // month labels at very bottom
+    ctx.fillStyle = '#b8bec4'; ctx.textAlign = 'center';
+    monthX.forEach(([i, d]) => { ctx.fillText(mNames[d.getMonth()], x(i), cssH - 8); });
+  }
+
+  fmtPrice(v) { return '$' + v.toFixed(2); }
+
+  // tiny "why did this fire" sparkline for a single rule over recent bars
+  whySpark(stock, rule, pass) {
+    const M = this.M; if (!M || rule.kind === 'rank') return null;
+    const W = 134, H = 30, N = 46;
+    const L = stock.full.c.length, start = Math.max(0, L - N);
+    const idxs = []; for (let i = start; i < L; i++) idxs.push(i);
+    const color = pass ? '#06a96b' : '#9aa1a8';
+    let mainVals = null, refVals = null, thr = null, marks = [];
+    try {
+      if (rule.kind === 'ind') {
+        const Lr = M.indSeries(stock, rule.left); mainVals = idxs.map(i => Lr[i]);
+        if (rule.rhs) {
+          if (rule.rhs.type === 'const') thr = +rule.rhs.value;
+          else if (rule.rhs.type === 'price') refVals = idxs.map(i => stock.full.c[i]);
+          else if (rule.rhs.type === 'ind') { const Rr = M.indSeries(stock, rule.rhs.def); refVals = idxs.map(i => Rr[i]); }
+        }
+      } else if (rule.kind === 'chain') {
+        const op0 = rule.operands && rule.operands[0];
+        const arr = op0 && op0.type === 'ind' ? M.indSeries(stock, op0.def) : stock.full.c;
+        mainVals = idxs.map(i => arr[i]);
+        idxs.forEach((i, k) => { if (M.evalChainAt(stock, rule, i)) marks.push(k); });
+      } else if (rule.kind === 'group') {
+        const op0 = rule.conds && rule.conds[0] && rule.conds[0].left;
+        const arr = op0 && op0.kind === 'ind' ? M.indSeries(stock, op0.def) : stock.full.c;
+        mainVals = idxs.map(i => arr[i]);
+        idxs.forEach((i, k) => { if (M.evalGroupAt(stock, rule, i)) marks.push(k); });
+      } else if (rule.kind === 'pattern') {
+        mainVals = idxs.map(i => stock.full.c[i]);
+        idxs.forEach((i, k) => { if (M.evalPatternAt(stock, rule, i)) marks.push(k); });
+      } else if (rule.kind === 'flag') {
+        mainVals = idxs.map(i => stock.full.c[i]);
+        idxs.forEach((i, k) => { const sn = stock.snapAbs(i); if (sn[rule.field]) marks.push(k); });
+      } else {
+        mainVals = idxs.map(i => { const sn = stock.snapAbs(i); return sn[rule.field]; });
+        if (rule.op === 'gt' || rule.op === 'lt') thr = +rule.value;
+      }
+    } catch (e) { return null; }
+    if (!mainVals) return null;
+    const allv = mainVals.filter(v => v != null && !isNaN(v)).slice();
+    if (refVals) for (const v of refVals) if (v != null && !isNaN(v)) allv.push(v);
+    if (thr != null && !isNaN(thr)) allv.push(thr);
+    if (allv.length < 2) return null;
+    const mn = Math.min(...allv), mx = Math.max(...allv), rng = (mx - mn) || 1;
+    const px = (k) => (k / (mainVals.length - 1)) * (W - 4) + 2;
+    const py = (v) => H - 3 - ((v - mn) / rng) * (H - 6);
+    const pts = (arr) => arr.map((v, k) => (v == null || isNaN(v)) ? null : `${px(k).toFixed(1)},${py(v).toFixed(1)}`).filter(Boolean).join(' ');
+    const kids = [];
+    if (thr != null && !isNaN(thr)) kids.push(React.createElement('line', { key: 't', x1: 2, x2: W - 2, y1: py(thr), y2: py(thr), stroke: '#c9ced3', strokeWidth: 1, strokeDasharray: '3 3' }));
+    if (refVals) kids.push(React.createElement('polyline', { key: 'r', points: pts(refVals), fill: 'none', stroke: '#cfd4d8', strokeWidth: 1.2 }));
+    kids.push(React.createElement('polyline', { key: 'm', points: pts(mainVals), fill: 'none', stroke: color, strokeWidth: 1.5, strokeLinejoin: 'round', strokeLinecap: 'round' }));
+    for (const k of marks) kids.push(React.createElement('circle', { key: 'mk' + k, cx: px(k), cy: H - 2.5, r: 1.8, fill: color }));
+    return React.createElement('svg', { width: W, height: H, viewBox: `0 0 ${W} ${H}`, style: { display: 'block' } }, kids);
+  }
+
+  renderVals() {
+    const s = this.props.stock;
+    const P = this.panels();
+    const M = this.M;
+    if (!s) return { stock: {}, tiles: [], toggles: [], matches: [], hasRules: false, noRules: true, setCanvas: this.setCanvas, onClose: this.props.onClose, priceStr: '', chgStr: '', chgColor: '#15171a' };
+
+    const up = s.changePct >= 0;
+    const col = (c) => c >= 0 ? '#06a96b' : '#e23d3d';
+
+    const trend = s.ema20 > s.ema50 && s.ema50 > s.ema200 ? ['Strong up', '#06a96b']
+      : s.ema50 > s.ema200 ? ['Uptrend', '#06a96b']
+        : s.ema20 < s.ema50 && s.ema50 < s.ema200 ? ['Downtrend', '#e23d3d'] : ['Mixed', '#6b7280'];
+
+    const tiles = [
+      { label: 'RSI 14', value: s.rsi.toFixed(1), color: s.rsi > 70 ? '#e23d3d' : s.rsi < 30 ? '#06a96b' : '#15171a' },
+      { label: 'MACD hist', value: s.macdHist.toFixed(3), color: col(s.macdHist) },
+      { label: 'Stoch %K', value: (s.stochK).toFixed(1), color: s.stochK > 80 ? '#e23d3d' : s.stochK < 20 ? '#06a96b' : '#15171a' },
+      { label: 'Rel volume', value: s.relVol.toFixed(2) + '×', color: s.relVol > 1.5 ? '#06a96b' : '#15171a' },
+      { label: 'Trend', value: trend[0], color: trend[1] },
+      { label: '52w range', value: s.pct52w.toFixed(0) + '%', color: '#15171a' },
+    ];
+
+    const defs = [
+      ['ema', 'EMA', '#2b6cff'], ['volume', 'Volume', '#f5a623'], ['macd', 'MACD', '#2b6cff'],
+      ['rsi', 'RSI', '#9b51e0'], ['stoch', 'Stoch RSI', '#2b6cff'], ['markers', 'Signal markers', '#06a96b'],
+    ];
+    const toggles = defs.map(([k, label, dot]) => {
+      const on = P[k];
+      return {
+        label, dot: on ? dot : '#cfd4d8',
+        bg: on ? '#f4f8ff' : '#fff', fg: on ? '#15171a' : '#9aa1a8',
+        border: on ? '#d7e6ff' : '#ececef',
+        onClick: () => this.props.onTogglePanel && this.props.onTogglePanel(k),
+      };
+    });
+
+    const rules = this.props.rules || [];
+    let matches = [];
+    if (M && rules.length) {
+      matches = rules.map(r => {
+        const pass = r.kind === 'rank' ? !!r._pass : M.evalRuleAt(s, r, s.nLast);
+        return {
+          label: this.props.ruleLabel ? this.props.ruleLabel(r) : (r.field || ''),
+          pass, icon: pass ? '✓' : '✕',
+          color: pass ? '#06a96b' : '#cfd4d8',
+          text: pass ? '#15171a' : '#9aa1a8',
+          spark: this.whySpark(s, r, pass),
+        };
+      });
+    }
+
+    return {
+      stock: s,
+      priceStr: this.fmtPrice(s.price),
+      chgStr: (up ? '+' : '') + s.changePct.toFixed(2) + '%',
+      chgColor: col(s.changePct),
+      tiles, toggles, matches,
+      hasRules: rules.length > 0, noRules: rules.length === 0,
+      setCanvas: this.setCanvas,
+      onClose: this.props.onClose || (() => {}),
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,2036 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #f4f5f6; }
+  *::-webkit-scrollbar { width: 10px; height: 10px; }
+  *::-webkit-scrollbar-thumb { background: #d6dadd; border-radius: 6px; border: 2px solid #f4f5f6; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes slidein { from { transform: translateX(40px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+  @keyframes popin { from { transform: translateY(10px) scale(0.98); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
+</style>
+</helmet>
+<div data-screen-label="Screener" style="display:flex; flex-direction:column; height:100vh; background:#f4f5f6; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; color:#15171a; overflow:hidden;">
+
+  <!-- TOP BAR -->
+  <div style="display:flex; align-items:center; gap:18px; padding:0 20px; height:60px; background:#fff; border-bottom:1px solid #e7e8ea; flex:none; z-index:5;">
+    <div style="display:flex; align-items:center; gap:10px;">
+      <div style="width:28px; height:28px; border-radius:7px; background:#06a96b; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:800; font-size:16px;">S</div>
+      <span style="font-size:17px; font-weight:700; letter-spacing:-0.02em;">Screenr</span>
+      <span style="font-size:11px; color:#98a0a8; padding:3px 7px; background:#f4f5f6; border-radius:5px; letter-spacing:0.03em;">DEMO DATA</span>
+    </div>
+
+    <div style="position:relative; flex:1; max-width:340px;">
+      <input value="{{ search }}" onInput="{{ onSearch }}" placeholder="Search ticker or company…" style="width:100%; box-sizing:border-box; padding:9px 12px 9px 34px; border:1px solid #e7e8ea; border-radius:9px; font-size:13px; font-family:inherit; outline:none; background:#fafbfb;" style-focus="border-color:#06a96b; background:#fff;" />
+      <span style="position:absolute; left:11px; top:50%; transform:translateY(-50%); color:#aab0b6; font-size:14px;">⌕</span>
+    </div>
+
+    <div style="flex:1;"></div>
+
+    <button onClick="{{ refreshData }}" title="Simulate next session's data" style="display:flex; align-items:center; gap:7px; padding:7px 13px; border:1px solid #e7e8ea; border-radius:9px; background:#fff; color:#15171a; font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit;" style-hover="background:#f5f6f7;"><span style="font-size:14px;">⟳</span>Refresh</button>
+
+    <div style="display:flex; align-items:center; gap:2px; background:#f4f5f6; padding:3px; border-radius:9px;">
+      <sc-for list="{{ layoutBtns }}" as="lb" hint-placeholder-count="2">
+        <button onClick="{{ lb.onClick }}" style="padding:6px 13px; border:none; border-radius:7px; font-size:12px; font-weight:600; cursor:pointer; font-family:inherit; background:{{ lb.bg }}; color:{{ lb.fg }}; box-shadow:{{ lb.shadow }};">{{ lb.label }}</button>
+      </sc-for>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div style="display:flex; flex:1; min-height:0;">
+
+    <!-- FILTER SIDEBAR -->
+    <div style="width:320px; flex:none; background:#fff; border-right:1px solid #e7e8ea; display:flex; flex-direction:column; min-height:0;">
+      <div style="padding:18px 18px 12px 18px; flex:none; display:flex; align-items:center; justify-content:space-between; gap:8px;">
+        <span style="font-size:11px; color:#98a0a8; text-transform:uppercase; letter-spacing:0.09em; font-weight:600;">Strategy presets</span>
+        <button onClick="{{ newPreset }}" title="Save the current filters as a new preset" style="border:none; background:#eafaf3; color:#06865a; font-size:11px; font-weight:700; padding:4px 10px; border-radius:7px; cursor:pointer; font-family:inherit;" style-hover="background:#dcf5ea;">+ New</button>
+      </div>
+      <div style="flex:1; overflow-y:auto; padding:0 14px 18px 14px;">
+        <div style="display:flex; flex-direction:column; gap:7px;">
+          <sc-for list="{{ presets }}" as="p" hint-placeholder-count="7">
+            <div onClick="{{ p.onClick }}" style="text-align:left; padding:11px 13px; border-radius:10px; border:1px solid {{ p.border }}; background:{{ p.bg }}; cursor:pointer; font-family:inherit; display:flex; flex-direction:column; gap:4px; position:relative;" style-hover="border-color:#cdd8e0;">
+              <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                <span style="font-size:13px; font-weight:600; color:{{ p.titleColor }};">{{ p.name }}</span>
+                <div style="display:flex; align-items:center; gap:7px; flex:none;">
+                  <sc-if value="{{ p.editable }}" hint-placeholder-val="{{ true }}">
+                    <button onClick="{{ p.onEdit }}" title="Edit preset" style="border:none; background:none; cursor:pointer; color:#aab0b6; font-size:12px; padding:0; line-height:1;" style-hover="color:#2b5bbf;">✎</button>
+                  </sc-if>
+                  <span style="font-size:11px; font-weight:600; font-variant-numeric:tabular-nums; color:{{ p.countColor }}; background:{{ p.countBg }}; padding:2px 7px; border-radius:20px;">{{ p.count }}</span>
+                </div>
+              </div>
+              <span style="font-size:11.5px; color:#8b9298; line-height:1.45;">{{ p.desc }}</span>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="font-size:11px; color:#98a0a8; text-transform:uppercase; letter-spacing:0.09em; font-weight:600; margin:20px 4px 10px 4px;">Active filters</div>
+        <div style="display:flex; flex-wrap:wrap; align-items:center; gap:6px;">
+          <sc-for list="{{ presetChips }}" as="c" hint-placeholder-count="2">
+            <span style="display:inline-flex; align-items:center; gap:6px; font-size:11.5px; font-weight:500; padding:5px 9px; border-radius:7px; background:#eafaf3; color:#06865a; border:1px solid #bfe8d6;">{{ c.label }}</span>
+          </sc-for>
+          <sc-for list="{{ customChips }}" as="c" hint-placeholder-count="1">
+            <sc-if value="{{ c.showConj }}" hint-placeholder-val="{{ false }}">
+              <button onClick="{{ c.onToggleConj }}" title="Toggle AND / OR" style="border:1px solid {{ c.conjBorder }}; background:{{ c.conjBg }}; color:{{ c.conjFg }}; font-size:10px; font-weight:700; letter-spacing:0.04em; padding:3px 7px; border-radius:6px; cursor:pointer; font-family:inherit;">{{ c.conjLabel }}</button>
+            </sc-if>
+            <span style="display:inline-flex; align-items:center; gap:6px; font-size:11.5px; font-weight:500; padding:5px 9px; border-radius:7px; background:{{ c.editBg }}; color:#2b5bbf; border:1px solid {{ c.editBorder }};">
+              <button onClick="{{ c.onEdit }}" title="Edit filter" style="border:none; background:none; cursor:pointer; color:#2b5bbf; font-family:inherit; font-size:11.5px; font-weight:500; padding:0; line-height:1.2;">{{ c.label }}</button>
+              <button onClick="{{ c.onRemove }}" style="border:none; background:none; cursor:pointer; color:#2b5bbf; font-size:13px; padding:0; line-height:1; opacity:0.7;">✕</button>
+            </span>
+          </sc-for>
+          <sc-if value="{{ noChips }}" hint-placeholder-val="{{ false }}">
+            <span style="font-size:12px; color:#aab0b6; padding:3px 0;">No filters — full universe.</span>
+          </sc-if>
+        </div>
+
+        <sc-if value="{{ hasChipEditor }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-top:10px; border:1px solid #cfddfb; border-radius:10px; background:#f7faff; padding:12px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:9px;">
+              <span style="font-size:11.5px; font-weight:700; color:#2b5bbf;">Edit filter</span>
+              <button onClick="{{ chipEditor.close }}" style="border:none; background:none; cursor:pointer; color:#9aa1a8; font-size:13px; line-height:1;">✕</button>
+            </div>
+            <div style="font-size:11.5px; color:#6b7280; line-height:1.45; margin-bottom:10px; word-break:break-word;">{{ chipEditor.label }}</div>
+            <sc-if value="{{ chipEditor.isValue }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:12px; color:#6b7280;">Value</span>
+                <input type="number" value="{{ chipEditor.value }}" onInput="{{ chipEditor.onValue }}" style="flex:1; min-width:0; box-sizing:border-box; padding:8px 9px; border:1px solid #cfddfb; border-radius:8px; font-size:13px; font-family:inherit; background:#fff;" />
+              </div>
+            </sc-if>
+            <sc-if value="{{ chipEditor.isBetween }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex; gap:8px;">
+                <input type="number" value="{{ chipEditor.min }}" onInput="{{ chipEditor.onMin }}" placeholder="min" style="flex:1; min-width:0; box-sizing:border-box; padding:8px 9px; border:1px solid #cfddfb; border-radius:8px; font-size:13px; font-family:inherit; background:#fff;" />
+                <input type="number" value="{{ chipEditor.max }}" onInput="{{ chipEditor.onMax }}" placeholder="max" style="flex:1; min-width:0; box-sizing:border-box; padding:8px 9px; border:1px solid #cfddfb; border-radius:8px; font-size:13px; font-family:inherit; background:#fff;" />
+              </div>
+            </sc-if>
+            <sc-if value="{{ chipEditor.isN }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:12px; color:#6b7280; flex:1;">{{ chipEditor.countLabel }}</span>
+                <input type="number" min="{{ chipEditor.nMin }}" max="{{ chipEditor.nMax }}" value="{{ chipEditor.n }}" onInput="{{ chipEditor.onN }}" style="width:78px; box-sizing:border-box; padding:8px 9px; border:1px solid #cfddfb; border-radius:8px; font-size:13px; font-family:inherit; background:#fff; text-align:center;" />
+              </div>
+            </sc-if>
+            <sc-if value="{{ chipEditor.isRank }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex; flex-direction:column; gap:8px;">
+                <div style="display:flex; gap:8px;">
+                  <select value="{{ chipEditor.dir }}" onChange="{{ chipEditor.onDir }}" style="flex:none; width:92px; padding:8px 9px; border:1px solid #cfddfb; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; cursor:pointer;">
+                    <option value="top">Top</option><option value="bottom">Bottom</option>
+                  </select>
+                  <div style="position:relative; flex:1;">
+                    <input type="number" min="1" max="99" value="{{ chipEditor.pct }}" onInput="{{ chipEditor.onPct }}" style="width:100%; box-sizing:border-box; padding:8px 22px 8px 9px; border:1px solid #cfddfb; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff;" />
+                    <span style="position:absolute; right:9px; top:50%; transform:translateY(-50%); color:#aab0b6; font-size:12px;">%</span>
+                  </div>
+                </div>
+                <select value="{{ chipEditor.rfield }}" onChange="{{ chipEditor.onField }}" style="width:100%; box-sizing:border-box; padding:8px 9px; border:1px solid #cfddfb; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; cursor:pointer;">
+                  <sc-for list="{{ chipEditor.rankFieldOptions }}" as="rf" hint-placeholder-count="6"><option value="{{ rf.value }}">{{ rf.label }}</option></sc-for>
+                </select>
+                <select value="{{ chipEditor.scope }}" onChange="{{ chipEditor.onScope }}" style="width:100%; box-sizing:border-box; padding:8px 9px; border:1px solid #cfddfb; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; cursor:pointer;">
+                  <option value="all">Across whole universe</option><option value="sector">Within each sector</option>
+                </select>
+              </div>
+            </sc-if>
+            <sc-if value="{{ chipEditor.isSetup }}" hint-placeholder-val="{{ false }}">
+              <button onClick="{{ chipEditor.onEditSetup }}" style="width:100%; padding:9px; border:none; border-radius:8px; background:#2b5bbf; color:#fff; font-size:12.5px; font-weight:700; cursor:pointer; font-family:inherit;" style-hover="background:#244f9f;">Open in setup builder</button>
+            </sc-if>
+            <sc-if value="{{ chipEditor.note }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:11.5px; color:#9aa1a8; line-height:1.45;">{{ chipEditor.note }}</div>
+            </sc-if>
+          </div>
+        </sc-if>
+
+        <!-- MY INDICATORS -->
+        <div style="display:flex; align-items:center; justify-content:space-between; margin:22px 4px 10px 4px;">
+          <span style="font-size:11px; color:#98a0a8; text-transform:uppercase; letter-spacing:0.09em; font-weight:600;">My indicators</span>
+          <button onClick="{{ openBuilder }}" style="border:none; background:#eafaf3; color:#06865a; font-size:11px; font-weight:700; padding:4px 10px; border-radius:7px; cursor:pointer; font-family:inherit;" style-hover="background:#dcf5ea;">+ New</button>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          <sc-for list="{{ indicators }}" as="ind" hint-placeholder-count="2">
+            <div style="display:flex; align-items:center; gap:9px; padding:9px 10px; border:1px solid #ececef; border-radius:9px; background:#fff;">
+              <span style="width:9px; height:9px; border-radius:3px; background:{{ ind.dot }}; flex:none;"></span>
+              <div style="display:flex; flex-direction:column; gap:1px; min-width:0; flex:1;">
+                <span style="font-size:12.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ ind.name }}</span>
+                <span style="font-size:10.5px; color:#9aa1a8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ ind.spec }}</span>
+              </div>
+              <button onClick="{{ ind.onEdit }}" title="Edit indicator" style="border:none; background:none; cursor:pointer; color:#aab0b6; font-size:12px; padding:2px; flex:none; line-height:1;" style-hover="color:#2b5bbf;">✎</button>
+              <button onClick="{{ ind.onDelete }}" style="border:none; background:none; cursor:pointer; color:#c0c5ca; font-size:13px; padding:2px; flex:none; line-height:1;" style-hover="color:#e23d3d;">✕</button>
+            </div>
+          </sc-for>
+          <sc-if value="{{ noIndicators }}" hint-placeholder-val="{{ true }}">
+            <button onClick="{{ openBuilder }}" style="text-align:left; padding:13px; border:1px dashed #d4d7da; border-radius:10px; background:#fafbfb; cursor:pointer; font-family:inherit; color:#8b9298; font-size:12px; line-height:1.45;">No indicators yet — create an EMA, MACD, RSI or Stoch RSI to screen on.</button>
+          </sc-if>
+        </div>
+
+        <!-- MY SCREENS (named chains) -->
+        <div style="display:flex; align-items:center; justify-content:space-between; margin:22px 4px 10px 4px;">
+          <span style="font-size:11px; color:#98a0a8; text-transform:uppercase; letter-spacing:0.09em; font-weight:600;">My screens</span>
+          <button onClick="{{ openScreenBuilder }}" style="border:none; background:#eef3ff; color:#2b5bbf; font-size:11px; font-weight:700; padding:4px 10px; border-radius:7px; cursor:pointer; font-family:inherit;" style-hover="background:#e1ebff;">+ Build</button>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          <sc-for list="{{ screens }}" as="scr" hint-placeholder-count="1">
+            <div style="display:flex; align-items:center; gap:8px; padding:9px 10px; border:1px solid {{ scr.border }}; border-radius:9px; background:{{ scr.bg }};">
+              <button onClick="{{ scr.onApply }}" style="flex:1; min-width:0; text-align:left; border:none; background:none; cursor:pointer; font-family:inherit; display:flex; flex-direction:column; gap:1px; padding:0;">
+                <span style="font-size:12.5px; font-weight:600; color:{{ scr.titleColor }}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ scr.name }}</span>
+                <span style="font-size:10.5px; color:#9aa1a8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ scr.spec }}</span>
+              </button>
+              <sc-if value="{{ scr.showLive }}" hint-placeholder-val="{{ false }}"><span style="font-size:9px; font-weight:700; color:#b3641a; background:#fff4e6; padding:2px 6px; border-radius:20px; flex:none; font-variant-numeric:tabular-nums;">{{ scr.liveCount }}</span></sc-if>
+              <sc-if value="{{ scr.active }}" hint-placeholder-val="{{ false }}"><span style="font-size:9px; font-weight:700; color:#06865a; background:#dcf5ea; padding:2px 6px; border-radius:20px; flex:none; letter-spacing:0.04em;">ON</span></sc-if>
+              <button onClick="{{ scr.onAlert }}" title="Alert when this screen has matches" style="border:none; background:{{ scr.alertBg }}; color:{{ scr.alertFg }}; font-size:9px; font-weight:700; padding:3px 6px; border-radius:6px; flex:none; cursor:pointer; font-family:inherit; letter-spacing:0.03em;">ALERT</button>
+              <button onClick="{{ scr.onEdit }}" title="Edit setup" style="border:none; background:none; cursor:pointer; color:#aab0b6; font-size:12px; padding:2px; flex:none; line-height:1;" style-hover="color:#2b5bbf;">✎</button>
+              <button onClick="{{ scr.onDelete }}" style="border:none; background:none; cursor:pointer; color:#c0c5ca; font-size:13px; padding:2px; flex:none; line-height:1;" style-hover="color:#e23d3d;">✕</button>
+            </div>
+          </sc-for>
+          <sc-if value="{{ noScreens }}" hint-placeholder-val="{{ true }}">
+            <button onClick="{{ openScreenBuilder }}" style="text-align:left; padding:13px; border:1px dashed #d4d7da; border-radius:10px; background:#fafbfb; cursor:pointer; font-family:inherit; color:#8b9298; font-size:12px; line-height:1.45;">Build a setup — combine comparisons with AND/OR, using bar offsets (t&minus;1, t&minus;2…) to reference prior bars. Recreate any TC2000 PCF.</button>
+          </sc-if>
+        </div>
+
+        <!-- ADD SCREENING RULE -->
+        <div style="margin-top:14px; border:1px solid #ececef; border-radius:11px; background:#fafbfb; overflow:hidden;">
+          <button onClick="{{ toggleRuleSection }}" style="width:100%; box-sizing:border-box; display:flex; align-items:center; justify-content:space-between; gap:8px; padding:12px 13px; border:none; background:none; cursor:pointer; font-family:inherit;" style-hover="background:#f4f5f6;">
+            <span style="font-size:11.5px; font-weight:600; color:#6b7280;">Add screening rule</span>
+            <span style="font-size:10px; color:#aab0b6;">{{ ruleArrow }}</span>
+          </button>
+          <sc-if value="{{ ruleOpen }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:0 13px 13px 13px;">
+          <sc-if value="{{ canBuildRule }}" hint-placeholder-val="{{ true }}">
+            <select value="{{ ruleLeftId }}" onChange="{{ onRuleLeft }}" style="width:100%; box-sizing:border-box; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; margin-bottom:8px; cursor:pointer;">
+              <sc-for list="{{ indicators }}" as="li" hint-placeholder-count="2"><option value="{{ li.id }}">{{ li.name }}</option></sc-for>
+            </select>
+            <select value="{{ ruleOp }}" onChange="{{ onRuleOp }}" style="width:100%; box-sizing:border-box; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; margin-bottom:8px; cursor:pointer;">
+              <sc-for list="{{ opOptions }}" as="op" hint-placeholder-count="7"><option value="{{ op.value }}">{{ op.label }}</option></sc-for>
+            </select>
+            <sc-if value="{{ ruleNeedsRhs }}" hint-placeholder-val="{{ true }}">
+              <select value="{{ ruleRhsType }}" onChange="{{ onRuleRhsType }}" style="width:100%; box-sizing:border-box; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; margin-bottom:8px; cursor:pointer;">
+                <option value="const">a value</option>
+                <option value="price">Price (close)</option>
+                <option value="ind">another indicator</option>
+              </select>
+              <sc-if value="{{ rhsIsConst }}" hint-placeholder-val="{{ true }}">
+                <input type="number" value="{{ ruleValue }}" onInput="{{ onRuleValue }}" placeholder="value" style="width:100%; box-sizing:border-box; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff;" />
+              </sc-if>
+              <sc-if value="{{ rhsIsInd }}" hint-placeholder-val="{{ false }}">
+                <select value="{{ ruleRightId }}" onChange="{{ onRuleRight }}" style="width:100%; box-sizing:border-box; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; cursor:pointer;">
+                  <sc-for list="{{ indicators }}" as="ri" hint-placeholder-count="2"><option value="{{ ri.id }}">{{ ri.name }}</option></sc-for>
+                </select>
+              </sc-if>
+            </sc-if>
+            <sc-if value="{{ ruleIsBetween }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex; gap:8px;">
+                <input type="number" value="{{ ruleMin }}" onInput="{{ onRuleMin }}" placeholder="min" style="flex:1; min-width:0; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff;" />
+                <input type="number" value="{{ ruleMax }}" onInput="{{ onRuleMax }}" placeholder="max" style="flex:1; min-width:0; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff;" />
+              </div>
+            </sc-if>
+            <button onClick="{{ addRule }}" style="margin-top:10px; width:100%; padding:9px; border:none; border-radius:8px; background:#15171a; color:#fff; font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit;" style-hover="background:#000;">+ Add filter</button>
+          </sc-if>
+          <sc-if value="{{ cannotBuildRule }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:12px; color:#aab0b6; line-height:1.5;">Create an indicator first, then screen the universe on it.</div>
+          </sc-if>
+          </div>
+          </sc-if>
+        </div>
+
+        <!-- PRICE ACTION PATTERN -->
+        <div style="margin-top:14px; border:1px solid #ececef; border-radius:11px; background:#fafbfb; overflow:hidden;">
+          <button onClick="{{ togglePatternSection }}" style="width:100%; box-sizing:border-box; display:flex; align-items:center; justify-content:space-between; gap:8px; padding:12px 13px; border:none; background:none; cursor:pointer; font-family:inherit;" style-hover="background:#f4f5f6;">
+            <span style="font-size:11.5px; font-weight:600; color:#6b7280;">Price action pattern</span>
+            <span style="font-size:10px; color:#aab0b6;">{{ patternArrow }}</span>
+          </button>
+          <sc-if value="{{ patternOpen }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:0 13px 13px 13px;">
+          <select value="{{ patternPat }}" onChange="{{ onPatternType }}" style="width:100%; box-sizing:border-box; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; cursor:pointer;">
+            <sc-for list="{{ patternOptions }}" as="po" hint-placeholder-count="12"><option value="{{ po.value }}">{{ po.label }}</option></sc-for>
+          </select>
+          <div style="font-size:11.5px; color:#8b9298; line-height:1.45; margin:9px 2px 0;">{{ patternDesc }}</div>
+          <sc-if value="{{ patternHasCount }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex; align-items:center; gap:8px; margin-top:10px;">
+              <span style="font-size:12px; color:#6b7280; flex:1;">{{ patternCountLabel }}</span>
+              <input type="number" value="{{ patternN }}" onInput="{{ onPatternN }}" min="{{ patternMin }}" max="{{ patternMax }}" style="width:74px; box-sizing:border-box; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; text-align:center;" />
+            </div>
+          </sc-if>
+          <button onClick="{{ addPattern }}" style="margin-top:10px; width:100%; padding:9px; border:none; border-radius:8px; background:#15171a; color:#fff; font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit;" style-hover="background:#000;">+ Add filter</button>
+          </div>
+          </sc-if>
+        </div>
+
+        <!-- CROSS-SECTIONAL RANKING -->
+        <div style="margin-top:14px; border:1px solid #ececef; border-radius:11px; background:#fafbfb; overflow:hidden;">
+          <button onClick="{{ toggleRankSection }}" style="width:100%; box-sizing:border-box; display:flex; align-items:center; justify-content:space-between; gap:8px; padding:12px 13px; border:none; background:none; cursor:pointer; font-family:inherit;" style-hover="background:#f4f5f6;">
+            <span style="font-size:11.5px; font-weight:600; color:#6b7280;">Cross-sectional rank</span>
+            <span style="font-size:10px; color:#aab0b6;">{{ rankArrow }}</span>
+          </button>
+          <sc-if value="{{ rankOpen }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:0 13px 13px 13px;">
+            <div style="display:flex; gap:8px; margin-bottom:8px;">
+              <select value="{{ rankDir }}" onChange="{{ onRankDir }}" style="flex:none; width:96px; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; cursor:pointer;">
+                <option value="top">Top</option>
+                <option value="bottom">Bottom</option>
+              </select>
+              <div style="position:relative; flex:1;">
+                <input type="number" value="{{ rankPct }}" onInput="{{ onRankPct }}" min="1" max="99" style="width:100%; box-sizing:border-box; padding:8px 22px 8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff;" />
+                <span style="position:absolute; right:9px; top:50%; transform:translateY(-50%); color:#aab0b6; font-size:12px;">%</span>
+              </div>
+            </div>
+            <select value="{{ rankField }}" onChange="{{ onRankField }}" style="width:100%; box-sizing:border-box; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; margin-bottom:8px; cursor:pointer;">
+              <sc-for list="{{ rankFieldOptions }}" as="rf" hint-placeholder-count="6"><option value="{{ rf.value }}">{{ rf.label }}</option></sc-for>
+            </select>
+            <select value="{{ rankScope }}" onChange="{{ onRankScope }}" style="width:100%; box-sizing:border-box; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; cursor:pointer;">
+              <option value="all">Across whole universe</option>
+              <option value="sector">Within each sector</option>
+            </select>
+            <button onClick="{{ addRank }}" style="margin-top:10px; width:100%; padding:9px; border:none; border-radius:8px; background:#15171a; color:#fff; font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit;" style-hover="background:#000;">+ Add filter</button>
+            <div style="font-size:11px; color:#aab0b6; line-height:1.45; margin-top:8px;">Ranks the live universe — applies to today's bar (excluded from backtests).</div>
+          </div>
+          </sc-if>
+        </div>
+
+        <div style="font-size:11px; color:#98a0a8; text-transform:uppercase; letter-spacing:0.09em; font-weight:600; margin:18px 4px 9px 4px;">Quick signals</div>
+        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+          <sc-for list="{{ flagChips }}" as="fc" hint-placeholder-count="4">
+            <button onClick="{{ fc.onClick }}" style="font-size:11px; padding:5px 9px; border-radius:7px; border:1px solid #dfe1e4; background:#fff; color:#6b7280; cursor:pointer; font-family:inherit;" style-hover="background:#f5f6f7;">+ {{ fc.label }}</button>
+          </sc-for>
+        </div>
+
+        <button onClick="{{ clearAll }}" style="margin-top:16px; width:100%; padding:8px; border:1px solid #ececef; border-radius:8px; background:#fff; color:#8b9298; font-size:12px; font-weight:500; cursor:pointer; font-family:inherit;" style-hover="background:#f5f6f7;">Reset all filters</button>
+      </div>
+    </div>
+
+    <!-- RESULTS -->
+    <div style="flex:1; min-width:0; display:flex; flex-direction:column; min-height:0;">
+      <div style="display:flex; align-items:center; gap:14px; padding:14px 20px; flex:none;">
+        <div style="display:flex; align-items:baseline; gap:9px;">
+          <span style="font-size:22px; font-weight:700; font-variant-numeric:tabular-nums;">{{ matchCount }}</span>
+          <span style="font-size:13px; color:#8b9298;">matches{{ ofTotal }}</span>
+        </div>
+        <div style="flex:1;"></div>
+        <button onClick="{{ toggleHeatmap }}" style="padding:7px 12px; border:1px solid #e7e8ea; border-radius:8px; background:#fff; color:#15171a; font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit;" style-hover="background:#f5f6f7;">Sectors</button>
+        <button onClick="{{ openBacktest }}" style="padding:7px 12px; border:1px solid #e7e8ea; border-radius:8px; background:#fff; color:#15171a; font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit;" style-hover="background:#f5f6f7;">Backtest</button>
+        <select value="{{ sectorFilter }}" onChange="{{ onSector }}" style="padding:7px 10px; border:1px solid #e7e8ea; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; cursor:pointer;">
+          <sc-for list="{{ sectors }}" as="se" hint-placeholder-count="4">
+            <option value="{{ se.value }}">{{ se.label }}</option>
+          </sc-for>
+        </select>
+        <div style="display:flex; align-items:center; gap:2px; background:#eceef0; padding:3px; border-radius:8px;">
+          <button onClick="{{ setComfortable }}" style="padding:5px 10px; border:none; border-radius:6px; font-size:11.5px; font-weight:600; cursor:pointer; font-family:inherit; background:{{ comfBg }}; color:{{ comfFg }};">Comfortable</button>
+          <button onClick="{{ setCompact }}" style="padding:5px 10px; border:none; border-radius:6px; font-size:11.5px; font-weight:600; cursor:pointer; font-family:inherit; background:{{ compBg }}; color:{{ compFg }};">Compact</button>
+        </div>
+      </div>
+
+      <sc-if value="{{ showDiff }}" hint-placeholder-val="{{ false }}">
+        <div style="margin:0 20px 12px; border:1px solid #e7e8ea; border-radius:11px; background:#fff; padding:11px 14px; display:flex; align-items:center; gap:14px; animation:popin 0.2s ease;">
+          <span style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:#98a0a8; flex:none;">New session</span>
+          <div style="flex:1; min-width:0; display:flex; flex-wrap:wrap; gap:6px 16px; font-size:12.5px;">
+            <sc-if value="{{ diffBanner.hasEntered }}" hint-placeholder-val="{{ true }}"><span style="color:#06865a;"><b>+{{ diffBanner.enteredN }} entered</b>&nbsp;&nbsp;{{ diffBanner.enteredStr }}</span></sc-if>
+            <sc-if value="{{ diffBanner.hasExited }}" hint-placeholder-val="{{ false }}"><span style="color:#e23d3d;"><b>−{{ diffBanner.exitedN }} exited</b>&nbsp;&nbsp;{{ diffBanner.exitedStr }}</span></sc-if>
+            <sc-if value="{{ diffBanner.hasAlerts }}" hint-placeholder-val="{{ false }}"><span style="color:#b3641a;"><b>Alerts:</b>&nbsp;{{ diffBanner.alertsStr }}</span></sc-if>
+            <sc-if value="{{ diffBanner.none }}" hint-placeholder-val="{{ false }}"><span style="color:#8b9298;">No change to the active screen's matches.</span></sc-if>
+          </div>
+          <button onClick="{{ dismissDiff }}" style="border:none; background:none; cursor:pointer; color:#aab0b6; font-size:15px; flex:none; line-height:1;">✕</button>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ heatmapOpen }}" hint-placeholder-val="{{ false }}">
+        <div style="margin:0 20px 12px; border:1px solid #e7e8ea; border-radius:11px; background:#fff; padding:14px 16px;">
+          <div style="font-size:11px; color:#98a0a8; text-transform:uppercase; letter-spacing:0.07em; font-weight:600; margin-bottom:11px;">Matches by sector · active screen</div>
+          <div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px 22px;">
+            <sc-for list="{{ heatItems }}" as="hi" hint-placeholder-count="8">
+              <button onClick="{{ hi.onClick }}" style="text-align:left; border:none; background:none; cursor:pointer; font-family:inherit; padding:0; display:flex; flex-direction:column; gap:4px;">
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                  <span style="font-size:12px; font-weight:600; color:{{ hi.labelColor }};">{{ hi.sector }}</span>
+                  <span style="font-size:12px; font-weight:700; font-variant-numeric:tabular-nums; color:{{ hi.labelColor }};">{{ hi.count }}</span>
+                </div>
+                <div style="height:6px; background:#f1f2f3; border-radius:3px; overflow:hidden;"><div style="height:100%; width:{{ hi.barW }}; background:{{ hi.barBg }}; border-radius:3px;"></div></div>
+              </button>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <div style="flex:1; overflow:auto; padding:0 20px 20px 20px; min-height:0;">
+        <div style="min-width:920px;">
+          <!-- header -->
+          <div style="display:grid; grid-template-columns:156px 92px 84px 62px 86px 78px 74px 96px 104px 92px; align-items:center; padding:0 14px; height:38px; border-bottom:1.5px solid #e7e8ea; position:sticky; top:0; background:#f4f5f6; z-index:2;">
+            <sc-for list="{{ cols }}" as="h" hint-placeholder-count="10">
+              <button onClick="{{ h.onClick }}" title="{{ h.title }}" style="text-align:{{ h.align }}; border:none; background:none; cursor:{{ h.cursor }}; font-family:inherit; font-size:10.5px; font-weight:600; color:{{ h.color }}; text-transform:uppercase; letter-spacing:0.05em; padding:0; display:flex; gap:3px; justify-content:{{ h.justify }};">{{ h.label }}{{ h.arrow }}</button>
+            </sc-for>
+          </div>
+          <!-- rows -->
+          <sc-for list="{{ rows }}" as="r" hint-placeholder-count="12">
+            <div onClick="{{ r.onClick }}" style="display:grid; grid-template-columns:156px 92px 84px 62px 86px 78px 74px 96px 104px 92px; align-items:center; padding:{{ rowPad }} 14px; border-bottom:1px solid #eef0f1; cursor:pointer; background:{{ r.bg }}; border-left:2.5px solid {{ r.accent }};" style-hover="background:#f0f7f4;">
+              <div style="display:flex; align-items:center; gap:7px; min-width:0;">
+                <button onClick="{{ r.onPin }}" title="Pin to top" style="border:none; background:none; cursor:pointer; padding:0; font-size:14px; line-height:1; color:{{ r.starColor }}; flex:none;">{{ r.starIcon }}</button>
+                <button onClick="{{ r.onCompare }}" title="Add to compare" style="border:none; background:none; cursor:pointer; padding:0; font-size:12px; line-height:1; color:{{ r.cmpColor }}; flex:none;">{{ r.cmpIcon }}</button>
+                <div style="display:flex; flex-direction:column; gap:1px; min-width:0;">
+                  <span style="font-size:13.5px; font-weight:700; letter-spacing:-0.01em;">{{ r.ticker }}</span>
+                  <span style="font-size:11px; color:#9aa1a8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ r.name }}</span>
+                </div>
+              </div>
+              <span style="font-size:13px; font-weight:600; font-variant-numeric:tabular-nums; text-align:right;">{{ r.price }}</span>
+              <span style="font-size:12.5px; font-weight:600; font-variant-numeric:tabular-nums; text-align:right; color:{{ r.chgColor }};">{{ r.chg }}</span>
+              <span style="font-size:12.5px; font-variant-numeric:tabular-nums; text-align:right; color:{{ r.rsiColor }};">{{ r.rsi }}</span>
+              <span style="font-size:12.5px; font-variant-numeric:tabular-nums; text-align:right; color:{{ r.macdColor }};">{{ r.macd }}</span>
+              <span style="font-size:12.5px; font-variant-numeric:tabular-nums; text-align:right; color:{{ r.stochColor }};">{{ r.stoch }}</span>
+              <span style="font-size:12.5px; font-variant-numeric:tabular-nums; text-align:right; font-weight:{{ r.relVolW }}; color:{{ r.relVolColor }};">{{ r.relVol }}</span>
+              <div style="display:flex; justify-content:flex-end;">
+                <span style="font-size:11px; font-weight:600; padding:3px 8px; border-radius:20px; background:{{ r.trendBg }}; color:{{ r.trendColor }};">{{ r.trend }}</span>
+              </div>
+              <div style="display:flex; flex-direction:column; gap:3px; padding-left:6px;">
+                <div style="position:relative; height:5px; background:#eceef0; border-radius:3px;">
+                  <div style="position:absolute; left:0; top:0; bottom:0; width:{{ r.pos52 }}%; background:#cdd3d8; border-radius:3px;"></div>
+                  <div style="position:absolute; left:{{ r.pos52 }}%; top:50%; width:7px; height:7px; border-radius:50%; background:#15171a; transform:translate(-50%,-50%);"></div>
+                </div>
+                <span style="font-size:11px; color:#aab0b6; text-align:right;">{{ r.pos52Label }}</span>
+              </div>
+              <div style="display:flex; justify-content:flex-end; padding-left:6px;">{{ r.sparkEl }}</div>
+            </div>
+          </sc-for>
+          <sc-if value="{{ empty }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:60px 20px; text-align:center; color:#aab0b6; font-size:14px;">No stocks match these filters. Loosen a rule or pick another preset.</div>
+          </sc-if>
+        </div>
+      </div>
+    </div>
+
+    <!-- DOCKED DETAIL -->
+    <sc-if value="{{ showDocked }}" hint-placeholder-val="{{ false }}">
+      <div style="width:660px; flex:none; border-left:1px solid #e7e8ea; background:#fff; min-height:0;">
+        <sc-if value="{{ hasSelection }}" hint-placeholder-val="{{ false }}">
+          <dc-import name="StockDetail" stock="{{ selectedStock }}" panels="{{ panels }}" rules="{{ effectiveRules }}" on-close="{{ closeDetail }}" on-toggle-panel="{{ togglePanel }}" rule-label="{{ ruleLabel }}" hint-size="100%,100%"></dc-import>
+        </sc-if>
+        <sc-if value="{{ noSelection }}" hint-placeholder-val="{{ true }}">
+          <div style="height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; color:#b8bec4; padding:40px; text-align:center;">
+            <div style="width:46px; height:46px; border-radius:12px; background:#f4f5f6; display:flex; align-items:center; justify-content:center; font-size:22px;">▦</div>
+            <div style="font-size:14px; font-weight:600; color:#8b9298;">Select a stock</div>
+            <div style="font-size:12.5px; line-height:1.5;">Click any row to load its candlestick chart with your screening overlays applied.</div>
+          </div>
+        </sc-if>
+      </div>
+    </sc-if>
+  </div>
+
+  <!-- OVERLAY DETAIL -->
+  <sc-if value="{{ showOverlay }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeDetail }}" style="position:fixed; inset:0; background:rgba(20,23,26,0.32); z-index:40; display:flex; justify-content:flex-end;">
+      <div onClick="{{ stop }}" style="width:min(1080px,94vw); height:100%; background:#fff; box-shadow:-12px 0 40px rgba(0,0,0,0.16); animation:slidein 0.22s ease;">
+        <dc-import name="StockDetail" stock="{{ selectedStock }}" panels="{{ panels }}" rules="{{ effectiveRules }}" on-close="{{ closeDetail }}" on-toggle-panel="{{ togglePanel }}" rule-label="{{ ruleLabel }}" hint-size="100%,100%"></dc-import>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- INDICATOR BUILDER MODAL -->
+  <sc-if value="{{ showBuilder }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeBuilder }}" style="position:fixed; inset:0; background:rgba(20,23,26,0.42); z-index:60; display:flex; align-items:center; justify-content:center; padding:24px;">
+      <div onClick="{{ stop }}" style="width:564px; max-width:100%; max-height:90vh; overflow-y:auto; background:#fff; border-radius:16px; box-shadow:0 24px 70px rgba(0,0,0,0.3); display:flex; flex-direction:column; animation:popin 0.18s ease;">
+        <div style="padding:20px 24px 15px; border-bottom:1px solid #f0f1f2;">
+          <div style="font-size:17px; font-weight:700; letter-spacing:-0.01em;">{{ builderTitle }}</div>
+          <div style="font-size:12.5px; color:#8b9298; margin-top:3px;">{{ builderSubtitle }}</div>
+        </div>
+
+        <div style="padding:18px 24px; display:flex; flex-direction:column; gap:20px;">
+          <!-- type -->
+          <div>
+            <div style="font-size:11px; color:#98a0a8; text-transform:uppercase; letter-spacing:0.07em; font-weight:600; margin-bottom:9px;">Indicator type</div>
+            <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:8px;">
+              <sc-for list="{{ typeOptions }}" as="t" hint-placeholder-count="6">
+                <button onClick="{{ t.onClick }}" style="text-align:left; padding:10px 11px; border-radius:10px; border:1.5px solid {{ t.border }}; background:{{ t.bg }}; cursor:pointer; font-family:inherit; display:flex; flex-direction:column; gap:3px;">
+                  <span style="font-size:13px; font-weight:700; color:{{ t.titleColor }};">{{ t.label }}</span>
+                  <span style="font-size:11px; color:#9aa1a8; line-height:1.3;">{{ t.tag }}</span>
+                </button>
+              </sc-for>
+            </div>
+          </div>
+
+          <!-- params -->
+          <div>
+            <div style="font-size:11px; color:#98a0a8; text-transform:uppercase; letter-spacing:0.07em; font-weight:600; margin-bottom:9px;">Parameters</div>
+            <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:11px;">
+              <sc-for list="{{ builderParams }}" as="bp" hint-placeholder-count="2">
+                <div style="display:flex; flex-direction:column; gap:5px;">
+                  <span style="font-size:11px; color:#8b9298; font-weight:500;">{{ bp.label }}</span>
+                  <sc-if value="{{ bp.isSelect }}" hint-placeholder-val="{{ true }}">
+                    <select value="{{ bp.value }}" onChange="{{ bp.onChange }}" style="width:100%; box-sizing:border-box; padding:9px 10px; border:1px solid #e2e4e6; border-radius:9px; font-size:13px; font-family:inherit; background:#fff; cursor:pointer;">
+                      <sc-for list="{{ bp.options }}" as="o" hint-placeholder-count="4"><option value="{{ o.value }}">{{ o.label }}</option></sc-for>
+                    </select>
+                  </sc-if>
+                  <sc-if value="{{ bp.isNumber }}" hint-placeholder-val="{{ false }}">
+                    <input type="number" value="{{ bp.value }}" onInput="{{ bp.onChange }}" min="{{ bp.min }}" max="{{ bp.max }}" style="width:100%; box-sizing:border-box; padding:9px 10px; border:1px solid #e2e4e6; border-radius:9px; font-size:13px; font-family:inherit; background:#fff;" />
+                  </sc-if>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <!-- live preview -->
+          <div style="display:flex; align-items:center; gap:16px; padding:14px 16px; background:#f7f8f9; border-radius:12px;">
+            <div style="flex:1; min-width:0;">
+              <div style="font-size:10px; color:#98a0a8; text-transform:uppercase; letter-spacing:0.06em;">Preview · {{ sampleTicker }}</div>
+              <div style="font-size:21px; font-weight:700; font-variant-numeric:tabular-nums; margin-top:2px; color:#15171a;">{{ previewValue }}</div>
+              <div style="font-size:11px; color:#9aa1a8;">{{ previewScale }}</div>
+            </div>
+            <div style="flex:none;">{{ previewSpark }}</div>
+          </div>
+
+          <!-- name -->
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <span style="font-size:11px; color:#8b9298; font-weight:500;">Name</span>
+            <input value="{{ builderName }}" onInput="{{ onBuilderName }}" style="width:100%; box-sizing:border-box; padding:10px 11px; border:1px solid #e2e4e6; border-radius:9px; font-size:13px; font-weight:600; font-family:inherit; background:#fff; outline:none;" style-focus="border-color:#06a96b;" />
+          </div>
+        </div>
+
+        <div style="display:flex; gap:10px; padding:14px 24px 20px; border-top:1px solid #f0f1f2;">
+          <button onClick="{{ closeBuilder }}" style="flex:1; padding:11px; border:1px solid #e2e4e6; border-radius:10px; background:#fff; color:#6b7280; font-size:13px; font-weight:600; cursor:pointer; font-family:inherit;" style-hover="background:#f5f6f7;">Cancel</button>
+          <button onClick="{{ saveIndicator }}" style="flex:2; padding:11px; border:none; border-radius:10px; background:#06a96b; color:#fff; font-size:13px; font-weight:700; cursor:pointer; font-family:inherit;" style-hover="background:#05935d;">{{ builderSaveLabel }}</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- SETUP (CONDITION-GROUP) BUILDER MODAL -->
+  <sc-if value="{{ showScreenBuilder }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeScreenBuilder }}" style="position:fixed; inset:0; background:rgba(20,23,26,0.42); z-index:60; display:flex; align-items:center; justify-content:center; padding:24px;">
+      <div onClick="{{ stop }}" style="width:564px; max-width:100%; max-height:90vh; overflow-y:auto; background:#fff; border-radius:16px; box-shadow:0 24px 70px rgba(0,0,0,0.3); display:flex; flex-direction:column; animation:popin 0.18s ease;">
+        <div style="padding:20px 24px 15px; border-bottom:1px solid #f0f1f2;">
+          <div style="font-size:17px; font-weight:700; letter-spacing:-0.01em;">{{ setupTitle }}</div>
+          <div style="font-size:12.5px; color:#8b9298; margin-top:3px; line-height:1.45;">Combine comparisons with AND / OR. Any operand can look back N bars — <b style="color:#6b7280;">t&minus;1</b> is the prior bar, like TC2000's <span style="font-family:monospace;">.1</span> suffix.</div>
+        </div>
+
+        <div style="padding:18px 24px; display:flex; flex-direction:column; gap:10px;">
+          <div style="border:1px solid #d7e6ff; border-radius:11px; background:#f7faff; overflow:hidden;">
+            <button onClick="{{ togglePcf }}" style="width:100%; box-sizing:border-box; display:flex; align-items:center; justify-content:space-between; gap:8px; padding:11px 13px; border:none; background:none; cursor:pointer; font-family:inherit;" style-hover="background:#eef4ff;">
+              <span style="font-size:12px; font-weight:700; color:#2b5bbf;">⎘ Paste a TC2000 formula</span>
+              <span style="font-size:10px; color:#9bb4e0;">{{ pcfArrow }}</span>
+            </button>
+            <sc-if value="{{ pcfOpen }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:0 13px 13px 13px; display:flex; flex-direction:column; gap:9px;">
+                <textarea value="{{ pcfText }}" onInput="{{ onPcfText }}" placeholder="O>L1 AND C>L1 AND L<L1 AND&#10;O>XAVGC50 AND C>XAVGC50 AND L<XAVGC50 AND&#10;XAVGC18>XAVGC50 AND XAVGC50>XAVGC100 AND XAVGC100>XAVGC200" rows="5" style="width:100%; box-sizing:border-box; padding:10px 11px; border:1px solid #cfddfb; border-radius:9px; font-size:12px; font-family:ui-monospace,'SF Mono',Menlo,monospace; background:#fff; outline:none; resize:vertical; line-height:1.55; color:#15171a;" style-focus="border-color:#2b5bbf;"></textarea>
+                <sc-if value="{{ hasPcfError }}" hint-placeholder-val="{{ false }}">
+                  <div style="font-size:11.5px; color:#e23d3d; line-height:1.45;">{{ pcfError }}</div>
+                </sc-if>
+                <div style="display:flex; align-items:center; gap:10px;">
+                  <button onClick="{{ onParsePCF }}" style="flex:none; padding:8px 16px; border:none; border-radius:8px; background:#2b5bbf; color:#fff; font-size:12.5px; font-weight:700; cursor:pointer; font-family:inherit;" style-hover="background:#244f9f;">Parse → conditions</button>
+                  <span style="font-size:10.5px; color:#9aa1a8; line-height:1.45;">O/H/L/C/V (C1 = 1 bar ago), XAVGC50, AVGV60, .1 offsets, ×/+ math. Missing indicators are auto-created.</span>
+                </div>
+              </div>
+            </sc-if>
+          </div>
+
+          <sc-for list="{{ condRows }}" as="row" hint-placeholder-count="2">
+            <sc-if value="{{ row.showConj }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex; justify-content:center;">
+                <button onClick="{{ row.onToggleConj }}" title="Toggle AND / OR" style="border:1px solid {{ row.conjBorder }}; background:{{ row.conjBg }}; color:{{ row.conjFg }}; font-size:10px; font-weight:700; letter-spacing:0.07em; padding:3px 13px; border-radius:20px; cursor:pointer; font-family:inherit;">{{ row.conjLabel }}</button>
+              </div>
+            </sc-if>
+            <div style="border:1px solid #ececef; border-radius:11px; background:#fafbfb; padding:10px 11px; display:flex; flex-direction:column; gap:7px;">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span style="width:18px; height:18px; border-radius:5px; background:#eceef0; color:#8b9298; font-size:10px; font-weight:700; display:flex; align-items:center; justify-content:center; flex:none;">{{ row.badge }}</span>
+                <div style="flex:1;"></div>
+                <sc-if value="{{ row.canRemove }}" hint-placeholder-val="{{ true }}">
+                  <button onClick="{{ row.onRemove }}" style="border:none; background:none; cursor:pointer; color:#c0c5ca; font-size:13px; padding:2px; line-height:1;" style-hover="color:#e23d3d;">✕</button>
+                </sc-if>
+              </div>
+              <div style="display:flex; flex-direction:column; gap:6px;">
+                <div style="display:flex; gap:6px; align-items:center;">
+                  <select value="{{ row.left.srcValue }}" onChange="{{ row.left.onSrc }}" style="flex:1; min-width:0; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; cursor:pointer;">
+                    <sc-for list="{{ row.left.options }}" as="oo" hint-placeholder-count="3"><option value="{{ oo.value }}">{{ oo.label }}</option></sc-for>
+                  </select>
+                  <sc-if value="{{ row.left.isConst }}" hint-placeholder-val="{{ false }}">
+                    <input type="number" value="{{ row.left.value }}" onInput="{{ row.left.onValue }}" style="width:78px; flex:none; box-sizing:border-box; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff;" />
+                  </sc-if>
+                  <sc-if value="{{ row.left.showOffset }}" hint-placeholder-val="{{ true }}">
+                    <div title="Bars ago (t−N). 0 = current bar." style="position:relative; flex:none;">
+                      <span style="position:absolute; left:7px; top:50%; transform:translateY(-50%); color:#aab0b6; font-size:11px; pointer-events:none;">t−</span>
+                      <input type="number" min="0" max="20" value="{{ row.left.offset }}" onInput="{{ row.left.onOffset }}" style="width:56px; box-sizing:border-box; padding:8px 6px 8px 24px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; text-align:center;" />
+                    </div>
+                    <button onClick="{{ row.left.onToggleMath }}" title="Multiply / add a constant" style="flex:none; width:30px; height:33px; border:1px solid {{ row.left.mathBtnBorder }}; border-radius:8px; background:{{ row.left.mathBtnBg }}; color:{{ row.left.mathBtnFg }}; font-size:13px; font-weight:700; cursor:pointer; font-family:inherit; line-height:1;">×</button>
+                  </sc-if>
+                </div>
+                <sc-if value="{{ row.left.showMath }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex; gap:7px; align-items:center; padding-left:2px;">
+                    <span style="font-size:12px; color:#9aa1a8; font-weight:700;">×</span>
+                    <input type="number" step="0.01" value="{{ row.left.mult }}" onInput="{{ row.left.onMult }}" style="width:72px; box-sizing:border-box; padding:7px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff;" />
+                    <span style="font-size:12px; color:#9aa1a8; font-weight:700;">+</span>
+                    <input type="number" step="0.01" value="{{ row.left.add }}" onInput="{{ row.left.onAdd }}" style="width:72px; box-sizing:border-box; padding:7px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff;" />
+                    <span style="font-size:10.5px; color:#bcc2c8;">e.g. ×1.02 = +2%</span>
+                  </div>
+                </sc-if>
+              </div>
+              <div style="display:flex; justify-content:center;">
+                <select value="{{ row.opValue }}" onChange="{{ row.onOp }}" style="width:150px; padding:6px 9px; border:1px solid #d7e6ff; border-radius:8px; font-size:13px; font-weight:600; font-family:inherit; background:#f4f8ff; color:#2b5bbf; cursor:pointer; text-align:center; text-align-last:center;">
+                  <sc-for list="{{ condOps }}" as="oo" hint-placeholder-count="4"><option value="{{ oo.value }}">{{ oo.label }}</option></sc-for>
+                </select>
+              </div>
+              <div style="display:flex; flex-direction:column; gap:6px;">
+                <div style="display:flex; gap:6px; align-items:center;">
+                  <select value="{{ row.right.srcValue }}" onChange="{{ row.right.onSrc }}" style="flex:1; min-width:0; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; cursor:pointer;">
+                    <sc-for list="{{ row.right.options }}" as="oo" hint-placeholder-count="3"><option value="{{ oo.value }}">{{ oo.label }}</option></sc-for>
+                  </select>
+                  <sc-if value="{{ row.right.isConst }}" hint-placeholder-val="{{ true }}">
+                    <input type="number" value="{{ row.right.value }}" onInput="{{ row.right.onValue }}" style="width:78px; flex:none; box-sizing:border-box; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff;" />
+                  </sc-if>
+                  <sc-if value="{{ row.right.showOffset }}" hint-placeholder-val="{{ false }}">
+                    <div title="Bars ago (t−N). 0 = current bar." style="position:relative; flex:none;">
+                      <span style="position:absolute; left:7px; top:50%; transform:translateY(-50%); color:#aab0b6; font-size:11px; pointer-events:none;">t−</span>
+                      <input type="number" min="0" max="20" value="{{ row.right.offset }}" onInput="{{ row.right.onOffset }}" style="width:56px; box-sizing:border-box; padding:8px 6px 8px 24px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; text-align:center;" />
+                    </div>
+                    <button onClick="{{ row.right.onToggleMath }}" title="Multiply / add a constant" style="flex:none; width:30px; height:33px; border:1px solid {{ row.right.mathBtnBorder }}; border-radius:8px; background:{{ row.right.mathBtnBg }}; color:{{ row.right.mathBtnFg }}; font-size:13px; font-weight:700; cursor:pointer; font-family:inherit; line-height:1;">×</button>
+                  </sc-if>
+                </div>
+                <sc-if value="{{ row.right.showMath }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex; gap:7px; align-items:center; padding-left:2px;">
+                    <span style="font-size:12px; color:#9aa1a8; font-weight:700;">×</span>
+                    <input type="number" step="0.01" value="{{ row.right.mult }}" onInput="{{ row.right.onMult }}" style="width:72px; box-sizing:border-box; padding:7px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff;" />
+                    <span style="font-size:12px; color:#9aa1a8; font-weight:700;">+</span>
+                    <input type="number" step="0.01" value="{{ row.right.add }}" onInput="{{ row.right.onAdd }}" style="width:72px; box-sizing:border-box; padding:7px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff;" />
+                    <span style="font-size:10.5px; color:#bcc2c8;">e.g. ×1.02 = +2%</span>
+                  </div>
+                </sc-if>
+              </div>
+            </div>
+          </sc-for>
+
+          <div style="display:flex; gap:8px;">
+            <button onClick="{{ addCond }}" style="flex:1; padding:9px; border:1px dashed #cdd3d8; border-radius:9px; background:#fff; color:#6b7280; font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit;" style-hover="background:#f7f8f9;">+ Add condition</button>
+            <button onClick="{{ loadExample }}" title="Loads the TC2000 GREEN-RED reversal as a worked example" style="flex:none; padding:9px 14px; border:1px solid #ececef; border-radius:9px; background:#fff; color:#2b5bbf; font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit;" style-hover="background:#f4f8ff;">Load example</button>
+          </div>
+
+          <div style="padding:11px 14px; background:#f7f8f9; border-radius:11px; display:flex; flex-direction:column; gap:9px;">
+            <sc-if value="{{ setupPreview }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:11.5px; color:#6b7280; line-height:1.55; word-break:break-word;">{{ setupPreview }}</div>
+            </sc-if>
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+              <span style="font-size:12px; color:#8b9298;">Matches right now</span>
+              <span style="font-size:16px; font-weight:700; font-variant-numeric:tabular-nums;">{{ screenMatchN }}<span style="font-size:11px; color:#9aa1a8; font-weight:500;"> / {{ universeN }}</span></span>
+            </div>
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <span style="font-size:11px; color:#8b9298; font-weight:500;">Name</span>
+            <input value="{{ screenName }}" onInput="{{ onScreenName }}" placeholder="e.g. EMA bounce (long)" style="width:100%; box-sizing:border-box; padding:10px 11px; border:1px solid #e2e4e6; border-radius:9px; font-size:13px; font-weight:600; font-family:inherit; background:#fff; outline:none;" style-focus="border-color:#06a96b;" />
+          </div>
+        </div>
+
+        <div style="display:flex; gap:10px; padding:14px 24px 20px; border-top:1px solid #f0f1f2;">
+          <button onClick="{{ closeScreenBuilder }}" style="flex:1; padding:11px; border:1px solid #e2e4e6; border-radius:10px; background:#fff; color:#6b7280; font-size:13px; font-weight:600; cursor:pointer; font-family:inherit;" style-hover="background:#f5f6f7;">Cancel</button>
+          <button onClick="{{ saveScreen }}" style="flex:2; padding:11px; border:none; border-radius:10px; background:#06a96b; color:#fff; font-size:13px; font-weight:700; cursor:pointer; font-family:inherit;" style-hover="background:#05935d;">{{ setupSaveLabel }}</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- COMPARE FLOATING BAR -->
+  <sc-if value="{{ showCompareBar }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed; left:50%; bottom:22px; transform:translateX(-50%); z-index:35; display:flex; align-items:center; gap:12px; background:#15171a; color:#fff; padding:9px 12px 9px 16px; border-radius:13px; box-shadow:0 12px 34px rgba(0,0,0,0.28);">
+      <span style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:#8a9099;">Compare</span>
+      <div style="display:flex; gap:6px;">
+        <sc-for list="{{ compareChips }}" as="cc" hint-placeholder-count="2">
+          <span style="display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:600; background:#2a2e33; padding:4px 8px; border-radius:7px;">{{ cc.ticker }}<button onClick="{{ cc.onRemove }}" style="border:none; background:none; color:#9aa1a8; cursor:pointer; font-size:12px; padding:0; line-height:1;">✕</button></span>
+        </sc-for>
+      </div>
+      <sc-if value="{{ canCompare }}" hint-placeholder-val="{{ false }}">
+        <button onClick="{{ openCompare }}" style="padding:7px 14px; border:none; border-radius:8px; background:#06a96b; color:#fff; font-size:12.5px; font-weight:700; cursor:pointer; font-family:inherit;" style-hover="background:#05935d;">Compare {{ compareCount }}</button>
+      </sc-if>
+      <sc-if value="{{ cannotCompare }}" hint-placeholder-val="{{ true }}">
+        <span style="font-size:12px; color:#6f757c;">Pick 2–4</span>
+      </sc-if>
+      <button onClick="{{ clearCompare }}" style="border:none; background:none; color:#9aa1a8; font-size:12px; cursor:pointer; font-family:inherit;">Clear</button>
+    </div>
+  </sc-if>
+
+  <!-- COMPARE DRAWER -->
+  <sc-if value="{{ showCompare }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeCompare }}" style="position:fixed; inset:0; background:rgba(20,23,26,0.32); z-index:55; display:flex; justify-content:center; align-items:center; padding:24px;">
+      <div onClick="{{ stop }}" style="width:min(1080px,96vw); max-height:92vh; overflow-y:auto; background:#fff; border-radius:16px; box-shadow:0 24px 70px rgba(0,0,0,0.3); animation:popin 0.18s ease;">
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:18px 22px; border-bottom:1px solid #f0f1f2;">
+          <div><div style="font-size:17px; font-weight:700;">Compare</div><div style="font-size:12.5px; color:#8b9298; margin-top:2px;">Side-by-side · last 70 sessions</div></div>
+          <button onClick="{{ closeCompare }}" style="width:34px; height:34px; border:1px solid #ececef; background:#fff; border-radius:8px; cursor:pointer; font-size:16px; color:#6b7280;">✕</button>
+        </div>
+        <div style="display:flex; gap:1px; background:#ececef;">
+          <sc-for list="{{ compareCols }}" as="cc" hint-placeholder-count="2">
+            <div style="flex:1; min-width:0; background:#fff; padding:16px 16px 18px;">
+              <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:8px;">
+                <div style="min-width:0;">
+                  <div style="font-size:18px; font-weight:700;">{{ cc.ticker }}</div>
+                  <div style="font-size:11px; color:#9aa1a8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ cc.name }}</div>
+                </div>
+                <button onClick="{{ cc.onRemove }}" style="border:none; background:none; cursor:pointer; color:#c0c5ca; font-size:13px;">✕</button>
+              </div>
+              <div style="display:flex; align-items:baseline; gap:8px; margin:6px 0 12px;">
+                <span style="font-size:16px; font-weight:700; font-variant-numeric:tabular-nums;">{{ cc.price }}</span>
+                <span style="font-size:12.5px; font-weight:600; color:{{ cc.chgColor }};">{{ cc.chg }}</span>
+              </div>
+              <div style="position:relative; margin-bottom:14px;"><canvas ref="{{ cc.miniRef }}" style="display:block; width:100%;"></canvas></div>
+              <div style="display:flex; flex-direction:column; gap:1px; background:#f0f1f2; border-radius:8px; overflow:hidden;">
+                <sc-for list="{{ cc.stats }}" as="ss" hint-placeholder-count="6">
+                  <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; background:#fff; padding:8px 11px;">
+                    <span style="font-size:11.5px; color:#8b9298;">{{ ss.label }}</span>
+                    <span style="font-size:13px; font-weight:600; font-variant-numeric:tabular-nums; color:{{ ss.color }};">{{ ss.value }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- BACKTEST MODAL -->
+  <sc-if value="{{ showBacktest }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeBacktest }}" style="position:fixed; inset:0; background:rgba(20,23,26,0.42); z-index:60; display:flex; align-items:center; justify-content:center; padding:24px;">
+      <div onClick="{{ stop }}" style="width:620px; max-width:100%; max-height:90vh; overflow-y:auto; background:#fff; border-radius:16px; box-shadow:0 24px 70px rgba(0,0,0,0.3); animation:popin 0.18s ease;">
+        <div style="padding:20px 24px 15px; border-bottom:1px solid #f0f1f2;">
+          <div style="font-size:17px; font-weight:700;">Backtest · active screen</div>
+          <div style="font-size:12.5px; color:#8b9298; margin-top:3px;">Every bar of all {{ universeN }} names, ~1y history — forward return from buying the close on each signal.</div>
+        </div>
+        <div style="padding:18px 24px;">
+          <sc-if value="{{ btNoRules }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:13px; color:#8b9298; line-height:1.5; margin-bottom:14px;">No filters active — this is the unconditional baseline (every bar fires).</div>
+          </sc-if>
+          <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:16px;">
+            <sc-for list="{{ btRuleLabels }}" as="bl" hint-placeholder-count="2"><span style="font-size:11.5px; font-weight:500; padding:5px 9px; border-radius:7px; background:#eafaf3; color:#06865a; border:1px solid #bfe8d6;">{{ bl }}</span></sc-for>
+          </div>
+          <div style="display:flex; gap:24px; margin-bottom:18px;">
+            <div><div style="font-size:11px; color:#98a0a8; text-transform:uppercase; letter-spacing:0.06em;">Signals</div><div style="font-size:22px; font-weight:700; font-variant-numeric:tabular-nums;">{{ btSignals }}</div></div>
+            <div><div style="font-size:11px; color:#98a0a8; text-transform:uppercase; letter-spacing:0.06em;">Fire rate</div><div style="font-size:22px; font-weight:700; font-variant-numeric:tabular-nums;">{{ btFire }}</div></div>
+          </div>
+          <sc-if value="{{ btEmpty }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:13px; color:#8b9298; line-height:1.5;">This screen never fired across the sample. Loosen a rule and try again.</div>
+          </sc-if>
+          <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:12px;">
+            <sc-for list="{{ btCards }}" as="bc" hint-placeholder-count="3">
+              <div style="border:1px solid #ececef; border-radius:12px; padding:14px; background:{{ bc.winBg }};">
+                <div style="font-size:12px; color:#6b7280; font-weight:600; margin-bottom:8px;">Forward {{ bc.h }}</div>
+                <div style="display:flex; align-items:baseline; gap:6px;"><span style="font-size:24px; font-weight:700; font-variant-numeric:tabular-nums; color:{{ bc.winColor }};">{{ bc.winRate }}</span><span style="font-size:11px; color:#9aa1a8;">win rate</span></div>
+                <div style="height:5px; background:#fff; border-radius:3px; margin:8px 0 12px; overflow:hidden;"><div style="height:100%; width:{{ bc.winW }}; background:{{ bc.winColor }};"></div></div>
+                <div style="display:flex; flex-direction:column; gap:5px; font-size:12px;">
+                  <div style="display:flex; justify-content:space-between;"><span style="color:#8b9298;">Avg return</span><span style="font-weight:600; font-variant-numeric:tabular-nums; color:{{ bc.avgColor }};">{{ bc.avg }}</span></div>
+                  <div style="display:flex; justify-content:space-between;"><span style="color:#8b9298;">Median</span><span style="font-weight:600; font-variant-numeric:tabular-nums;">{{ bc.median }}</span></div>
+                  <div style="display:flex; justify-content:space-between;"><span style="color:#8b9298;">Best / worst</span><span style="font-weight:600; font-variant-numeric:tabular-nums;">{{ bc.best }} / {{ bc.worst }}</span></div>
+                  <div style="display:flex; justify-content:space-between;"><span style="color:#8b9298;">Samples</span><span style="font-weight:600; font-variant-numeric:tabular-nums;">{{ bc.n }}</span></div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="font-size:11px; color:#aab0b6; line-height:1.5; margin-top:16px;">Demo data for illustrating the workflow — not investment advice. Ranking filters are excluded from history.</div>
+        </div>
+        <div style="display:flex; padding:14px 24px 20px; border-top:1px solid #f0f1f2;">
+          <button onClick="{{ closeBacktest }}" style="margin-left:auto; padding:11px 22px; border:none; border-radius:10px; background:#15171a; color:#fff; font-size:13px; font-weight:600; cursor:pointer; font-family:inherit;" style-hover="background:#000;">Done</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- PRESET (STRATEGY) BUILDER MODAL -->
+  <sc-if value="{{ editingPreset }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ cancelPresetEdit }}" style="position:fixed; inset:0; background:rgba(20,23,26,0.42); z-index:60; display:flex; align-items:center; justify-content:center; padding:24px;">
+      <div onClick="{{ stop }}" style="width:560px; max-width:100%; max-height:90vh; overflow-y:auto; background:#fff; border-radius:16px; box-shadow:0 24px 70px rgba(0,0,0,0.3); display:flex; flex-direction:column; animation:popin 0.18s ease;">
+        <div style="padding:20px 24px 15px; border-bottom:1px solid #f0f1f2;">
+          <div style="font-size:17px; font-weight:700; letter-spacing:-0.01em;">{{ presetEditTitle }}</div>
+          <div style="font-size:12.5px; color:#8b9298; margin-top:3px; line-height:1.45;">A strategy preset is a named bundle of filters. Add, remove, or tap a chip to tweak — then save.</div>
+        </div>
+
+        <div style="padding:18px 24px; display:flex; flex-direction:column; gap:16px;">
+          <div style="display:flex; flex-direction:column; gap:9px;">
+            <input value="{{ presetName }}" onInput="{{ onPresetName }}" placeholder="Preset name" style="width:100%; box-sizing:border-box; padding:10px 11px; border:1px solid #e2e4e6; border-radius:9px; font-size:13px; font-weight:600; font-family:inherit; background:#fff; outline:none;" style-focus="border-color:#06a96b;" />
+            <input value="{{ presetDesc }}" onInput="{{ onPresetDesc }}" placeholder="Short description (optional)" style="width:100%; box-sizing:border-box; padding:10px 11px; border:1px solid #e2e4e6; border-radius:9px; font-size:12px; font-family:inherit; background:#fff; outline:none;" style-focus="border-color:#06a96b;" />
+          </div>
+
+          <div>
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:9px;">
+              <span style="font-size:11px; color:#98a0a8; text-transform:uppercase; letter-spacing:0.07em; font-weight:600;">Filters in this preset</span>
+              <span style="font-size:12px; color:#8b9298;"><b style="color:#15171a; font-variant-numeric:tabular-nums;">{{ presetDraftCount }}</b> / {{ universeN }} match</span>
+            </div>
+            <div style="display:flex; flex-wrap:wrap; align-items:center; gap:6px;">
+              <sc-for list="{{ customChips }}" as="c" hint-placeholder-count="2">
+                <sc-if value="{{ c.showConj }}" hint-placeholder-val="{{ false }}">
+                  <button onClick="{{ c.onToggleConj }}" title="Toggle AND / OR" style="border:1px solid {{ c.conjBorder }}; background:{{ c.conjBg }}; color:{{ c.conjFg }}; font-size:10px; font-weight:700; letter-spacing:0.04em; padding:3px 7px; border-radius:6px; cursor:pointer; font-family:inherit;">{{ c.conjLabel }}</button>
+                </sc-if>
+                <span style="display:inline-flex; align-items:center; gap:6px; font-size:11.5px; font-weight:500; padding:5px 9px; border-radius:7px; background:{{ c.editBg }}; color:#2b5bbf; border:1px solid {{ c.editBorder }};">
+                  <button onClick="{{ c.onEdit }}" title="Edit filter" style="border:none; background:none; cursor:pointer; color:#2b5bbf; font-family:inherit; font-size:11.5px; font-weight:500; padding:0; line-height:1.2;">{{ c.label }}</button>
+                  <button onClick="{{ c.onRemove }}" style="border:none; background:none; cursor:pointer; color:#2b5bbf; font-size:13px; padding:0; line-height:1; opacity:0.7;">✕</button>
+                </span>
+              </sc-for>
+              <sc-if value="{{ noChips }}" hint-placeholder-val="{{ true }}">
+                <span style="font-size:12px; color:#aab0b6; padding:3px 0;">No filters yet — add some below. (Empty = the full universe.)</span>
+              </sc-if>
+            </div>
+
+            <sc-if value="{{ hasChipEditor }}" hint-placeholder-val="{{ false }}">
+              <div style="margin-top:10px; border:1px solid #cfddfb; border-radius:10px; background:#f7faff; padding:12px;">
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:9px;">
+                  <span style="font-size:11.5px; font-weight:700; color:#2b5bbf;">Edit filter</span>
+                  <button onClick="{{ chipEditor.close }}" style="border:none; background:none; cursor:pointer; color:#9aa1a8; font-size:13px; line-height:1;">✕</button>
+                </div>
+                <div style="font-size:11.5px; color:#6b7280; line-height:1.45; margin-bottom:10px; word-break:break-word;">{{ chipEditor.label }}</div>
+                <sc-if value="{{ chipEditor.isValue }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:12px; color:#6b7280;">Value</span>
+                    <input type="number" value="{{ chipEditor.value }}" onInput="{{ chipEditor.onValue }}" style="flex:1; min-width:0; box-sizing:border-box; padding:8px 9px; border:1px solid #cfddfb; border-radius:8px; font-size:13px; font-family:inherit; background:#fff;" />
+                  </div>
+                </sc-if>
+                <sc-if value="{{ chipEditor.isBetween }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex; gap:8px;">
+                    <input type="number" value="{{ chipEditor.min }}" onInput="{{ chipEditor.onMin }}" placeholder="min" style="flex:1; min-width:0; box-sizing:border-box; padding:8px 9px; border:1px solid #cfddfb; border-radius:8px; font-size:13px; font-family:inherit; background:#fff;" />
+                    <input type="number" value="{{ chipEditor.max }}" onInput="{{ chipEditor.onMax }}" placeholder="max" style="flex:1; min-width:0; box-sizing:border-box; padding:8px 9px; border:1px solid #cfddfb; border-radius:8px; font-size:13px; font-family:inherit; background:#fff;" />
+                  </div>
+                </sc-if>
+                <sc-if value="{{ chipEditor.isN }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:12px; color:#6b7280; flex:1;">{{ chipEditor.countLabel }}</span>
+                    <input type="number" min="{{ chipEditor.nMin }}" max="{{ chipEditor.nMax }}" value="{{ chipEditor.n }}" onInput="{{ chipEditor.onN }}" style="width:78px; box-sizing:border-box; padding:8px 9px; border:1px solid #cfddfb; border-radius:8px; font-size:13px; font-family:inherit; background:#fff; text-align:center;" />
+                  </div>
+                </sc-if>
+                <sc-if value="{{ chipEditor.isRank }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex; flex-direction:column; gap:8px;">
+                    <div style="display:flex; gap:8px;">
+                      <select value="{{ chipEditor.dir }}" onChange="{{ chipEditor.onDir }}" style="flex:none; width:92px; padding:8px 9px; border:1px solid #cfddfb; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; cursor:pointer;">
+                        <option value="top">Top</option><option value="bottom">Bottom</option>
+                      </select>
+                      <div style="position:relative; flex:1;">
+                        <input type="number" min="1" max="99" value="{{ chipEditor.pct }}" onInput="{{ chipEditor.onPct }}" style="width:100%; box-sizing:border-box; padding:8px 22px 8px 9px; border:1px solid #cfddfb; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff;" />
+                        <span style="position:absolute; right:9px; top:50%; transform:translateY(-50%); color:#aab0b6; font-size:12px;">%</span>
+                      </div>
+                    </div>
+                    <select value="{{ chipEditor.rfield }}" onChange="{{ chipEditor.onField }}" style="width:100%; box-sizing:border-box; padding:8px 9px; border:1px solid #cfddfb; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; cursor:pointer;">
+                      <sc-for list="{{ chipEditor.rankFieldOptions }}" as="rf" hint-placeholder-count="6"><option value="{{ rf.value }}">{{ rf.label }}</option></sc-for>
+                    </select>
+                    <select value="{{ chipEditor.scope }}" onChange="{{ chipEditor.onScope }}" style="width:100%; box-sizing:border-box; padding:8px 9px; border:1px solid #cfddfb; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; cursor:pointer;">
+                      <option value="all">Across whole universe</option><option value="sector">Within each sector</option>
+                    </select>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ chipEditor.isSetup }}" hint-placeholder-val="{{ false }}">
+                  <button onClick="{{ chipEditor.onEditSetup }}" style="width:100%; padding:9px; border:none; border-radius:8px; background:#2b5bbf; color:#fff; font-size:12.5px; font-weight:700; cursor:pointer; font-family:inherit;" style-hover="background:#244f9f;">Open in setup builder</button>
+                </sc-if>
+                <sc-if value="{{ chipEditor.note }}" hint-placeholder-val="{{ false }}">
+                  <div style="font-size:11.5px; color:#9aa1a8; line-height:1.45;">{{ chipEditor.note }}</div>
+                </sc-if>
+              </div>
+            </sc-if>
+          </div>
+
+          <div>
+            <div style="font-size:11px; color:#98a0a8; text-transform:uppercase; letter-spacing:0.07em; font-weight:600; margin-bottom:9px;">Add a filter</div>
+            <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;">
+              <sc-for list="{{ flagChips }}" as="fc" hint-placeholder-count="4">
+                <button onClick="{{ fc.onClick }}" style="font-size:11px; padding:5px 9px; border-radius:7px; border:1px solid #dfe1e4; background:#fff; color:#6b7280; cursor:pointer; font-family:inherit;" style-hover="background:#f5f6f7;">+ {{ fc.label }}</button>
+              </sc-for>
+            </div>
+
+            <div style="border:1px solid #ececef; border-radius:11px; background:#fafbfb; overflow:hidden; margin-bottom:8px;">
+              <button onClick="{{ toggleRuleSection }}" style="width:100%; box-sizing:border-box; display:flex; align-items:center; justify-content:space-between; gap:8px; padding:12px 13px; border:none; background:none; cursor:pointer; font-family:inherit;" style-hover="background:#f4f5f6;">
+                <span style="font-size:11.5px; font-weight:600; color:#6b7280;">Add screening rule</span>
+                <span style="font-size:10px; color:#aab0b6;">{{ ruleArrow }}</span>
+              </button>
+              <sc-if value="{{ ruleOpen }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:0 13px 13px 13px;">
+              <sc-if value="{{ canBuildRule }}" hint-placeholder-val="{{ true }}">
+                <select value="{{ ruleLeftId }}" onChange="{{ onRuleLeft }}" style="width:100%; box-sizing:border-box; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; margin-bottom:8px; cursor:pointer;">
+                  <sc-for list="{{ indicators }}" as="li" hint-placeholder-count="2"><option value="{{ li.id }}">{{ li.name }}</option></sc-for>
+                </select>
+                <select value="{{ ruleOp }}" onChange="{{ onRuleOp }}" style="width:100%; box-sizing:border-box; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; margin-bottom:8px; cursor:pointer;">
+                  <sc-for list="{{ opOptions }}" as="op" hint-placeholder-count="7"><option value="{{ op.value }}">{{ op.label }}</option></sc-for>
+                </select>
+                <sc-if value="{{ ruleNeedsRhs }}" hint-placeholder-val="{{ true }}">
+                  <select value="{{ ruleRhsType }}" onChange="{{ onRuleRhsType }}" style="width:100%; box-sizing:border-box; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; margin-bottom:8px; cursor:pointer;">
+                    <option value="const">a value</option>
+                    <option value="price">Price (close)</option>
+                    <option value="ind">another indicator</option>
+                  </select>
+                  <sc-if value="{{ rhsIsConst }}" hint-placeholder-val="{{ true }}">
+                    <input type="number" value="{{ ruleValue }}" onInput="{{ onRuleValue }}" placeholder="value" style="width:100%; box-sizing:border-box; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff;" />
+                  </sc-if>
+                  <sc-if value="{{ rhsIsInd }}" hint-placeholder-val="{{ false }}">
+                    <select value="{{ ruleRightId }}" onChange="{{ onRuleRight }}" style="width:100%; box-sizing:border-box; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; cursor:pointer;">
+                      <sc-for list="{{ indicators }}" as="ri" hint-placeholder-count="2"><option value="{{ ri.id }}">{{ ri.name }}</option></sc-for>
+                    </select>
+                  </sc-if>
+                </sc-if>
+                <sc-if value="{{ ruleIsBetween }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex; gap:8px;">
+                    <input type="number" value="{{ ruleMin }}" onInput="{{ onRuleMin }}" placeholder="min" style="flex:1; min-width:0; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff;" />
+                    <input type="number" value="{{ ruleMax }}" onInput="{{ onRuleMax }}" placeholder="max" style="flex:1; min-width:0; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff;" />
+                  </div>
+                </sc-if>
+                <button onClick="{{ addRule }}" style="margin-top:10px; width:100%; padding:9px; border:none; border-radius:8px; background:#15171a; color:#fff; font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit;" style-hover="background:#000;">+ Add filter</button>
+              </sc-if>
+              <sc-if value="{{ cannotBuildRule }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:12px; color:#aab0b6; line-height:1.5;">Create an indicator first, then screen the universe on it.</div>
+              </sc-if>
+              </div>
+              </sc-if>
+            </div>
+
+            <div style="border:1px solid #ececef; border-radius:11px; background:#fafbfb; overflow:hidden; margin-bottom:8px;">
+              <button onClick="{{ togglePatternSection }}" style="width:100%; box-sizing:border-box; display:flex; align-items:center; justify-content:space-between; gap:8px; padding:12px 13px; border:none; background:none; cursor:pointer; font-family:inherit;" style-hover="background:#f4f5f6;">
+                <span style="font-size:11.5px; font-weight:600; color:#6b7280;">Price action pattern</span>
+                <span style="font-size:10px; color:#aab0b6;">{{ patternArrow }}</span>
+              </button>
+              <sc-if value="{{ patternOpen }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:0 13px 13px 13px;">
+              <select value="{{ patternPat }}" onChange="{{ onPatternType }}" style="width:100%; box-sizing:border-box; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; cursor:pointer;">
+                <sc-for list="{{ patternOptions }}" as="po" hint-placeholder-count="12"><option value="{{ po.value }}">{{ po.label }}</option></sc-for>
+              </select>
+              <div style="font-size:11.5px; color:#8b9298; line-height:1.45; margin:9px 2px 0;">{{ patternDesc }}</div>
+              <sc-if value="{{ patternHasCount }}" hint-placeholder-val="{{ true }}">
+                <div style="display:flex; align-items:center; gap:8px; margin-top:10px;">
+                  <span style="font-size:12px; color:#6b7280; flex:1;">{{ patternCountLabel }}</span>
+                  <input type="number" value="{{ patternN }}" onInput="{{ onPatternN }}" min="{{ patternMin }}" max="{{ patternMax }}" style="width:74px; box-sizing:border-box; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; text-align:center;" />
+                </div>
+              </sc-if>
+              <button onClick="{{ addPattern }}" style="margin-top:10px; width:100%; padding:9px; border:none; border-radius:8px; background:#15171a; color:#fff; font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit;" style-hover="background:#000;">+ Add filter</button>
+              </div>
+              </sc-if>
+            </div>
+
+            <div style="border:1px solid #ececef; border-radius:11px; background:#fafbfb; overflow:hidden;">
+              <button onClick="{{ toggleRankSection }}" style="width:100%; box-sizing:border-box; display:flex; align-items:center; justify-content:space-between; gap:8px; padding:12px 13px; border:none; background:none; cursor:pointer; font-family:inherit;" style-hover="background:#f4f5f6;">
+                <span style="font-size:11.5px; font-weight:600; color:#6b7280;">Cross-sectional rank</span>
+                <span style="font-size:10px; color:#aab0b6;">{{ rankArrow }}</span>
+              </button>
+              <sc-if value="{{ rankOpen }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:0 13px 13px 13px;">
+                <div style="display:flex; gap:8px; margin-bottom:8px;">
+                  <select value="{{ rankDir }}" onChange="{{ onRankDir }}" style="flex:none; width:96px; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; cursor:pointer;">
+                    <option value="top">Top</option>
+                    <option value="bottom">Bottom</option>
+                  </select>
+                  <div style="position:relative; flex:1;">
+                    <input type="number" value="{{ rankPct }}" onInput="{{ onRankPct }}" min="1" max="99" style="width:100%; box-sizing:border-box; padding:8px 22px 8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff;" />
+                    <span style="position:absolute; right:9px; top:50%; transform:translateY(-50%); color:#aab0b6; font-size:12px;">%</span>
+                  </div>
+                </div>
+                <select value="{{ rankField }}" onChange="{{ onRankField }}" style="width:100%; box-sizing:border-box; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; margin-bottom:8px; cursor:pointer;">
+                  <sc-for list="{{ rankFieldOptions }}" as="rf" hint-placeholder-count="6"><option value="{{ rf.value }}">{{ rf.label }}</option></sc-for>
+                </select>
+                <select value="{{ rankScope }}" onChange="{{ onRankScope }}" style="width:100%; box-sizing:border-box; padding:8px 9px; border:1px solid #e2e4e6; border-radius:8px; font-size:12.5px; font-family:inherit; background:#fff; cursor:pointer;">
+                  <option value="all">Across whole universe</option>
+                  <option value="sector">Within each sector</option>
+                </select>
+                <button onClick="{{ addRank }}" style="margin-top:10px; width:100%; padding:9px; border:none; border-radius:8px; background:#15171a; color:#fff; font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit;" style-hover="background:#000;">+ Add filter</button>
+                <div style="font-size:11px; color:#aab0b6; line-height:1.45; margin-top:8px;">Ranks the live universe — applies to today's bar (excluded from backtests).</div>
+              </div>
+              </sc-if>
+            </div>
+          </div>
+
+          <div style="display:flex; gap:14px;">
+            <sc-if value="{{ canResetPreset }}" hint-placeholder-val="{{ false }}">
+              <button onClick="{{ resetPreset }}" style="border:none; background:none; color:#b3641a; font-size:11.5px; font-weight:600; cursor:pointer; font-family:inherit; padding:0;">↺ Reset to built-in default</button>
+            </sc-if>
+            <sc-if value="{{ canDeletePreset }}" hint-placeholder-val="{{ false }}">
+              <button onClick="{{ deletePreset }}" style="border:none; background:none; color:#e23d3d; font-size:11.5px; font-weight:600; cursor:pointer; font-family:inherit; padding:0;">Delete preset</button>
+            </sc-if>
+          </div>
+        </div>
+
+        <div style="display:flex; gap:10px; padding:14px 24px 20px; border-top:1px solid #f0f1f2;">
+          <button onClick="{{ cancelPresetEdit }}" style="flex:1; padding:11px; border:1px solid #e2e4e6; border-radius:10px; background:#fff; color:#6b7280; font-size:13px; font-weight:600; cursor:pointer; font-family:inherit;" style-hover="background:#f5f6f7;">Cancel</button>
+          <button onClick="{{ savePreset }}" style="flex:2; padding:11px; border:none; border-radius:10px; background:#06a96b; color:#fff; font-size:13px; font-weight:700; cursor:pointer; font-family:inherit;" style-hover="background:#05935d;">Save preset</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- LOADING -->
+  <sc-if value="{{ loading }}" hint-placeholder-val="{{ true }}">
+    <div style="position:fixed; inset:0; background:#f4f5f6; display:flex; align-items:center; justify-content:center; z-index:80;">
+      <div style="width:26px; height:26px; border:3px solid #e0e3e5; border-top-color:#06a96b; border-radius:50%; animation:spin 0.8s linear infinite;"></div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900}}">
+class Component extends DCLogic {
+  PALETTE = ['#e2649b', '#13b8b0', '#7b61ff', '#d9871f', '#3aa0ff', '#06a96b', '#e2553d', '#9b51e0'];
+  STORE = 'screenr.indicators.v1';
+  SCREENS = 'screenr.screens.v1';
+  VIEW = 'screenr.view.v1';
+  PINS = 'screenr.pins.v1';
+  ALERTS = 'screenr.alerts.v1';
+  PSTORE = 'screenr.presets.v1';
+
+  state = {
+    ready: false,
+    universe: [],
+    activePreset: 'macdmomo',
+    customRules: [],
+    search: '',
+    sectorFilter: 'all',
+    sortKey: 'changePct',
+    sortDir: 'desc',
+    selected: null,
+    layout: 'overlay',
+    density: 'comfortable',
+    panels: { ema: true, volume: true, macd: true, rsi: true, stoch: true, markers: true },
+    savedIndicators: [],
+    builderOpen: false,
+    builder: null,
+    editingIndId: null,
+    editingScreenId: null,
+    rule: { leftId: null, op: 'gt', rhsType: 'const', value: 0, rightId: null, min: 0, max: 0 },
+    savedScreens: [],
+    screenBuilderOpen: false,
+    screenDraft: null,
+    pcfOpen: false,
+    pcfText: '',
+    pcfError: '',
+    mathOpen: {},
+    patternDraft: { pat: 'consec_down', n: 3 },
+    ruleOpen: false,
+    patternOpen: false,
+    pinned: [],
+    seed: 7,
+    compareSel: [],
+    compareOpen: false,
+    backtestOpen: false,
+    backtestResult: null,
+    rankOpen: false,
+    rankDraft: { field: 'relVol', scope: 'all', dir: 'top', pct: 10 },
+    heatmapOpen: false,
+    alertScreens: {},
+    diff: null,
+    presetStore: { custom: [], overrides: {}, hidden: [] },
+    editingPreset: null,
+    presetName: '',
+    presetDesc: '',
+    editChip: null,
+  };
+
+  async componentDidMount() {
+    window.addEventListener('keydown', this._onKey);
+    this.M = await import('./market.js');
+    const saved = this._loadInds();
+    const view = this._loadView();
+    this.setState({
+      ready: true,
+      universe: this.M.generateUniverse(7),
+      savedIndicators: saved,
+      savedScreens: this._loadScreens(),
+      builder: this._freshBuilder('ema'),
+      rule: { ...this.state.rule, leftId: saved.length ? saved[0].id : null },
+      pinned: this._loadPins(),
+      alertScreens: this._loadAlerts(),
+      presetStore: this._loadPresetStore(),
+      ...view,
+    });
+  }
+  _loadPresetStore() {
+    try { const o = JSON.parse(localStorage.getItem(this.PSTORE)) || {}; return { custom: o.custom || [], overrides: o.overrides || {}, hidden: o.hidden || [] }; }
+    catch (e) { return { custom: [], overrides: {}, hidden: [] }; }
+  }
+  _savePresetStore(o) { try { localStorage.setItem(this.PSTORE, JSON.stringify(o)); } catch (e) {} }
+  // built-in presets with user overrides applied, plus user-created presets
+  _presets() {
+    const M = this.M; if (!M) return [];
+    const ps = this.state.presetStore || { custom: [], overrides: {}, hidden: [] };
+    const hidden = new Set(ps.hidden || []);
+    const builtins = M.PRESETS.filter(p => !hidden.has(p.id)).map(p =>
+      ps.overrides[p.id] ? { ...p, ...ps.overrides[p.id], id: p.id, builtin: true, overridden: true } : { ...p, builtin: true });
+    const custom = (ps.custom || []).map(p => ({ ...p, builtin: false }));
+    return [...builtins, ...custom];
+  }
+  _presetById(id) { return this._presets().find(p => p.id === id) || { rules: [] }; }
+  componentWillUnmount() { window.removeEventListener('keydown', this._onKey); }
+  componentDidUpdate() { this._redrawMinis(); }
+  _onKey = (e) => {
+    if (e.key !== 'Escape') return;
+    if (this.state.backtestOpen) { e.preventDefault(); this.setState({ backtestOpen: false }); }
+    else if (this.state.compareOpen) { e.preventDefault(); this.setState({ compareOpen: false }); }
+    else if (this.state.builderOpen) { e.preventDefault(); this.setState({ builderOpen: false }); }
+    else if (this.state.screenBuilderOpen) { e.preventDefault(); this.setState({ screenBuilderOpen: false }); }
+    else if (this.state.editingPreset) { e.preventDefault(); this.cancelPresetEdit(); }
+    else if (this.state.selected) { e.preventDefault(); this.setState({ selected: null }); }
+  };
+
+  // ---------- persistence ----------
+  _loadInds() { try { return JSON.parse(localStorage.getItem(this.STORE)) || []; } catch (e) { return []; } }
+  _saveInds(list) { try { localStorage.setItem(this.STORE, JSON.stringify(list)); } catch (e) {} }
+  _loadScreens() { try { return JSON.parse(localStorage.getItem(this.SCREENS)) || []; } catch (e) { return []; } }
+  _saveScreens(list) { try { localStorage.setItem(this.SCREENS, JSON.stringify(list)); } catch (e) {} }
+  _loadView() {
+    try {
+      const v = JSON.parse(localStorage.getItem(this.VIEW)) || {};
+      const ok = {};
+      ['activePreset', 'sortKey', 'sortDir', 'density', 'layout', 'sectorFilter'].forEach(k => { if (v[k] != null) ok[k] = v[k]; });
+      return ok;
+    } catch (e) { return {}; }
+  }
+  _saveView() {
+    try {
+      const s = this.state;
+      localStorage.setItem(this.VIEW, JSON.stringify({ activePreset: s.activePreset, sortKey: s.sortKey, sortDir: s.sortDir, density: s.density, layout: s.layout, sectorFilter: s.sectorFilter }));
+    } catch (e) {}
+  }
+  _loadPins() { try { return JSON.parse(localStorage.getItem(this.PINS)) || []; } catch (e) { return []; } }
+  _savePins(list) { try { localStorage.setItem(this.PINS, JSON.stringify(list)); } catch (e) {} }
+  _loadAlerts() { try { return JSON.parse(localStorage.getItem(this.ALERTS)) || {}; } catch (e) { return {}; } }
+  _saveAlerts(o) { try { localStorage.setItem(this.ALERTS, JSON.stringify(o)); } catch (e) {} }
+
+  // ---------- indicator builder ----------
+  _freshBuilder(type) {
+    const base = { source: 'close', length: 21, fast: 12, slow: 26, signal: 9, output: 'line', rsiLen: 14, stochLen: 14, kSmooth: 3, dSmooth: 3 };
+    return { type, ...base, ...(this.M.IND_DEFAULTS[type] || {}), name: '', nameTouched: false };
+  }
+  _def(b) {
+    const clamp = (v, dflt, min, max) => { let n = parseInt(v, 10); if (isNaN(n)) n = dflt; return Math.max(min, Math.min(max, n)); };
+    const d = { type: b.type, source: b.source };
+    if (b.type === 'ema' || b.type === 'sma') d.length = clamp(b.length, 21, 2, 400);
+    else if (b.type === 'rsi') d.length = clamp(b.length, 14, 2, 100);
+    else if (b.type === 'macd') { d.fast = clamp(b.fast, 12, 2, 100); d.slow = clamp(b.slow, 26, 3, 300); d.signal = clamp(b.signal, 9, 1, 100); d.output = b.output; }
+    else if (b.type === 'stochrsi') { d.rsiLen = clamp(b.rsiLen, 14, 2, 100); d.stochLen = clamp(b.stochLen, 14, 2, 100); d.kSmooth = clamp(b.kSmooth, 3, 1, 20); d.dSmooth = clamp(b.dSmooth, 3, 1, 20); d.output = b.output; }
+    return d;
+  }
+  _builderFromInd(ind) {
+    const base = { source: 'close', length: 21, fast: 12, slow: 26, signal: 9, output: 'line', rsiLen: 14, stochLen: 14, kSmooth: 3, dSmooth: 3 };
+    return { ...base, ...ind, name: ind.name, nameTouched: true };
+  }
+  openBuilder = () => this.setState({ builderOpen: true, editingIndId: null, builder: this._freshBuilder('ema') });
+  editIndicator = (id) => {
+    const ind = this.state.savedIndicators.find(i => i.id === id);
+    if (!ind) return;
+    this.setState({ builderOpen: true, editingIndId: id, builder: this._builderFromInd(ind) });
+  };
+  closeBuilder = () => this.setState({ builderOpen: false, editingIndId: null });
+  setBuilderType = (type) => this.setState({ builder: this._freshBuilder(type) });
+  // swap any operand/def referencing indicator `id` for the updated indicator
+  _replaceIndInRule(rule, id, newInd) {
+    const fixOp = (op) => (op && op.kind === 'ind' && op.def && op.def.id === id) ? { ...op, def: { ...newInd } } : op;
+    if (rule.kind === 'group') return { ...rule, conds: rule.conds.map(c => ({ ...c, left: fixOp(c.left), right: fixOp(c.right) })) };
+    if (rule.kind === 'chain') return { ...rule, operands: rule.operands.map(o => (o.type === 'ind' && o.def && o.def.id === id) ? { ...o, def: { ...newInd } } : o) };
+    if (rule.kind === 'ind') {
+      const r = { ...rule };
+      if (r.left && r.left.id === id) r.left = { ...newInd };
+      if (r.rhs && r.rhs.type === 'ind' && r.rhs.def && r.rhs.def.id === id) r.rhs = { ...r.rhs, def: { ...newInd } };
+      return r;
+    }
+    return rule;
+  }
+  onBuilderParam = (key, isNum) => (e) => {
+    const v = e.target.value;
+    this.setState(st => ({ builder: { ...st.builder, [key]: v } }));
+  };
+  onBuilderName = (e) => this.setState(st => ({ builder: { ...st.builder, name: e.target.value, nameTouched: true } }));
+  saveIndicator = () => {
+    const b = this.state.builder;
+    const def = this._def(b);
+    const name = (b.nameTouched && b.name.trim()) ? b.name.trim() : this.M.autoIndName(def);
+    const editId = this.state.editingIndId;
+    if (editId) {
+      const prev = this.state.savedIndicators.find(i => i.id === editId) || {};
+      const ind = { id: editId, name, color: prev.color, ...def };
+      const list = this.state.savedIndicators.map(i => i.id === editId ? ind : i);
+      this._saveInds(list);
+      const screens = this.state.savedScreens.map(s => ({ ...s, rule: this._replaceIndInRule(s.rule, editId, ind) }));
+      this._saveScreens(screens);
+      this.setState(st => ({
+        savedIndicators: list, savedScreens: screens, builderOpen: false, editingIndId: null,
+        customRules: st.customRules.map(r => this._replaceIndInRule(r, editId, ind)),
+      }));
+      return;
+    }
+    const id = 'ind' + Date.now().toString(36) + Math.floor(Math.random() * 1000).toString(36);
+    const color = this.PALETTE[this.state.savedIndicators.length % this.PALETTE.length];
+    const ind = { id, name, color, ...def };
+    const list = [...this.state.savedIndicators, ind];
+    this._saveInds(list);
+    this.setState(st => ({ savedIndicators: list, builderOpen: false, rule: { ...st.rule, leftId: st.rule.leftId || id } }));
+  };
+  deleteIndicator = (id) => {
+    const list = this.state.savedIndicators.filter(i => i.id !== id);
+    this._saveInds(list);
+    this.setState(st => ({
+      savedIndicators: list,
+      customRules: st.customRules.filter(r => !(r.kind === 'ind' && (r.left.id === id || (r.rhs && r.rhs.type === 'ind' && r.rhs.def.id === id)))),
+      rule: {
+        ...st.rule,
+        leftId: st.rule.leftId === id ? (list[0] ? list[0].id : null) : st.rule.leftId,
+        rightId: st.rule.rightId === id ? null : st.rule.rightId,
+      },
+    }));
+  };
+  specOf(ind) {
+    const t = ind.type;
+    if (t === 'ema' || t === 'sma' || t === 'rsi') return `${ind.source} · length ${ind.length}`;
+    if (t === 'macd') return `${ind.source} · ${ind.fast}/${ind.slow}/${ind.signal} · ${ind.output}`;
+    if (t === 'stochrsi') return `${ind.source} · ${ind.rsiLen}/${ind.stochLen}/${ind.kSmooth}/${ind.dSmooth} · ${ind.output === 'd' ? '%D' : '%K'}`;
+    return ind.source;
+  }
+
+  // ---------- setup (condition-group) builder ----------
+  // A setup is an AND/OR group of pairwise comparisons. Each operand is a
+  // price/volume field, a saved indicator, or a constant — and (except const)
+  // carries a bar OFFSET (0 = now, 1 = one bar ago, like TC2000's `.1`).
+  _freshCond(inds) {
+    const right = inds[0] ? { kind: 'ind', id: inds[0].id, offset: 0 } : { kind: 'const', value: 0 };
+    return { left: { kind: 'field', field: 'close', offset: 0 }, op: 'gt', right, conj: 'and' };
+  }
+  _freshScreen(inds) {
+    return { name: '', nameTouched: false, conds: [this._freshCond(inds)] };
+  }
+  _screenRule(draft) {
+    const inds = this.state.savedIndicators;
+    const resolve = (op) => {
+      if (!op) return null;
+      if (op.kind === 'const') return { kind: 'const', value: Number(op.value) || 0 };
+      const offset = Math.max(0, parseInt(op.offset, 10) || 0);
+      const mult = (op.mult == null || op.mult === '') ? 1 : Number(op.mult);
+      const add = (op.add == null || op.add === '') ? 0 : Number(op.add);
+      if (op.kind === 'field') return { kind: 'field', field: op.field, offset, mult, add };
+      const ind = inds.find(i => i.id === op.id);
+      return ind ? { kind: 'ind', def: { ...ind }, offset, mult, add } : null;
+    };
+    const conds = (draft.conds || []).map(c => {
+      const left = resolve(c.left), right = resolve(c.right);
+      if (!left || !right) return null;
+      return { left, op: c.op, right, conj: c.conj || 'and' };
+    });
+    if (!conds.length || conds.some(c => !c)) return null;
+    return { kind: 'group', conds };
+  }
+  openScreenBuilder = () => this.setState({ screenBuilderOpen: true, editingScreenId: null, pcfOpen: false, pcfError: '', mathOpen: {}, screenDraft: this._freshScreen(this.state.savedIndicators) });
+  closeScreenBuilder = () => this.setState({ screenBuilderOpen: false, editingScreenId: null });
+  editScreen = (scr) => {
+    let inds = this.state.savedIndicators.slice();
+    const ensure = (def) => {
+      const sig = this.M.defSig(def);
+      const found = inds.find(i => this.M.defSig(i) === sig);
+      if (found) return found.id;
+      const id = 'ind' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36);
+      const color = this.PALETTE[inds.length % this.PALETTE.length];
+      inds.push({ id, name: this.M.autoIndName(def), color, ...def });
+      return id;
+    };
+    const opToDraft = (op) => {
+      if (!op) return { kind: 'const', value: 0 };
+      if (op.kind === 'const' || op.type === 'const') return { kind: 'const', value: op.value };
+      if (op.kind === 'field') return { kind: 'field', field: op.field, offset: op.offset || 0, mult: op.mult, add: op.add };
+      if (op.type === 'price') return { kind: 'field', field: 'close', offset: 0 };
+      return { kind: 'ind', id: ensure(op.def), offset: op.offset || 0, mult: op.mult, add: op.add };
+    };
+    let conds;
+    if (scr.rule.kind === 'group') {
+      conds = scr.rule.conds.map(c => ({ left: opToDraft(c.left), op: c.op, right: opToDraft(c.right), conj: c.conj || 'and' }));
+    } else { // migrate an old monotonic chain into the condition model
+      const ops = scr.rule.operands, link = scr.rule.ops;
+      conds = link.map((o, k) => ({ left: opToDraft(ops[k]), op: o === 'lt' ? 'lt' : 'gt', right: opToDraft(ops[k + 1]), conj: 'and' }));
+    }
+    if (inds.length !== this.state.savedIndicators.length) this._saveInds(inds);
+    this.setState({ savedIndicators: inds, screenBuilderOpen: true, editingScreenId: scr.id, screenDraft: { name: scr.name, nameTouched: true, conds }, pcfOpen: false, pcfError: '', mathOpen: {} });
+  };
+  _setOperand(idx, side, mut) {
+    this.setState(st => {
+      const conds = st.screenDraft.conds.slice();
+      const c = { ...conds[idx] };
+      c[side] = mut({ ...c[side] });
+      conds[idx] = c;
+      return { screenDraft: { ...st.screenDraft, conds } };
+    });
+  }
+  onCondSrc = (idx, side) => (e) => {
+    const v = e.target.value;
+    this._setOperand(idx, side, (op) => {
+      if (v === 'const') return { kind: 'const', value: op.value != null ? op.value : 0 };
+      if (v.indexOf('field:') === 0) return { kind: 'field', field: v.slice(6), offset: op.offset || 0 };
+      return { kind: 'ind', id: v.slice(4), offset: op.offset || 0 };
+    });
+  };
+  onCondOffset = (idx, side) => (e) => { const v = e.target.value; this._setOperand(idx, side, (op) => ({ ...op, offset: v })); };
+  onCondConst = (idx, side) => (e) => { const v = e.target.value; this._setOperand(idx, side, (op) => ({ ...op, value: v })); };
+  onCondOp = (idx) => (e) => { const v = e.target.value; this.setState(st => { const conds = st.screenDraft.conds.slice(); conds[idx] = { ...conds[idx], op: v }; return { screenDraft: { ...st.screenDraft, conds } }; }); };
+  toggleCondConj = (idx) => () => { this.setState(st => { const conds = st.screenDraft.conds.slice(); conds[idx] = { ...conds[idx], conj: conds[idx].conj === 'or' ? 'and' : 'or' }; return { screenDraft: { ...st.screenDraft, conds } }; }); };
+  addCond = () => this.setState(st => ({ screenDraft: { ...st.screenDraft, conds: [...st.screenDraft.conds, this._freshCond(st.savedIndicators)] } }));
+  removeCond = (idx) => this.setState(st => {
+    if (st.screenDraft.conds.length <= 1) return {};
+    return { screenDraft: { ...st.screenDraft, conds: st.screenDraft.conds.filter((_, i) => i !== idx) } };
+  });
+  loadExample = () => this.setState({ screenDraft: {
+    name: '', nameTouched: false,
+    conds: [
+      { left: { kind: 'field', field: 'high', offset: 0 }, op: 'lt', right: { kind: 'field', field: 'high', offset: 1 }, conj: 'and' },
+      { left: { kind: 'field', field: 'close', offset: 0 }, op: 'gt', right: { kind: 'field', field: 'open', offset: 0 }, conj: 'and' },
+      { left: { kind: 'field', field: 'open', offset: 1 }, op: 'lt', right: { kind: 'field', field: 'close', offset: 1 }, conj: 'and' },
+    ],
+  } });
+  // operand arithmetic (× / +)
+  toggleMath = (idx, side) => () => this.setState(st => { const k = idx + ':' + side; const m = { ...st.mathOpen }; m[k] = !m[k]; return { mathOpen: m }; });
+  onCondMult = (idx, side) => (e) => { const v = e.target.value; this._setOperand(idx, side, (op) => ({ ...op, mult: v })); };
+  onCondAdd = (idx, side) => (e) => { const v = e.target.value; this._setOperand(idx, side, (op) => ({ ...op, add: v })); };
+  // TC2000 PCF text import
+  togglePcf = () => this.setState(st => ({ pcfOpen: !st.pcfOpen, pcfError: '' }));
+  onPcfText = (e) => this.setState({ pcfText: e.target.value, pcfError: '' });
+  onParsePCF = () => {
+    const res = this.M.parsePCF(this.state.pcfText || '');
+    if (res.error) { this.setState({ pcfError: res.error }); return; }
+    let inds = this.state.savedIndicators.slice();
+    const ensure = (def) => {
+      const sig = this.M.defSig(def);
+      const found = inds.find(i => this.M.defSig(i) === sig);
+      if (found) return found.id;
+      const id = 'ind' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36);
+      const color = this.PALETTE[inds.length % this.PALETTE.length];
+      inds.push({ id, name: this.M.autoIndName(def), color, ...def });
+      return id;
+    };
+    const toDraftOp = (op) => {
+      if (op.kind === 'const') return { kind: 'const', value: op.value };
+      if (op.kind === 'field') return { kind: 'field', field: op.field, offset: op.offset || 0, mult: op.mult, add: op.add };
+      return { kind: 'ind', id: ensure(op.def), offset: op.offset || 0, mult: op.mult, add: op.add };
+    };
+    const conds = res.rule.conds.map(c => ({ left: toDraftOp(c.left), op: c.op, right: toDraftOp(c.right), conj: c.conj }));
+    if (inds.length !== this.state.savedIndicators.length) this._saveInds(inds);
+    this.setState({ savedIndicators: inds, screenDraft: { name: '', nameTouched: false, conds }, pcfOpen: false, pcfError: '', mathOpen: {} });
+  };
+  onScreenName = (e) => this.setState(st => ({ screenDraft: { ...st.screenDraft, name: e.target.value, nameTouched: true } }));
+  saveScreen = () => {
+    const d = this.state.screenDraft;
+    const rule = this._screenRule(d);
+    if (!rule) return;
+    const name = (d.nameTouched && d.name.trim()) ? d.name.trim() : this.M.groupLabel(rule);
+    const editId = this.state.editingScreenId;
+    if (editId) {
+      const list = this.state.savedScreens.map(s => s.id === editId ? { ...s, name, rule } : s);
+      this._saveScreens(list);
+      this.setState(st => ({
+        savedScreens: list, screenBuilderOpen: false, editingScreenId: null,
+        customRules: st.customRules.map(r => r.screenId === editId ? { ...rule, name, screenId: editId } : r),
+      }));
+      return;
+    }
+    const id = 'scr' + Date.now().toString(36) + Math.floor(Math.random() * 1000).toString(36);
+    const screen = { id, name, rule };
+    const list = [...this.state.savedScreens, screen];
+    this._saveScreens(list);
+    this.setState(st => ({
+      savedScreens: list, screenBuilderOpen: false,
+      customRules: [...st.customRules.filter(r => r.screenId !== id), { ...rule, name, screenId: id }],
+    }));
+  };
+  applyScreen = (scr) => this.setState(st => {
+    const exists = st.customRules.some(r => r.screenId === scr.id);
+    if (exists) return { customRules: st.customRules.filter(r => r.screenId !== scr.id) };
+    return { customRules: [...st.customRules, { ...scr.rule, name: scr.name, screenId: scr.id }] };
+  });
+  deleteScreen = (id) => {
+    const list = this.state.savedScreens.filter(s => s.id !== id);
+    this._saveScreens(list);
+    this.setState(st => ({ savedScreens: list, customRules: st.customRules.filter(r => r.screenId !== id) }));
+  };
+
+  // ---------- rule builder ----------
+  onRuleLeft = (e) => this.setState(st => ({ rule: { ...st.rule, leftId: e.target.value } }));
+  onRuleOp = (e) => this.setState(st => ({ rule: { ...st.rule, op: e.target.value } }));
+  onRuleRhsType = (e) => this.setState(st => ({ rule: { ...st.rule, rhsType: e.target.value } }));
+  onRuleValue = (e) => this.setState(st => ({ rule: { ...st.rule, value: e.target.value } }));
+  onRuleRight = (e) => this.setState(st => ({ rule: { ...st.rule, rightId: e.target.value } }));
+  onRuleMin = (e) => this.setState(st => ({ rule: { ...st.rule, min: e.target.value } }));
+  onRuleMax = (e) => this.setState(st => ({ rule: { ...st.rule, max: e.target.value } }));
+  addRule = () => {
+    const r = this.state.rule, inds = this.state.savedIndicators;
+    const left = inds.find(i => i.id === r.leftId);
+    if (!left) return;
+    const leftDef = { ...left };
+    let rule;
+    if (r.op === 'between') rule = { kind: 'ind', left: leftDef, op: 'between', min: Number(r.min) || 0, max: Number(r.max) || 0 };
+    else if (r.op === 'rising' || r.op === 'falling') rule = { kind: 'ind', left: leftDef, op: r.op };
+    else {
+      let rhs;
+      if (r.rhsType === 'price') rhs = { type: 'price' };
+      else if (r.rhsType === 'ind') {
+        const right = inds.find(i => i.id === r.rightId) || (inds[0] && inds[0].id !== r.leftId ? inds[0] : inds[1]);
+        if (!right) return;
+        rhs = { type: 'ind', def: { ...right } };
+      } else rhs = { type: 'const', value: Number(r.value) || 0 };
+      rule = { kind: 'ind', left: leftDef, op: r.op, rhs };
+    }
+    this.setState(st => ({ customRules: [...st.customRules, rule] }));
+  };
+  addFlag = (field) => this.setState(st => ({ customRules: [...st.customRules, { kind: 'flag', field }] }));
+
+  // ---------- price-action patterns ----------
+  onPatternType = (e) => {
+    const pat = e.target.value;
+    const meta = this.M.PATTERNS[pat];
+    this.setState({ patternDraft: { pat, n: meta && meta.count ? meta.n : 0 } });
+  };
+  onPatternN = (e) => this.setState(st => ({ patternDraft: { ...st.patternDraft, n: e.target.value } }));
+  addPattern = () => {
+    const d = this.state.patternDraft, meta = this.M.PATTERNS[d.pat];
+    let n = parseInt(d.n, 10);
+    if (meta && meta.count) { if (isNaN(n)) n = meta.n; n = Math.max(meta.min, Math.min(meta.max, n)); }
+    const rule = { kind: 'pattern', pat: d.pat, n };
+    rule.name = this.M.patternLabel(rule);
+    this.setState(st => ({ customRules: [...st.customRules, rule] }));
+  };
+
+  // ---------- labels ----------
+  ruleLabel = (r) => {
+    if (r.kind === 'group') return r.name || this.M.groupLabel(r);
+    if (r.kind === 'chain') return r.name || this.M.chainLabel(r);
+    if (r.kind === 'pattern') return r.name || this.M.patternLabel(r);
+    if (r.kind === 'rank') return r.name || this.M.rankLabel(r);
+    if (r.kind === 'ind') return this.M.indRuleLabel(r);
+    const F = this.M.FIELDS, FL = this.M.FLAGS;
+    if (r.kind === 'flag') return FL[r.field];
+    const f = F[r.field], u = f.unit;
+    if (r.op === 'gt') return `${f.label} > ${r.value}${u}`;
+    if (r.op === 'lt') return `${f.label} < ${r.value}${u}`;
+    if (r.op === 'between') return `${f.label} ${r.min}–${r.max}${u}`;
+    return f.label;
+  };
+
+  effectiveRules() {
+    if (!this.M) return [];
+    const preset = this._presetById(this.state.activePreset);
+    return [...preset.rules, ...this.state.customRules];
+  }
+
+  trendOf(s) {
+    if (s.ema20 > s.ema50 && s.ema50 > s.ema200) return ['Strong up', '#06a96b', '#e7f6ef'];
+    if (s.ema50 > s.ema200) return ['Uptrend', '#06a96b', '#e7f6ef'];
+    if (s.ema20 < s.ema50 && s.ema50 < s.ema200) return ['Downtrend', '#e23d3d', '#fdeceb'];
+    return ['Mixed', '#8b9298', '#f1f2f3'];
+  }
+
+  spark(arr, color) {
+    const w = 84, h = 24, min = Math.min(...arr), max = Math.max(...arr), rng = (max - min) || 1;
+    const up = arr[arr.length - 1] >= arr[0];
+    const pts = arr.map((v, i) => `${(i / (arr.length - 1) * w).toFixed(1)},${(h - ((v - min) / rng) * (h - 2) - 1).toFixed(1)}`).join(' ');
+    return React.createElement('svg', { width: w, height: h, viewBox: `0 0 ${w} ${h}`, style: { display: 'block' } },
+      React.createElement('polyline', { points: pts, fill: 'none', stroke: color || (up ? '#06a96b' : '#e23d3d'), strokeWidth: 1.4, strokeLinejoin: 'round', strokeLinecap: 'round' }));
+  }
+
+  sortVal(s, k) { return s[k]; }
+
+  // ---------- handlers ----------
+  setPreset = (id) => this.setState({ activePreset: id }, () => this._saveView());
+  clearAll = () => this.setState({ activePreset: 'all', customRules: [] }, () => this._saveView());
+  removeRule = (i) => this.setState(st => ({ customRules: st.customRules.filter((_, idx) => idx !== i), editChip: st.editChip === i ? null : st.editChip }));
+
+  // ---- preset editing ----
+  // Editing a preset loads its rules into the live filter set (shown as Active
+  // filter chips + editable with every builder); Save writes them back.
+  editPreset = (id) => {
+    const p = this._presetById(id);
+    this.setState({ editingPreset: id, presetName: p.name || '', presetDesc: p.desc || '', activePreset: 'all', customRules: p.rules.map(r => ({ ...r })), editChip: null }, () => this._saveView());
+  };
+  newPreset = () => {
+    const eff = this.effectiveRules().map(r => { const { screenId, ...rest } = r; return rest; });
+    this.setState({ editingPreset: '__new__', presetName: '', presetDesc: '', activePreset: 'all', customRules: eff, editChip: null }, () => this._saveView());
+  };
+  onPresetName = (e) => this.setState({ presetName: e.target.value });
+  onPresetDesc = (e) => this.setState({ presetDesc: e.target.value });
+  savePreset = () => {
+    const name = (this.state.presetName || '').trim() || 'My preset';
+    const desc = (this.state.presetDesc || '').trim();
+    const rules = this.state.customRules.map(r => { const { screenId, ...rest } = r; return rest; });
+    const ps = { custom: [...(this.state.presetStore.custom || [])], overrides: { ...this.state.presetStore.overrides }, hidden: [...(this.state.presetStore.hidden || [])] };
+    let savedId = this.state.editingPreset;
+    if (savedId === '__new__') {
+      savedId = 'up' + Date.now().toString(36) + Math.floor(Math.random() * 1000).toString(36);
+      ps.custom.push({ id: savedId, name, desc, rules });
+    } else if (this.M.PRESETS.some(p => p.id === savedId)) {
+      ps.overrides[savedId] = { name, desc, rules };
+    } else {
+      ps.custom = ps.custom.map(p => p.id === savedId ? { ...p, name, desc, rules } : p);
+    }
+    this._savePresetStore(ps);
+    this.setState({ presetStore: ps, editingPreset: null, activePreset: savedId, customRules: [], editChip: null }, () => this._saveView());
+  };
+  cancelPresetEdit = () => {
+    const id = this.state.editingPreset;
+    const exists = id && id !== '__new__' && this._presets().some(p => p.id === id);
+    this.setState({ editingPreset: null, customRules: [], editChip: null, activePreset: exists ? id : 'all' }, () => this._saveView());
+  };
+  resetPreset = () => {
+    const id = this.state.editingPreset;
+    const ps = { ...this.state.presetStore, overrides: { ...this.state.presetStore.overrides } };
+    delete ps.overrides[id];
+    this._savePresetStore(ps);
+    const def = this._presetByIdFrom(ps, id);
+    this.setState({ presetStore: ps, presetName: def.name || '', presetDesc: def.desc || '', customRules: def.rules.map(r => ({ ...r })), editChip: null });
+  };
+  _presetByIdFrom(ps, id) {
+    const ov = ps.overrides[id]; const bi = this.M.PRESETS.find(p => p.id === id);
+    if (bi) return ov ? { ...bi, ...ov } : bi;
+    return (ps.custom || []).find(p => p.id === id) || { rules: [] };
+  }
+  deletePreset = () => {
+    const id = this.state.editingPreset;
+    const ps = { custom: [...(this.state.presetStore.custom || [])], overrides: { ...this.state.presetStore.overrides }, hidden: [...(this.state.presetStore.hidden || [])] };
+    if (this.M.PRESETS.some(p => p.id === id)) { delete ps.overrides[id]; if (!ps.hidden.includes(id)) ps.hidden.push(id); }
+    else ps.custom = ps.custom.filter(p => p.id !== id);
+    this._savePresetStore(ps);
+    this.setState({ presetStore: ps, editingPreset: null, customRules: [], editChip: null, activePreset: 'all' }, () => this._saveView());
+  };
+
+  // ---- in-place chip (filter) editing ----
+  openChipEdit = (i) => this.setState(st => ({ editChip: st.editChip === i ? null : i }));
+  closeChipEdit = () => this.setState({ editChip: null });
+  _patchRule = (i, patch, relabel) => this.setState(st => {
+    const customRules = st.customRules.slice();
+    let r = { ...customRules[i], ...patch };
+    if (relabel) r.name = relabel(r);
+    customRules[i] = r;
+    return { customRules };
+  });
+  onChipNum = (i, key) => (e) => { const v = e.target.value; this._patchRule(i, { [key]: v }); };
+  onChipPatternN = (i) => (e) => { const v = e.target.value; this._patchRule(i, { n: v }, (r) => this.M.patternLabel({ ...r, n: parseInt(v, 10) || r.n })); };
+  onChipRank = (i, key) => (e) => { const v = e.target.value; this._patchRule(i, { [key]: v }, (r) => this.M.rankLabel({ ...r, [key]: v })); };
+  onChipIndConst = (i) => (e) => { const v = e.target.value; this.setState(st => { const cr = st.customRules.slice(); cr[i] = { ...cr[i], rhs: { ...cr[i].rhs, value: v } }; return { customRules: cr }; }); };
+  onSearch = (e) => this.setState({ search: e.target.value });
+  onSector = (e) => this.setState({ sectorFilter: e.target.value }, () => this._saveView());
+  setSort = (k) => this.setState(st => ({ sortKey: k, sortDir: st.sortKey === k && st.sortDir === 'desc' ? 'asc' : 'desc' }), () => this._saveView());
+  selectStock = (t) => this.setState({ selected: t });
+  closeDetail = () => this.setState({ selected: null });
+  setLayout = (l) => this.setState({ layout: l }, () => this._saveView());
+  togglePanel = (k) => this.setState(st => ({ panels: { ...st.panels, [k]: !st.panels[k] } }));
+  toggleRuleSection = () => this.setState(st => ({ ruleOpen: !st.ruleOpen }));
+  togglePatternSection = () => this.setState(st => ({ patternOpen: !st.patternOpen }));
+  togglePin = (t) => this.setState(st => {
+    const pinned = st.pinned.includes(t) ? st.pinned.filter(x => x !== t) : [...st.pinned, t];
+    this._savePins(pinned);
+    return { pinned };
+  });
+
+  // ---- AND / OR grouping ----
+  toggleRuleConj = (i) => this.setState(st => {
+    const customRules = st.customRules.slice();
+    if (customRules[i]) customRules[i] = { ...customRules[i], conj: customRules[i].conj === 'or' ? 'and' : 'or' };
+    return { customRules };
+  });
+
+  // ---- cross-sectional ranking ----
+  toggleRankSection = () => this.setState(st => ({ rankOpen: !st.rankOpen }));
+  onRankField = (e) => this.setState(st => ({ rankDraft: { ...st.rankDraft, field: e.target.value } }));
+  onRankScope = (e) => this.setState(st => ({ rankDraft: { ...st.rankDraft, scope: e.target.value } }));
+  onRankDir = (e) => this.setState(st => ({ rankDraft: { ...st.rankDraft, dir: e.target.value } }));
+  onRankPct = (e) => this.setState(st => ({ rankDraft: { ...st.rankDraft, pct: e.target.value } }));
+  addRank = () => {
+    const d = this.state.rankDraft;
+    const rule = { kind: 'rank', field: d.field, scope: d.scope, dir: d.dir, pct: Math.max(1, Math.min(99, parseInt(d.pct, 10) || 10)) };
+    rule.name = this.M.rankLabel(rule);
+    this.setState(st => ({ customRules: [...st.customRules, rule] }));
+  };
+
+  // ---- compare ----
+  toggleCompare = (t) => this.setState(st => {
+    if (st.compareSel.includes(t)) return { compareSel: st.compareSel.filter(x => x !== t) };
+    if (st.compareSel.length >= 4) return {};
+    return { compareSel: [...st.compareSel, t] };
+  });
+  openCompare = () => this.setState({ compareOpen: true });
+  closeCompare = () => this.setState({ compareOpen: false });
+  clearCompare = () => this.setState({ compareSel: [], compareOpen: false });
+  _compareCol(t) {
+    const s = this.state.universe.find(x => x.ticker === t);
+    if (!s) return null;
+    const col = (c) => c >= 0 ? '#06a96b' : '#e23d3d';
+    const tr = s.ema20 > s.ema50 && s.ema50 > s.ema200 ? ['Strong up', '#06a96b'] : s.ema50 > s.ema200 ? ['Uptrend', '#06a96b'] : s.ema20 < s.ema50 && s.ema50 < s.ema200 ? ['Downtrend', '#e23d3d'] : ['Mixed', '#6b7280'];
+    return {
+      ticker: s.ticker, name: s.name, sector: s.sector,
+      price: '$' + s.price.toFixed(2),
+      chg: (s.changePct >= 0 ? '+' : '') + s.changePct.toFixed(2) + '%', chgColor: col(s.changePct),
+      miniRef: this.miniRef(s.ticker),
+      onRemove: () => this.toggleCompare(s.ticker),
+      stats: [
+        { label: 'RSI 14', value: s.rsi.toFixed(1), color: s.rsi > 70 ? '#e23d3d' : s.rsi < 30 ? '#06a96b' : '#15171a' },
+        { label: 'MACD hist', value: s.macdHist.toFixed(3), color: col(s.macdHist) },
+        { label: 'Stoch %K', value: s.stochK.toFixed(1), color: s.stochK > 80 ? '#e23d3d' : s.stochK < 20 ? '#06a96b' : '#15171a' },
+        { label: 'Rel vol', value: s.relVol.toFixed(2) + '\u00d7', color: s.relVol > 1.5 ? '#06a96b' : '#15171a' },
+        { label: 'Trend', value: tr[0], color: tr[1] },
+        { label: '52w pos', value: s.pct52w.toFixed(0) + '%', color: '#15171a' },
+      ],
+    };
+  }
+
+  // ---- backtest ----
+  openBacktest = () => {
+    const preset = this._presetById(this.state.activePreset);
+    const eff = [...preset.rules, ...this.state.customRules.filter(r => r.kind !== 'rank')];
+    const res = this.M.backtestRules(this.state.universe, eff);
+    this.setState({ backtestOpen: true, backtestResult: res });
+  };
+  closeBacktest = () => this.setState({ backtestOpen: false });
+
+  // ---- sector heatmap ----
+  toggleHeatmap = () => this.setState(st => ({ heatmapOpen: !st.heatmapOpen }));
+
+  // ---- screen alerts ----
+  toggleAlert = (id) => this.setState(st => {
+    const alertScreens = { ...st.alertScreens, [id]: !st.alertScreens[id] };
+    this._saveAlerts(alertScreens);
+    return { alertScreens };
+  });
+
+  // ---- refresh data + watchlist diff alerts ----
+  _screenTickers(universe) {
+    const st = this.state, M = this.M;
+    const preset = this._presetById(st.activePreset);
+    const rankRules = st.customRules.filter(r => r.kind === 'rank');
+    const others = st.customRules.filter(r => r.kind !== 'rank');
+    const evalList = [...preset.rules, ...others];
+    let list = universe.filter(s => M.evalGroupedRules(s, evalList));
+    for (const rr of rankRules) { const pass = M.rankPassSet(universe, rr); list = list.filter(s => pass.has(s.ticker)); }
+    return list.map(s => s.ticker);
+  }
+  refreshData = () => {
+    const prev = new Set(this._screenTickers(this.state.universe));
+    const seed = this.state.seed + 1;
+    const universe = this.M.generateUniverse(seed);
+    this.setState({ universe, seed, selected: null, compareSel: [], compareOpen: false }, () => {
+      const now = new Set(this._screenTickers(this.state.universe));
+      const entered = [...now].filter(t => !prev.has(t));
+      const exited = [...prev].filter(t => !now.has(t));
+      const alerts = [];
+      for (const scr of this.state.savedScreens) {
+        if (!this.state.alertScreens[scr.id]) continue;
+        const cnt = this.state.universe.filter(s => this.M.evalRuleAt(s, scr.rule, s.nLast)).length;
+        if (cnt > 0) alerts.push({ name: scr.name, count: cnt });
+      }
+      this.setState({ diff: { entered, exited, alerts } });
+    });
+  };
+  dismissDiff = () => this.setState({ diff: null });
+
+  // ---- compare mini candlestick charts ----
+  _redrawMinis() {
+    if (!this._minis) return;
+    for (const t in this._minis) {
+      const el = this._minis[t];
+      if (el && el.isConnected) this._drawMini(el, t); else delete this._minis[t];
+    }
+  }
+  miniRef = (t) => (el) => {
+    this._minis = this._minis || {};
+    if (el) { this._minis[t] = el; this._drawMini(el, t); } else delete this._minis[t];
+  };
+  _drawMini(canvas, ticker) {
+    const s = this.state.universe.find(x => x.ticker === ticker);
+    if (!s || !canvas.parentElement) return;
+    const cssW = Math.max(120, canvas.parentElement.clientWidth), cssH = 124;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = cssW * dpr; canvas.height = cssH * dpr;
+    canvas.style.width = '100%'; canvas.style.height = cssH + 'px';
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
+    const N = 70, o = s.full.o, h = s.full.h, l = s.full.l, c = s.full.c, L = c.length, start = Math.max(0, L - N);
+    let hi = -Infinity, lo = Infinity;
+    for (let i = start; i < L; i++) { if (h[i] > hi) hi = h[i]; if (l[i] < lo) lo = l[i]; }
+    const pad = (hi - lo) * 0.06 || 1; hi += pad; lo -= pad;
+    const n = L - start, plotW = cssW - 4, x = (i) => 2 + (i + 0.5) * (plotW / n), py = (v) => 4 + (1 - (v - lo) / (hi - lo)) * (cssH - 8);
+    const cw = Math.max(1, (plotW / n) * 0.6);
+    for (let i = 0; i < n; i++) {
+      const a = start + i, up = c[a] >= o[a], color = up ? '#06a96b' : '#e23d3d', cx = x(i);
+      ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(cx, py(h[a])); ctx.lineTo(cx, py(l[a])); ctx.stroke();
+      ctx.fillStyle = color; const yo = py(o[a]), yc = py(c[a]); ctx.fillRect(cx - cw / 2, Math.min(yo, yc), cw, Math.max(1, Math.abs(yc - yo)));
+    }
+  }
+
+  renderVals() {
+    const st = this.state, M = this.M;
+    if (!st.ready || !M) {
+      return { loading: true, presets: [], chips: [], presetChips: [], customChips: [], indicators: [], screens: [], chainItems: [], patternOptions: [], rows: [], cols: [], sectors: [], layoutBtns: [], flagChips: [], opOptions: [], typeOptions: [], builderParams: [], matchCount: 0, ofTotal: '', patternDesc: '', patternCountLabel: '', patternHasCount: false, ruleOpen: false, patternOpen: false, ruleArrow: '▸', patternArrow: '▸', toggleRuleSection: () => {}, togglePatternSection: () => {}, heatItems: [], compareChips: [], compareCols: [], btCards: [], btRuleLabels: [], rankFieldOptions: [], showCompareBar: false, showCompare: false, showBacktest: false, showDiff: false, heatmapOpen: false, rankOpen: false, rankArrow: '▸' };
+    }
+
+    // presets with live counts (built-ins + user overrides + custom)
+    const presets = this._presets().map(p => {
+      const count = st.universe.filter(s => M.evalRulesOnStock(s, p.rules)).length;
+      const active = p.id === st.activePreset;
+      return {
+        id: p.id, name: p.name, desc: p.desc, count, editable: p.id !== 'all',
+        custom: !p.builtin, overridden: !!p.overridden,
+        onClick: () => this.setPreset(p.id),
+        onEdit: (e) => { e.stopPropagation(); this.editPreset(p.id); },
+        bg: active ? '#eafaf3' : '#fff',
+        border: active ? '#06a96b' : '#ececef',
+        titleColor: active ? '#06865a' : '#15171a',
+        countBg: active ? '#06a96b' : '#f1f2f3',
+        countColor: active ? '#fff' : '#8b9298',
+      };
+    });
+
+    // active filter chips (preset = AND, custom carry AND/OR conjunctions)
+    const preset = this._presetById(st.activePreset);
+    const presetChips = preset.rules.map(rr => ({ label: this.ruleLabel(rr) }));
+    const customChips = st.customRules.map((rr, i) => ({
+      label: this.ruleLabel(rr), onRemove: () => this.removeRule(i), onEdit: () => this.openChipEdit(i), editing: st.editChip === i,
+      editBg: st.editChip === i ? '#d7e6ff' : '#eef3ff', editBorder: st.editChip === i ? '#2b5bbf' : '#cfddfb',
+      showConj: i > 0, conjLabel: rr.conj === 'or' ? 'OR' : 'AND',
+      conjBg: rr.conj === 'or' ? '#fff4e6' : '#eef3ff', conjFg: rr.conj === 'or' ? '#b3641a' : '#2b5bbf', conjBorder: rr.conj === 'or' ? '#f3d9b8' : '#cfddfb',
+      onToggleConj: () => this.toggleRuleConj(i),
+    }));
+    const noChips = presetChips.length === 0 && customChips.length === 0;
+
+    // inline editor for the currently-clicked filter chip
+    let chipEditor = null;
+    if (st.editChip != null && st.customRules[st.editChip]) {
+      const i = st.editChip, rr = st.customRules[i];
+      chipEditor = { label: this.ruleLabel(rr), close: this.closeChipEdit };
+      if (rr.kind === 'pattern') {
+        const meta = M.PATTERNS[rr.pat] || {};
+        if (meta.count) { chipEditor.isN = true; chipEditor.countLabel = meta.countLabel || 'Count'; chipEditor.n = rr.n; chipEditor.nMin = meta.min; chipEditor.nMax = meta.max; chipEditor.onN = this.onChipPatternN(i); }
+        else chipEditor.note = 'This pattern has no parameters to tweak.';
+      } else if (rr.kind === 'rank') {
+        chipEditor.isRank = true; chipEditor.dir = rr.dir; chipEditor.pct = rr.pct; chipEditor.rfield = rr.field; chipEditor.scope = rr.scope;
+        chipEditor.rankFieldOptions = Object.entries(M.RANK_FIELDS).map(([k, v]) => ({ value: k, label: v }));
+        chipEditor.onDir = this.onChipRank(i, 'dir'); chipEditor.onPct = this.onChipRank(i, 'pct'); chipEditor.onField = this.onChipRank(i, 'field'); chipEditor.onScope = this.onChipRank(i, 'scope');
+      } else if (rr.kind === 'num' && rr.op === 'between') {
+        chipEditor.isBetween = true; chipEditor.min = rr.min; chipEditor.max = rr.max; chipEditor.onMin = this.onChipNum(i, 'min'); chipEditor.onMax = this.onChipNum(i, 'max');
+      } else if (rr.kind === 'num') {
+        chipEditor.isValue = true; chipEditor.value = rr.value; chipEditor.onValue = this.onChipNum(i, 'value');
+      } else if (rr.kind === 'ind' && rr.op === 'between') {
+        chipEditor.isBetween = true; chipEditor.min = rr.min; chipEditor.max = rr.max; chipEditor.onMin = this.onChipNum(i, 'min'); chipEditor.onMax = this.onChipNum(i, 'max');
+      } else if (rr.kind === 'ind' && rr.rhs && rr.rhs.type === 'const') {
+        chipEditor.isValue = true; chipEditor.value = rr.rhs.value; chipEditor.onValue = this.onChipIndConst(i);
+      } else if ((rr.kind === 'group' || rr.kind === 'chain') && rr.screenId && st.savedScreens.some(s => s.id === rr.screenId)) {
+        chipEditor.isSetup = true; chipEditor.onEditSetup = () => { const scr = st.savedScreens.find(s => s.id === rr.screenId); if (scr) { this.closeChipEdit(); this.editScreen(scr); } };
+      } else {
+        chipEditor.note = 'Remove and re-add to change this filter.';
+      }
+    }
+
+    // my indicators
+    const indicators = st.savedIndicators.map(ind => ({
+      id: ind.id, name: ind.name, dot: ind.color || '#06a96b', spec: this.specOf(ind),
+      onEdit: () => this.editIndicator(ind.id),
+      onDelete: () => this.deleteIndicator(ind.id),
+    }));
+
+    // rule builder
+    const r = st.rule;
+    const opOptions = [
+      { value: 'gt', label: 'is above' }, { value: 'lt', label: 'is below' },
+      { value: 'cross_up', label: 'crosses above' }, { value: 'cross_down', label: 'crosses below' },
+      { value: 'between', label: 'is between' }, { value: 'rising', label: 'is rising' }, { value: 'falling', label: 'is falling' },
+    ];
+    const needsRhs = r.op === 'gt' || r.op === 'lt' || r.op === 'cross_up' || r.op === 'cross_down';
+    const flagChips = Object.entries(M.FLAGS).map(([k, v]) => ({ label: v, onClick: () => this.addFlag(k) }));
+
+    // builder modal
+    const b = st.builder || this._freshBuilder('ema');
+    const typeOptions = Object.entries(M.INDICATOR_TYPES).map(([k, v]) => {
+      const active = b.type === k;
+      return {
+        value: k, label: v.label, tag: v.tag, onClick: () => this.setBuilderType(k),
+        bg: active ? '#eafaf3' : '#fff', border: active ? '#06a96b' : '#ececef',
+        titleColor: active ? '#06865a' : '#15171a',
+      };
+    });
+    const schema = M.INDICATOR_TYPES[b.type] || { params: [] };
+    const builderParams = schema.params.map(p => ({
+      label: p.label,
+      isSelect: p.kind !== 'int', isNumber: p.kind === 'int',
+      value: b[p.key], min: p.min, max: p.max,
+      options: p.kind === 'source' ? M.SOURCES : (p.options || []),
+      onChange: this.onBuilderParam(p.key, p.kind === 'int'),
+    }));
+    const bdef = this._def(b);
+    const builderName = b.nameTouched ? b.name : M.autoIndName(bdef);
+    // live preview on the first universe member
+    const sample = st.universe[0];
+    let previewValue = '—', previewScale = '', previewSpark = null, sampleTicker = '';
+    if (sample) {
+      sampleTicker = sample.ticker;
+      const series = M.indSeries(sample, bdef);
+      const last = series[series.length - 1];
+      const sc = schema.scale;
+      if (last != null && !isNaN(last)) {
+        if (sc === 'price') previewValue = bdef.source === 'volume' ? (last / 1e6).toFixed(2) + 'M' : '$' + last.toFixed(2);
+        else if (sc === 'osc') previewValue = last.toFixed(1);
+        else previewValue = last.toFixed(3);
+      }
+      previewScale = sc === 'osc' ? 'oscillator · 0–100' : sc === 'center' ? 'centered around zero' : 'price scale';
+      const clean = series.filter(v => v != null && !isNaN(v)).slice(-50);
+      if (clean.length > 1) previewSpark = this.spark(clean, '#06a96b');
+    }
+
+    // my screens (saved named chains)
+    const appliedScreenIds = new Set(st.customRules.filter(rr => rr.screenId).map(rr => rr.screenId));
+    const screens = st.savedScreens.map(scr => {
+      const on = appliedScreenIds.has(scr.id);
+      const alertOn = !!st.alertScreens[scr.id];
+      const cnt = st.universe.filter(s => M.evalRuleAt(s, scr.rule, s.nLast)).length;
+      return {
+        id: scr.id, name: scr.name, spec: scr.rule.kind === 'group' ? M.groupLabel(scr.rule) : M.chainLabel(scr.rule), active: on,
+        bg: on ? '#eafaf3' : '#fff', border: on ? '#bfe8d6' : '#ececef', titleColor: on ? '#06865a' : '#15171a',
+        onApply: () => this.applyScreen(scr), onEdit: () => this.editScreen(scr), onDelete: () => this.deleteScreen(scr.id),
+        alertOn, onAlert: () => this.toggleAlert(scr.id),
+        alertBg: alertOn ? '#fff4e6' : '#f4f5f6', alertFg: alertOn ? '#b3641a' : '#9aa1a8',
+        liveCount: cnt, showLive: alertOn && cnt > 0,
+      };
+    });
+
+    // setup (condition-group) builder modal
+    let condRows = [], screenName = '', screenMatchN = 0, setupPreview = '';
+    const condOps = M.GROUP_OPS;
+    const sd = st.screenDraft;
+    if (sd) {
+      const operandOptions = [
+        ...M.OPERAND_FIELDS.map(f => ({ value: 'field:' + f.value, label: f.label })),
+        ...st.savedIndicators.map(i => ({ value: 'ind:' + i.id, label: i.name })),
+        { value: 'const', label: 'a value' },
+      ];
+      const opView = (op, idx, side) => {
+        const mathActive = (op.mult != null && +op.mult !== 1) || (op.add != null && +op.add !== 0);
+        const mathOpen = !!st.mathOpen[idx + ':' + side];
+        return {
+          srcValue: op.kind === 'const' ? 'const' : op.kind === 'field' ? 'field:' + op.field : 'ind:' + op.id,
+          options: operandOptions,
+          isConst: op.kind === 'const', showOffset: op.kind !== 'const',
+          offset: op.offset != null ? op.offset : 0, value: op.value != null ? op.value : 0,
+          mult: op.mult != null ? op.mult : 1, add: op.add != null ? op.add : 0,
+          showMath: op.kind !== 'const' && (mathOpen || mathActive),
+          mathBtnBg: mathActive ? '#eef3ff' : '#fff', mathBtnFg: mathActive ? '#2b5bbf' : '#aab0b6', mathBtnBorder: mathActive ? '#cfddfb' : '#e2e4e6',
+          onSrc: this.onCondSrc(idx, side), onOffset: this.onCondOffset(idx, side), onValue: this.onCondConst(idx, side),
+          onToggleMath: this.toggleMath(idx, side), onMult: this.onCondMult(idx, side), onAdd: this.onCondAdd(idx, side),
+        };
+      };
+      condRows = sd.conds.map((c, idx) => ({
+        badge: String.fromCharCode(65 + idx),
+        showConj: idx > 0, conjLabel: c.conj === 'or' ? 'OR' : 'AND',
+        conjBg: c.conj === 'or' ? '#fff4e6' : '#eef3ff', conjFg: c.conj === 'or' ? '#b3641a' : '#2b5bbf', conjBorder: c.conj === 'or' ? '#f3d9b8' : '#cfddfb',
+        onToggleConj: this.toggleCondConj(idx),
+        opValue: c.op, onOp: this.onCondOp(idx),
+        canRemove: sd.conds.length > 1, onRemove: () => this.removeCond(idx),
+        left: opView(c.left, idx, 'left'), right: opView(c.right, idx, 'right'),
+      }));
+      const sRule = this._screenRule(sd);
+      screenName = sd.nameTouched ? sd.name : (sRule ? M.groupLabel(sRule) : '');
+      setupPreview = sRule ? M.groupLabel(sRule) : '';
+      if (sRule) screenMatchN = st.universe.filter(s => M.evalRuleAt(s, sRule, s.nLast)).length;
+    }
+
+    // price-action pattern picker
+    const pd = st.patternDraft, pMeta = M.PATTERNS[pd.pat] || {};
+    const patternOptions = Object.entries(M.PATTERNS).map(([k, v]) => ({ value: k, label: v.count ? v.label.replace(/^./, c => c.toUpperCase()) : v.label }));
+
+    // field columns
+    const fieldOptions = null;
+
+    // filter + sort rows — screen (preset + grouped custom), then rank, sector, search
+    const q = st.search.trim().toLowerCase();
+    const rankRules = st.customRules.filter(rr => rr.kind === 'rank');
+    const otherCustom = st.customRules.filter(rr => rr.kind !== 'rank');
+    const groupedList = [...preset.rules, ...otherCustom];
+    let screenList = st.universe.filter(s => M.evalGroupedRules(s, groupedList));
+    for (const rr of rankRules) { const pass = M.rankPassSet(st.universe, rr); screenList = screenList.filter(s => pass.has(s.ticker)); }
+    const heatRaw = {};
+    for (const s of screenList) heatRaw[s.sector] = (heatRaw[s.sector] || 0) + 1;
+    let list = screenList.slice();
+    if (st.sectorFilter !== 'all') list = list.filter(s => s.sector === st.sectorFilter);
+    if (q) list = list.filter(s => s.ticker.toLowerCase().includes(q) || s.name.toLowerCase().includes(q));
+    list = list.slice().sort((a, b2) => {
+      const va = this.sortVal(a, st.sortKey), vb = this.sortVal(b2, st.sortKey);
+      const cmp = typeof va === 'string' ? va.localeCompare(vb) : va - vb;
+      return st.sortDir === 'asc' ? cmp : -cmp;
+    });
+    const pinnedSet = new Set(st.pinned);
+    if (pinnedSet.size) list = [...list.filter(s => pinnedSet.has(s.ticker)), ...list.filter(s => !pinnedSet.has(s.ticker))];
+    const compareSet = new Set(st.compareSel);
+
+    const col = (c) => c >= 0 ? '#06a96b' : '#e23d3d';
+    const rows = list.map(s => {
+      const tr = this.trendOf(s);
+      return {
+        ticker: s.ticker, name: s.name,
+        price: '$' + s.price.toFixed(2),
+        chg: (s.changePct >= 0 ? '↑ +' : '↓ ') + s.changePct.toFixed(2) + '%', chgColor: col(s.changePct),
+        rsi: s.rsi.toFixed(0), rsiColor: s.rsi > 70 ? '#e23d3d' : s.rsi < 30 ? '#06a96b' : '#6b7280',
+        macd: s.macdHist.toFixed(2), macdColor: col(s.macdHist),
+        stoch: s.stochK.toFixed(0), stochColor: s.stochK > 80 ? '#e23d3d' : s.stochK < 20 ? '#06a96b' : '#6b7280',
+        relVol: s.relVol.toFixed(2) + '×', relVolW: s.relVol > 1.5 ? 700 : 400, relVolColor: s.relVol > 1.5 ? '#06a96b' : '#15171a',
+        trend: tr[0], trendColor: tr[1], trendBg: tr[2],
+        pos52: Math.max(2, Math.min(98, s.pct52w)).toFixed(0), pos52Label: s.pct52w.toFixed(0) + '% of 52w',
+        sparkEl: this.spark(s.sparkline),
+        onClick: () => this.selectStock(s.ticker),
+        bg: s.ticker === st.selected ? '#eafaf3' : '#fff',
+        accent: s.ticker === st.selected ? '#06a96b' : (pinnedSet.has(s.ticker) ? '#e0a23c' : 'transparent'),
+        starIcon: pinnedSet.has(s.ticker) ? '★' : '☆',
+        starColor: pinnedSet.has(s.ticker) ? '#e0a23c' : '#cfd4d8',
+        onPin: (e) => { e.stopPropagation(); this.togglePin(s.ticker); },
+        cmpIcon: compareSet.has(s.ticker) ? '◉' : '○',
+        cmpColor: compareSet.has(s.ticker) ? '#2b5bbf' : '#cfd4d8',
+        onCompare: (e) => { e.stopPropagation(); this.toggleCompare(s.ticker); },
+      };
+    });
+
+    const mk = (key, label, align, title) => {
+      const active = st.sortKey === key;
+      return {
+        label, title: title || label, align: align || 'right', justify: align === 'left' ? 'flex-start' : 'flex-end',
+        onClick: () => this.setSort(key), cursor: 'pointer',
+        color: active ? '#15171a' : '#9aa1a8',
+        arrow: active ? (st.sortDir === 'asc' ? ' ↑' : ' ↓') : '',
+      };
+    };
+    const cols = [
+      mk('ticker', 'Ticker', 'left', 'Symbol & company — click to sort'),
+      mk('price', 'Last', 'right', 'Last price'),
+      mk('changePct', 'Chg', 'right', 'Change today (%)'),
+      mk('rsi', 'RSI', 'right', 'Relative Strength Index (14)'),
+      mk('macdHist', 'MACD', 'right', 'MACD histogram'),
+      mk('stochK', 'Stoch', 'right', 'Stochastic RSI %K'),
+      mk('relVol', 'RelVol', 'right', 'Volume vs 20-day average'),
+      { label: 'Trend', title: 'EMA trend stack (20/50/200)', align: 'right', justify: 'flex-end', onClick: () => {}, cursor: 'default', color: '#9aa1a8', arrow: '' },
+      mk('pct52w', '52w', 'right', 'Position within the 52-week range'),
+      { label: '40d', title: '40-day price trend', align: 'right', justify: 'flex-end', onClick: () => {}, cursor: 'default', color: '#9aa1a8', arrow: '' },
+    ];
+
+    const sectors = [{ value: 'all', label: 'All sectors' },
+      ...[...new Set(st.universe.map(s => s.sector))].sort().map(x => ({ value: x, label: x }))];
+
+    const layoutBtns = ['overlay', 'docked'].map(l => {
+      const active = st.layout === l;
+      return {
+        label: l === 'overlay' ? 'Overlay' : 'Docked', onClick: () => this.setLayout(l),
+        bg: active ? '#fff' : 'transparent', fg: active ? '#15171a' : '#8b9298',
+        shadow: active ? '0 1px 3px rgba(0,0,0,0.12)' : 'none',
+      };
+    });
+
+    const selectedStock = st.universe.find(s => s.ticker === st.selected) || null;
+
+    // rules passed to the detail panel (rank rules annotated with this stock's membership)
+    const detailRules = [...preset.rules, ...st.customRules.map(rr => {
+      if (rr.kind !== 'rank') return rr;
+      const pass = M.rankPassSet(st.universe, rr);
+      return { ...rr, _pass: selectedStock ? pass.has(selectedStock.ticker) : false };
+    })];
+
+    // sector heatmap
+    const heatMax = Math.max(1, ...Object.values(heatRaw));
+    const allSectors = [...new Set(st.universe.map(s => s.sector))].sort();
+    const heatItems = allSectors.map(sec => {
+      const cnt = heatRaw[sec] || 0;
+      return {
+        sector: sec, count: cnt, barW: (cnt / heatMax * 100).toFixed(1) + '%', dim: cnt === 0, active: st.sectorFilter === sec,
+        barBg: st.sectorFilter === sec ? '#06a96b' : (cnt === 0 ? '#e7e8ea' : '#9fd9c0'),
+        labelColor: st.sectorFilter === sec ? '#06865a' : '#6b7280',
+        onClick: () => this.setState(s2 => ({ sectorFilter: s2.sectorFilter === sec ? 'all' : sec }), () => this._saveView()),
+      };
+    });
+
+    // backtest cards
+    const btRuleLabels = [...preset.rules, ...st.customRules.filter(rr => rr.kind !== 'rank')].map(rr => this.ruleLabel(rr));
+    const btHasRank = st.customRules.some(rr => rr.kind === 'rank');
+    let btCards = [], btSignals = 0, btFire = '', btEmpty = true;
+    if (st.backtestResult) {
+      const R = st.backtestResult; btSignals = R.signals; btFire = R.fireRate.toFixed(1) + '%'; btEmpty = R.signals === 0;
+      btCards = R.horizons.map(hh => ({
+        h: '+' + hh.h + 'd', n: hh.n,
+        winRate: hh.winRate.toFixed(0) + '%', winW: hh.winRate.toFixed(0) + '%',
+        avg: (hh.avg >= 0 ? '+' : '') + hh.avg.toFixed(2) + '%', avgColor: hh.avg >= 0 ? '#06a96b' : '#e23d3d',
+        median: (hh.median >= 0 ? '+' : '') + hh.median.toFixed(2) + '%',
+        best: '+' + hh.best.toFixed(1) + '%', worst: hh.worst.toFixed(1) + '%',
+        winColor: hh.winRate >= 50 ? '#06a96b' : '#e23d3d', winBg: hh.winRate >= 50 ? '#eafaf3' : '#fdeceb',
+      }));
+    }
+
+    // watchlist diff banner
+    let diffBanner = null;
+    if (st.diff) {
+      const d = st.diff;
+      diffBanner = {
+        enteredN: d.entered.length, exitedN: d.exited.length,
+        enteredStr: d.entered.slice(0, 8).join('  '), exitedStr: d.exited.slice(0, 8).join('  '),
+        hasEntered: d.entered.length > 0, hasExited: d.exited.length > 0,
+        alerts: d.alerts.map(a => a.name + ' · ' + a.count), alertsStr: d.alerts.map(a => a.name + ' · ' + a.count).join('   '), hasAlerts: d.alerts.length > 0,
+        none: d.entered.length === 0 && d.exited.length === 0 && d.alerts.length === 0,
+      };
+    }
+
+    const compareCols = st.compareSel.map(t => this._compareCol(t)).filter(Boolean);
+
+    return {
+      loading: false,
+      presets, presetChips, customChips, noChips, chipEditor, hasChipEditor: !!chipEditor,
+      // preset editing
+      editingPreset: !!st.editingPreset, notEditingPreset: !st.editingPreset,
+      presetDraftCount: st.editingPreset ? st.universe.filter(s => M.evalGroupedRules(s, st.customRules)).length : 0,
+      presetEditTitle: st.editingPreset === '__new__' ? 'New preset' : 'Editing preset',
+      presetName: st.presetName, presetDesc: st.presetDesc, onPresetName: this.onPresetName, onPresetDesc: this.onPresetDesc,
+      savePreset: this.savePreset, cancelPresetEdit: this.cancelPresetEdit, newPreset: this.newPreset,
+      canResetPreset: !!(st.editingPreset && st.editingPreset !== '__new__' && M.PRESETS.some(p => p.id === st.editingPreset) && st.presetStore.overrides[st.editingPreset]),
+      resetPreset: this.resetPreset,
+      canDeletePreset: !!(st.editingPreset && st.editingPreset !== '__new__' && (st.presetStore.custom || []).some(p => p.id === st.editingPreset)),
+      deletePreset: this.deletePreset,
+      indicators, noIndicators: indicators.length === 0, openBuilder: this.openBuilder,
+      // rule builder
+      canBuildRule: indicators.length > 0, cannotBuildRule: indicators.length === 0,
+      ruleLeftId: r.leftId, ruleOp: r.op, ruleRhsType: r.rhsType, ruleValue: r.value, ruleRightId: r.rightId, ruleMin: r.min, ruleMax: r.max,
+      opOptions, ruleNeedsRhs: needsRhs, rhsIsConst: needsRhs && r.rhsType === 'const', rhsIsInd: needsRhs && r.rhsType === 'ind',
+      ruleIsBetween: r.op === 'between',
+      onRuleLeft: this.onRuleLeft, onRuleOp: this.onRuleOp, onRuleRhsType: this.onRuleRhsType, onRuleValue: this.onRuleValue,
+      onRuleRight: this.onRuleRight, onRuleMin: this.onRuleMin, onRuleMax: this.onRuleMax, addRule: this.addRule,
+      flagChips,
+      // my screens + screen builder
+      screens, noScreens: screens.length === 0, openScreenBuilder: this.openScreenBuilder,
+      showScreenBuilder: st.screenBuilderOpen, closeScreenBuilder: this.closeScreenBuilder,
+      condRows, condOps, addCond: this.addCond, removeCond: this.removeCond, loadExample: this.loadExample,
+      pcfOpen: st.pcfOpen, pcfText: st.pcfText, pcfError: st.pcfError, hasPcfError: !!st.pcfError,
+      togglePcf: this.togglePcf, onPcfText: this.onPcfText, onParsePCF: this.onParsePCF, pcfArrow: st.pcfOpen ? '▾' : '▸',
+      screenName, onScreenName: this.onScreenName, setupPreview,
+      saveScreen: this.saveScreen, screenMatchN, universeN: st.universe.length,
+      // price-action patterns
+      patternOptions, patternPat: pd.pat, patternN: pd.n, patternDesc: pMeta.desc || '',
+      patternHasCount: !!pMeta.count, patternCountLabel: pMeta.countLabel || 'Count', patternMin: pMeta.min, patternMax: pMeta.max,
+      onPatternType: this.onPatternType, onPatternN: this.onPatternN, addPattern: this.addPattern,
+      ruleOpen: st.ruleOpen, patternOpen: st.patternOpen,
+      ruleArrow: st.ruleOpen ? '▾' : '▸', patternArrow: st.patternOpen ? '▾' : '▸',
+      toggleRuleSection: this.toggleRuleSection, togglePatternSection: this.togglePatternSection,
+      // builder modal
+      showBuilder: st.builderOpen, closeBuilder: this.closeBuilder, saveIndicator: this.saveIndicator,
+      builderTitle: st.editingIndId ? 'Edit indicator' : 'Create indicator',
+      builderSubtitle: st.editingIndId ? 'Adjust its inputs — changes apply everywhere it’s used.' : 'Pick a type, configure its inputs, and save it to reuse across screens.',
+      builderSaveLabel: st.editingIndId ? 'Save changes' : 'Save indicator',
+      setupTitle: st.editingScreenId ? 'Edit setup' : 'Build a setup',
+      setupSaveLabel: st.editingScreenId ? 'Save changes' : 'Save & apply setup',
+      typeOptions, builderParams, builderName, onBuilderName: this.onBuilderName,
+      sampleTicker, previewValue, previewScale, previewSpark,
+      // results
+      rows, cols, empty: rows.length === 0,
+      matchCount: rows.length, ofTotal: ' of ' + st.universe.length,
+      sectors, sectorFilter: st.sectorFilter, onSector: this.onSector,
+      search: st.search, onSearch: this.onSearch,
+      clearAll: this.clearAll,
+      rowPad: st.density === 'compact' ? '7px' : '12px',
+      comfBg: st.density === 'comfortable' ? '#fff' : 'transparent', comfFg: st.density === 'comfortable' ? '#15171a' : '#8b9298',
+      compBg: st.density === 'compact' ? '#fff' : 'transparent', compFg: st.density === 'compact' ? '#15171a' : '#8b9298',
+      setComfortable: () => this.setState({ density: 'comfortable' }, () => this._saveView()), setCompact: () => this.setState({ density: 'compact' }, () => this._saveView()),
+      layoutBtns,
+      // ranking builder
+      rankOpen: st.rankOpen, rankArrow: st.rankOpen ? '▾' : '▸', toggleRankSection: this.toggleRankSection,
+      rankField: st.rankDraft.field, rankScope: st.rankDraft.scope, rankDir: st.rankDraft.dir, rankPct: st.rankDraft.pct,
+      rankFieldOptions: Object.entries(M.RANK_FIELDS).map(([k, v]) => ({ value: k, label: v })),
+      onRankField: this.onRankField, onRankScope: this.onRankScope, onRankDir: this.onRankDir, onRankPct: this.onRankPct, addRank: this.addRank,
+      // compare
+      compareCount: st.compareSel.length, showCompareBar: st.compareSel.length > 0,
+      compareChips: st.compareSel.map(t => ({ ticker: t, onRemove: () => this.toggleCompare(t) })),
+      canCompare: st.compareSel.length >= 2, cannotCompare: st.compareSel.length < 2, openCompare: this.openCompare, clearCompare: this.clearCompare,
+      showCompare: st.compareOpen && st.compareSel.length >= 2, closeCompare: this.closeCompare, compareCols,
+      compareHint: st.compareSel.length < 2 ? 'Pick at least 2' : '',
+      // backtest
+      openBacktest: this.openBacktest, showBacktest: st.backtestOpen, closeBacktest: this.closeBacktest,
+      btCards, btSignals, btFire, btEmpty, btRuleLabels, btNoRules: btRuleLabels.length === 0, btHasRank,
+      // sector heatmap
+      heatmapOpen: st.heatmapOpen, toggleHeatmap: this.toggleHeatmap, heatItems,
+      // refresh + diff
+      refreshData: this.refreshData, diffBanner, dismissDiff: this.dismissDiff, showDiff: !!diffBanner,
+      panels: st.panels, togglePanel: this.togglePanel,
+      effectiveRules: detailRules, ruleLabel: this.ruleLabel,
+      selectedStock, closeDetail: this.closeDetail, stop: (e) => e.stopPropagation(),
+      hasSelection: !!selectedStock, noSelection: !selectedStock,
+      showDocked: st.layout === 'docked',
+      showOverlay: st.layout === 'overlay' && !!selectedStock,
+    };
+  }
+}
+</script>
+</body>
+</html>
