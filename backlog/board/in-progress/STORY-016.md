@@ -6,7 +6,7 @@ capability: CAP-screen
 sad_refs: [SAD#4.2, SAD#5.7, SAD#2.3, SAD#2.5, SAD#8.3]
 target: ~
 estimate: ~
-attempts: 0
+attempts: 1
 prev_column: ~
 blocked_reason: ~
 ---

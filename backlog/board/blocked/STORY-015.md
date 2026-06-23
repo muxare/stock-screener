@@ -7,8 +7,8 @@ sad_refs: [SAD#4.3, SAD#6.1, SAD#2.2, SAD#8.5, SAD#8.8]
 target: ~
 estimate: ~
 attempts: 0
-prev_column: ~
-blocked_reason: ~
+prev_column: todo
+blocked_reason: ADR-008 market-data vendor decision + redistribution legal sign-off pending (SAD#8.8)
 ---
 
 ## User Story
