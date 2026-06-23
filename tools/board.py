@@ -680,7 +680,13 @@ def cmd_review_check(args):
 
         def ignorable(f):
             f = normalize_path(f)
-            return f.startswith("backlog/") or f.endswith(".md")
+            # backlog data, docs, and the board tool's own audit log are
+            # tooling-managed — not part of any story's code change.
+            return (
+                f.startswith("backlog/")
+                or f.startswith(".workflow/")
+                or f.endswith(".md")
+            )
 
         out_of_scope = [f for f in changed
                         if not ignorable(f) and not path_in_scope(f, scope)]
