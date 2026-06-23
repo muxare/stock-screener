@@ -1,6 +1,9 @@
-// market.ts — deterministic mock market universe + technical indicators
+// market.ts — technical indicator + rule engine
 // Faithful TypeScript port of poc/market.js.
-// Pure ES module. No dependencies. Exports generateUniverse() and helpers.
+// Pure, isomorphic, dependency-free ES module (SAD#2.6 / ADR-002): no DOM, no
+// fetch, no global state, no "today". Bars are passed in, never fetched here
+// (SAD#8.4 / ADR-004). The synthetic data generator lives behind the
+// MarketDataProvider port in ./data (ADR-007); it is NOT part of the engine.
 
 // ---------- shared types ----------
 export type IndicatorType = 'ema' | 'sma' | 'rsi' | 'macd' | 'stochrsi';
@@ -262,16 +265,6 @@ export interface BacktestResult {
 
 export type RankField = keyof typeof RANK_FIELDS;
 
-// ---------- seeded RNG ----------
-function mulberry32(a: number): () => number {
-  return function () {
-    a |= 0; a = (a + 0x6D2B79F5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
 // ---------- indicator math ----------
 export function ema(values: number[], period: number): number[] {
   const k = 2 / (period + 1);
@@ -356,97 +349,29 @@ export function macd(closes: number[]): { line: number[]; signal: number[]; hist
 export const EMA_WINDOWS = [5, 8, 9, 10, 12, 20, 21, 26, 50, 100, 150, 200];
 
 // ---------- universe ----------
-const TICKERS: [string, string, string][] = [
-  ['AAPL', 'Apple Inc.', 'Technology'],
-  ['MSFT', 'Microsoft Corp.', 'Technology'],
-  ['NVDA', 'NVIDIA Corp.', 'Semiconductors'],
-  ['AMD', 'Advanced Micro Devices', 'Semiconductors'],
-  ['AVGO', 'Broadcom Inc.', 'Semiconductors'],
-  ['GOOGL', 'Alphabet Inc.', 'Communication'],
-  ['META', 'Meta Platforms', 'Communication'],
-  ['AMZN', 'Amazon.com Inc.', 'Consumer Disc.'],
-  ['TSLA', 'Tesla Inc.', 'Consumer Disc.'],
-  ['NFLX', 'Netflix Inc.', 'Communication'],
-  ['CRM', 'Salesforce Inc.', 'Technology'],
-  ['ORCL', 'Oracle Corp.', 'Technology'],
-  ['ADBE', 'Adobe Inc.', 'Technology'],
-  ['INTC', 'Intel Corp.', 'Semiconductors'],
-  ['QCOM', 'Qualcomm Inc.', 'Semiconductors'],
-  ['MU', 'Micron Technology', 'Semiconductors'],
-  ['PLTR', 'Palantir Technologies', 'Technology'],
-  ['SNOW', 'Snowflake Inc.', 'Technology'],
-  ['SHOP', 'Shopify Inc.', 'Technology'],
-  ['UBER', 'Uber Technologies', 'Industrials'],
-  ['ABNB', 'Airbnb Inc.', 'Consumer Disc.'],
-  ['COIN', 'Coinbase Global', 'Financials'],
-  ['SQ', 'Block Inc.', 'Financials'],
-  ['PYPL', 'PayPal Holdings', 'Financials'],
-  ['JPM', 'JPMorgan Chase', 'Financials'],
-  ['BAC', 'Bank of America', 'Financials'],
-  ['GS', 'Goldman Sachs', 'Financials'],
-  ['V', 'Visa Inc.', 'Financials'],
-  ['MA', 'Mastercard Inc.', 'Financials'],
-  ['DIS', 'Walt Disney Co.', 'Communication'],
-  ['NKE', 'Nike Inc.', 'Consumer Disc.'],
-  ['SBUX', 'Starbucks Corp.', 'Consumer Disc.'],
-  ['MCD', "McDonald's Corp.", 'Consumer Disc.'],
-  ['COST', 'Costco Wholesale', 'Consumer Staples'],
-  ['WMT', 'Walmart Inc.', 'Consumer Staples'],
-  ['XOM', 'Exxon Mobil', 'Energy'],
-  ['CVX', 'Chevron Corp.', 'Energy'],
-  ['LLY', 'Eli Lilly & Co.', 'Healthcare'],
-  ['UNH', 'UnitedHealth Group', 'Healthcare'],
-  ['PFE', 'Pfizer Inc.', 'Healthcare'],
-  ['BA', 'Boeing Co.', 'Industrials'],
-  ['CAT', 'Caterpillar Inc.', 'Industrials'],
-  ['GE', 'GE Aerospace', 'Industrials'],
-  ['F', 'Ford Motor Co.', 'Consumer Disc.'],
-];
-
-const DAYS = 260;       // generated trading days (~1y)
 const VISIBLE = 130;    // days shown on detail chart
-
-function genSeries(rand: () => number, startPrice: number): Bar[] {
-  // regime-based geometric random walk with occasional trend shifts
-  const closes: number[] = [];
-  let price = startPrice;
-  let drift = (rand() - 0.45) * 0.0016;      // slight bias
-  let vol = 0.012 + rand() * 0.022;
-  let regimeLeft = 20 + Math.floor(rand() * 40);
-  for (let i = 0; i < DAYS; i++) {
-    if (regimeLeft-- <= 0) {
-      drift = (rand() - 0.5) * 0.004;
-      vol = 0.01 + rand() * 0.03;
-      regimeLeft = 20 + Math.floor(rand() * 45);
-    }
-    const shock = (rand() - 0.5) * 2;
-    const ret = drift + vol * shock;
-    price = Math.max(1.5, price * (1 + ret));
-    closes.push(price);
-  }
-  // build OHLCV around closes
-  const bars: Bar[] = [];
-  const baseVol = 1.5e6 + rand() * 9e6;
-  for (let i = 0; i < closes.length; i++) {
-    const c = closes[i];
-    const prevC = i ? closes[i - 1] : c;
-    const o = prevC * (1 + (rand() - 0.5) * 0.01);
-    const hi = Math.max(o, c) * (1 + rand() * 0.012);
-    const lo = Math.min(o, c) * (1 - rand() * 0.012);
-    const move = Math.abs(c - prevC) / prevC;
-    const v = Math.round(baseVol * (0.6 + rand() * 0.8 + move * 14));
-    bars.push({ o, h: hi, l: lo, c, v });
-  }
-  return bars;
-}
 
 function pct(a: number, b: number): number { return ((a - b) / b) * 100; }
 
-export function generateUniverse(seed = 7): Stock[] {
-  const rand = mulberry32(seed);
-  const stocks = TICKERS.map(([ticker, name, sector], idx) => {
-    const startPrice = 18 + rand() * 380;
-    const bars = genSeries(mulberry32(seed * 131 + idx * 977), startPrice);
+// Engine input contract: universe metadata + adjusted OHLCV bars. Bars are
+// passed in (SAD#8.4 / ADR-004) and already corporate-action adjusted at
+// ingestion (SAD#2.2). Adapters behind the SAD#5.10 MarketDataProvider port
+// produce these; the engine builds Stocks from them and never fetches.
+export interface InstrumentBars {
+  ticker: string;
+  name: string;
+  sector: string;
+  bars: Bar[];
+}
+
+// Build the full set of Stocks (with computed indicators) from adjusted bars.
+export function buildUniverse(instruments: InstrumentBars[]): Stock[] {
+  return instruments.map(buildStock);
+}
+
+// Build one Stock — all indicator math + snapshots — from its metadata + bars.
+export function buildStock({ ticker, name, sector, bars }: InstrumentBars): Stock {
+  {
     const closes = bars.map(b => b.c);
     const vols = bars.map(b => b.v);
 
@@ -538,8 +463,7 @@ export function generateUniverse(seed = 7): Stock[] {
       },
     };
     return stockObj;
-  });
-  return stocks;
+  }
 }
 
 // add a custom EMA window to every stock so it can be used in rules + drawn

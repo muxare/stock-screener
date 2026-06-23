@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import * as M from './lib/market';
+import { syntheticProvider } from './lib/data/synthetic';
 import type {
   Stock,
   IndicatorDef,
@@ -398,7 +399,7 @@ export const useScreener = create<ScreenerState>((set, get) => {
       (['activePreset', 'sortKey', 'sortDir', 'density', 'layout', 'sectorFilter'] as const).forEach((k) => { if (view[k] != null) viewOk[k] = view[k]; });
       set({
         ready: true,
-        universe: M.generateUniverse(7),
+        universe: M.buildUniverse(syntheticProvider(7).getUniverse()),
         savedIndicators: saved,
         savedScreens: load<Screen[]>(SCREENS, []),
         builder: freshBuilder('ema'),
@@ -930,7 +931,7 @@ export const useScreener = create<ScreenerState>((set, get) => {
       };
       const prev = new Set(screenTickers(st.universe));
       const seed = st.seed + 1;
-      const universe = M.generateUniverse(seed);
+      const universe = M.buildUniverse(syntheticProvider(seed).getUniverse());
       set({ universe, seed, selected: null, compareSel: [], compareOpen: false });
       const now = new Set(screenTickers(universe));
       const entered = [...now].filter((t) => !prev.has(t));
