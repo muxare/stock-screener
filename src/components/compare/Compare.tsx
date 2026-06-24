@@ -131,11 +131,13 @@ function CompareColumn({ stock }: { stock: Stock }) {
 export function CompareDrawer() {
   const compareOpen = useScreener((s) => s.compareOpen);
   const compareSel = useScreener((s) => s.compareSel);
-  const universe = useScreener((s) => s.universe);
+  const displayed = useScreener((s) => s.displayed);
   const closeCompare = useScreener((s) => s.closeCompare);
 
   if (!compareOpen || compareSel.length < 2) return null;
-  const cols = compareSel.map((t) => universe.find((s) => s.ticker === t)).filter((s): s is Stock => !!s);
+  // Displayed-name bars are fetched on demand (SAD#2.5); a column appears once
+  // its instrument has loaded.
+  const cols = compareSel.map((t) => displayed[t]).filter((s): s is Stock => !!s);
 
   return (
     <div onClick={closeCompare} style={{ position: 'fixed', inset: 0, background: 'rgba(20,23,26,0.32)', zIndex: 55, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: 24 }}>

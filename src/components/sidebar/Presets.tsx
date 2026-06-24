@@ -1,6 +1,5 @@
 import { useMemo } from 'react';
 import { useScreener } from '../../store';
-import * as M from '../../lib/market';
 import { HButton, HDiv } from '../ui/Hoverable';
 
 /**
@@ -10,8 +9,8 @@ import { HButton, HDiv } from '../ui/Hoverable';
  * preset; the ✎ button (only when id !== 'all') opens the preset builder.
  */
 export function Presets() {
-  const universe = useScreener((s) => s.universe);
   const presetStore = useScreener((s) => s.presetStore);
+  const presetCounts = useScreener((s) => s.presetCounts);
   const activePreset = useScreener((s) => s.activePreset);
   const newPreset = useScreener((s) => s.newPreset);
   const setPreset = useScreener((s) => s.setPreset);
@@ -22,7 +21,9 @@ export function Presets() {
   const cards = useMemo(
     () =>
       presetList.map((p) => {
-        const count = universe.filter((s) => M.evalRulesOnStock(s, p.rules)).length;
+        // Full-universe match count comes from the service (SAD#2.5), kept warm
+        // in the store; undefined until the first /screen for this preset lands.
+        const count = presetCounts[p.id] ?? 0;
         const active = p.id === activePreset;
         return {
           id: p.id,
@@ -37,7 +38,7 @@ export function Presets() {
           countColor: active ? '#fff' : '#8b9298',
         };
       }),
-    [presetList, universe, activePreset],
+    [presetList, presetCounts, activePreset],
   );
 
   return (

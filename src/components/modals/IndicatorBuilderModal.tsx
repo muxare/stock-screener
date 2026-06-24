@@ -32,7 +32,7 @@ export function IndicatorBuilderModal() {
   const builderOpen = useScreener((s) => s.builderOpen);
   const builder = useScreener((s) => s.builder);
   const editingIndId = useScreener((s) => s.editingIndId);
-  const universe = useScreener((s) => s.universe);
+  const sampleStock = useScreener((s) => s.sampleStock);
   const closeBuilder = useScreener((s) => s.closeBuilder);
   const setBuilderType = useScreener((s) => s.setBuilderType);
   const onBuilderParam = useScreener((s) => s.onBuilderParam);
@@ -62,7 +62,8 @@ export function IndicatorBuilderModal() {
   const preview = ((): { builderName: string; previewValue: string; previewScale: string; sampleTicker: string; spark: number[] | null } => {
     const bdef = defFromBuilder(builder);
     const builderName = builder.nameTouched ? builder.name : M.autoIndName(bdef);
-    const sample = universe[0];
+    // One displayed name fetched at boot (SAD#2.5) drives the live preview.
+    const sample = sampleStock;
     let previewValue = '—', previewScale = '', sampleTicker = '';
     let spark: number[] | null = null;
     if (sample) {

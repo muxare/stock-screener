@@ -22,8 +22,11 @@ export function runScreen(universe: Stock[], rules: Rule[]): Stock[] {
   return listed;
 }
 
-// Compact per-match projection returned over the wire — the columns the results
-// table needs, not the full Stock (which carries large indicator arrays).
+// Compact per-match projection returned over the wire — the scalar columns the
+// results table renders (SAD#5.2), not the full Stock (which carries large
+// indicator arrays). Includes the MACD/Stoch/EMA-trend scalars and the 40-day
+// `sparkline` the table draws, so the client renders a match row without
+// fetching that name's bars (SAD#2.5: only displayed names pull bars).
 export interface ScreenRow {
   ticker: string;
   name: string;
@@ -31,8 +34,14 @@ export interface ScreenRow {
   price: number;
   changePct: number;
   rsi: number;
+  macdHist: number;
+  stochK: number;
   relVol: number;
+  ema20: number;
+  ema50: number;
+  ema200: number;
   pct52w: number;
+  sparkline: number[];
 }
 
 export function toRow(s: Stock): ScreenRow {
@@ -43,7 +52,13 @@ export function toRow(s: Stock): ScreenRow {
     price: s.price,
     changePct: s.changePct,
     rsi: s.rsi,
+    macdHist: s.macdHist,
+    stochK: s.stochK,
     relVol: s.relVol,
+    ema20: s.ema20,
+    ema50: s.ema50,
+    ema200: s.ema200,
     pct52w: s.pct52w,
+    sparkline: s.sparkline,
   };
 }

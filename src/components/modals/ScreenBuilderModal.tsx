@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useScreener } from '../../store';
 import * as M from '../../lib/market';
 import type { OperandDraft } from '../../store';
@@ -15,7 +15,8 @@ export function ScreenBuilderModal() {
   const screenDraft = useScreener((s) => s.screenDraft);
   const editingScreenId = useScreener((s) => s.editingScreenId);
   const savedIndicators = useScreener((s) => s.savedIndicators);
-  const universe = useScreener((s) => s.universe);
+  const universeSize = useScreener((s) => s.universeSize);
+  const previewCount = useScreener((s) => s.previewCount);
   const mathOpen = useScreener((s) => s.mathOpen);
   const pcfOpen = useScreener((s) => s.pcfOpen);
   const pcfText = useScreener((s) => s.pcfText);
@@ -73,9 +74,22 @@ export function ScreenBuilderModal() {
     const sRule = useScreener.getState().screenRule(screenDraft);
     const screenName = screenDraft.nameTouched ? screenDraft.name : (sRule ? M.groupLabel(sRule as never) : '');
     const setupPreview = sRule ? M.groupLabel(sRule as never) : '';
-    const screenMatchN = sRule ? universe.filter((s) => M.evalRuleAt(s, sRule, s.nLast)).length : 0;
-    return { condRows, screenName, setupPreview, screenMatchN };
-  }, [screenDraft, mathOpen, universe]);
+    return { condRows, screenName, setupPreview };
+  }, [screenDraft, mathOpen]);
+
+  // Full-universe preview count comes from the service (SAD#2.5), debounced so a
+  // keystroke doesn't fire a request per character.
+  const [screenMatchN, setScreenMatchN] = useState(0);
+  useEffect(() => {
+    if (!screenDraft) return;
+    let live = true;
+    const id = setTimeout(() => {
+      const sRule = useScreener.getState().screenRule(screenDraft);
+      if (!sRule) { if (live) setScreenMatchN(0); return; }
+      void previewCount([sRule]).then((n) => { if (live) setScreenMatchN(n); });
+    }, 200);
+    return () => { live = false; clearTimeout(id); };
+  }, [screenDraft, previewCount]);
 
   if (!screenBuilderOpen || !screenDraft || !view) return null;
 
@@ -183,7 +197,7 @@ export function ScreenBuilderModal() {
             {view.setupPreview && <div style={{ fontSize: 11.5, color: '#6b7280', lineHeight: 1.55, wordBreak: 'break-word' }}>{view.setupPreview}</div>}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
               <span style={{ fontSize: 12, color: '#8b9298' }}>Matches right now</span>
-              <span style={{ fontSize: 16, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{view.screenMatchN}<span style={{ fontSize: 11, color: '#9aa1a8', fontWeight: 500 }}> / {universe.length}</span></span>
+              <span style={{ fontSize: 16, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{screenMatchN}<span style={{ fontSize: 11, color: '#9aa1a8', fontWeight: 500 }}> / {universeSize}</span></span>
             </div>
           </div>
 

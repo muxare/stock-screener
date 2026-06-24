@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import { useScreener } from '../../store';
 import * as M from '../../lib/market';
 import { HButton, HInput } from '../ui/Hoverable';
@@ -18,7 +18,8 @@ export function PresetBuilderModal() {
   const presetDesc = useScreener((s) => s.presetDesc);
   const customRules = useScreener((s) => s.customRules);
   const editChip = useScreener((s) => s.editChip);
-  const universe = useScreener((s) => s.universe);
+  const universeSize = useScreener((s) => s.universeSize);
+  const previewCount = useScreener((s) => s.previewCount);
   const presetStore = useScreener((s) => s.presetStore);
   const onPresetName = useScreener((s) => s.onPresetName);
   const onPresetDesc = useScreener((s) => s.onPresetDesc);
@@ -28,10 +29,17 @@ export function PresetBuilderModal() {
   const deletePreset = useScreener((s) => s.deletePreset);
   const addFlag = useScreener((s) => s.addFlag);
 
-  const presetDraftCount = useMemo(
-    () => (editingPreset ? universe.filter((s) => M.evalGroupedRules(s, customRules)).length : 0),
-    [editingPreset, universe, customRules],
-  );
+  // Full-universe match count for the draft comes from the service (SAD#2.5),
+  // debounced so a chip edit doesn't fire a request per keystroke.
+  const [presetDraftCount, setPresetDraftCount] = useState(0);
+  useEffect(() => {
+    let live = true;
+    const id = setTimeout(() => {
+      if (!editingPreset) { if (live) setPresetDraftCount(0); return; }
+      void previewCount(customRules).then((n) => { if (live) setPresetDraftCount(n); });
+    }, 200);
+    return () => { live = false; clearTimeout(id); };
+  }, [editingPreset, customRules, previewCount]);
 
   if (!editingPreset) return null;
 
@@ -63,7 +71,7 @@ export function PresetBuilderModal() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 9 }}>
               <span style={{ fontSize: 11, color: '#98a0a8', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600 }}>Filters in this preset</span>
               <span style={{ fontSize: 12, color: '#8b9298' }}>
-                <b style={{ color: '#15171a', fontVariantNumeric: 'tabular-nums' }}>{presetDraftCount}</b> / {universe.length} match
+                <b style={{ color: '#15171a', fontVariantNumeric: 'tabular-nums' }}>{presetDraftCount}</b> / {universeSize} match
               </span>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>

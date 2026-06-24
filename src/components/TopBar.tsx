@@ -1,16 +1,15 @@
 import { useScreener } from '../store';
-import { HButton, HInput } from './ui/Hoverable';
+import { HInput } from './ui/Hoverable';
 
 /**
  * Top bar — faithful port of the POC's TOP BAR (Stock Screener.dc.html lines
- * 24–45): logo block, search input, spacer, Refresh button, and the
- * Overlay/Docked layout toggle. Inline styles copied from the POC; the layout
- * button styling mirrors renderVals' `layoutBtns` (lines 1888–1895).
+ * 24–45): logo block, search input, spacer, and the Overlay/Docked layout
+ * toggle. Inline styles copied from the POC; the layout button styling mirrors
+ * renderVals' `layoutBtns` (lines 1888–1895).
  */
 export function TopBar() {
   const search = useScreener((s) => s.search);
   const onSearch = useScreener((s) => s.onSearch);
-  const refreshData = useScreener((s) => s.refreshData);
   const layout = useScreener((s) => s.layout);
   const setLayout = useScreener((s) => s.setLayout);
 
@@ -45,15 +44,6 @@ export function TopBar() {
       </div>
 
       <div style={{ flex: 1 }} />
-
-      <HButton
-        onClick={() => refreshData()}
-        title="Simulate next session's data"
-        style={{ display: 'flex', alignItems: 'center', gap: '7px', padding: '7px 13px', border: '1px solid #e7e8ea', borderRadius: '9px', background: '#fff', color: '#15171a', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
-        hoverStyle={{ background: '#f5f6f7' }}
-      >
-        <span style={{ fontSize: '14px' }}>⟳</span>Refresh
-      </HButton>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '2px', background: '#f4f5f6', padding: '3px', borderRadius: '9px' }}>
         {layoutBtns.map((lb) => (

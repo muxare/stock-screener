@@ -13,7 +13,7 @@ export function Screens() {
   const savedScreens = useScreener((s) => s.savedScreens);
   const customRules = useScreener((s) => s.customRules);
   const alertScreens = useScreener((s) => s.alertScreens);
-  const universe = useScreener((s) => s.universe);
+  const screenCounts = useScreener((s) => s.screenCounts);
   const openScreenBuilder = useScreener((s) => s.openScreenBuilder);
   const applyScreen = useScreener((s) => s.applyScreen);
   const editScreen = useScreener((s) => s.editScreen);
@@ -25,7 +25,8 @@ export function Screens() {
     return savedScreens.map((scr) => {
       const on = appliedScreenIds.has(scr.id);
       const alertOn = !!alertScreens[scr.id];
-      const cnt = universe.filter((s) => M.evalRuleAt(s, scr.rule, s.nLast)).length;
+      // Full-universe match count from the service (SAD#2.5), kept warm in store.
+      const cnt = screenCounts[scr.id] ?? 0;
       const spec = (scr.rule as { kind: string }).kind === 'group'
         ? M.groupLabel(scr.rule as never)
         : M.chainLabel(scr.rule as never);
@@ -36,7 +37,7 @@ export function Screens() {
         liveCount: cnt, showLive: alertOn && cnt > 0,
       };
     });
-  }, [savedScreens, customRules, alertScreens, universe]);
+  }, [savedScreens, customRules, alertScreens, screenCounts]);
 
   return (
     <>

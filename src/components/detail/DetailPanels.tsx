@@ -13,25 +13,25 @@ import { StockDetail } from './StockDetail';
 // ----------------------------------------------------------------------------
 
 function useDetailRules(): Rule[] {
-  const universe = useScreener((s) => s.universe);
+  const rankTickers = useScreener((s) => s.rankTickers);
   const activePreset = useScreener((s) => s.activePreset);
   const customRules = useScreener((s) => s.customRules);
   const selected = useScreener((s) => s.selected);
   return useMemo(
     () => useScreener.getState().detailRules(),
-    [universe, activePreset, customRules, selected],
+    [rankTickers, activePreset, customRules, selected],
   );
 }
 
 export function DetailDock() {
   const selected = useScreener((s) => s.selected);
-  const universe = useScreener((s) => s.universe);
+  const displayed = useScreener((s) => s.displayed);
   const panels = useScreener((s) => s.panels);
   const closeDetail = useScreener((s) => s.closeDetail);
   const togglePanel = useScreener((s) => s.togglePanel);
   const ruleLabel = useScreener((s) => s.ruleLabel);
   const rules = useDetailRules();
-  const selectedStock = universe.find((s) => s.ticker === selected) || null;
+  const selectedStock = (selected && displayed[selected]) || null;
 
   return (
     <div style={{ width: 660, flex: 'none', borderLeft: '1px solid #e7e8ea', background: '#fff', minHeight: 0 }}>
@@ -58,13 +58,13 @@ export function DetailDock() {
 export function DetailOverlay() {
   const layout = useScreener((s) => s.layout);
   const selected = useScreener((s) => s.selected);
-  const universe = useScreener((s) => s.universe);
+  const displayed = useScreener((s) => s.displayed);
   const panels = useScreener((s) => s.panels);
   const closeDetail = useScreener((s) => s.closeDetail);
   const togglePanel = useScreener((s) => s.togglePanel);
   const ruleLabel = useScreener((s) => s.ruleLabel);
   const rules = useDetailRules();
-  const selectedStock = universe.find((s) => s.ticker === selected) || null;
+  const selectedStock = (selected && displayed[selected]) || null;
 
   if (layout !== 'overlay' || !selectedStock) return null;
 

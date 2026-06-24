@@ -39,7 +39,15 @@ describe('shared engine over the full universe (SAD#4.2 / SAD#8.3)', () => {
   it('resolves a built-in preset and returns a row projection', () => {
     const res = handleScreen(store.get(), { preset: 'oversold' });
     expect(res.total).toBe(res.tickers.length);
-    expect(res.results.every((r) => typeof r.ticker === 'string' && typeof r.price === 'number')).toBe(true);
+    // The projection carries every scalar the results table renders (SAD#5.2)
+    // plus the 40-day sparkline, so the client draws a match row without
+    // fetching that name's bars (SAD#2.5).
+    expect(res.results.every((r) =>
+      typeof r.ticker === 'string' && typeof r.price === 'number'
+      && typeof r.macdHist === 'number' && typeof r.stochK === 'number'
+      && typeof r.ema20 === 'number' && typeof r.ema50 === 'number' && typeof r.ema200 === 'number'
+      && Array.isArray(r.sparkline),
+    )).toBe(true);
   });
 
   it('rejects an unknown preset as a client error', () => {

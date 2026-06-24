@@ -6,8 +6,7 @@ import {
   flexRender,
   type ColumnDef,
 } from '@tanstack/react-table';
-import type { Stock } from '../lib/market';
-import { useScreener } from '../store';
+import { useScreener, type Row } from '../store';
 import { HButton, HDiv } from './ui/Hoverable';
 import { Spark } from './ui/Spark';
 
@@ -32,10 +31,13 @@ const COLS: Col[] = [
 const col = (c: number) => (c >= 0 ? '#06a96b' : '#e23d3d');
 
 export function Results() {
-  // primitive deps for derived selectors (read via getState() inside useMemo)
-  const universe = useScreener((s) => s.universe);
-  const activePreset = useScreener((s) => s.activePreset);
-  const customRules = useScreener((s) => s.customRules);
+  // primitive deps for derived selectors (read via getState() inside useMemo).
+  // The matched rows come from the screening service (SAD#4.2) via the store;
+  // `screen` changes whenever a /screen call lands.
+  const screen = useScreener((s) => s.screen);
+  const screenError = useScreener((s) => s.screenError);
+  const universeSize = useScreener((s) => s.universeSize);
+  const sectorList = useScreener((s) => s.sectorList);
   const search = useScreener((s) => s.search);
   const sectorFilter = useScreener((s) => s.sectorFilter);
   const sortKey = useScreener((s) => s.sortKey);
@@ -45,7 +47,6 @@ export function Results() {
   const compareSel = useScreener((s) => s.compareSel);
   const density = useScreener((s) => s.density);
   const heatmapOpen = useScreener((s) => s.heatmapOpen);
-  const diff = useScreener((s) => s.diff);
 
   // actions
   const setSort = useScreener((s) => s.setSort);
@@ -53,31 +54,30 @@ export function Results() {
   const setDensity = useScreener((s) => s.setDensity);
   const toggleHeatmap = useScreener((s) => s.toggleHeatmap);
   const openBacktest = useScreener((s) => s.openBacktest);
-  const dismissDiff = useScreener((s) => s.dismissDiff);
   const selectStock = useScreener((s) => s.selectStock);
   const togglePin = useScreener((s) => s.togglePin);
   const toggleCompare = useScreener((s) => s.toggleCompare);
 
   const rows = useMemo(
     () => useScreener.getState().filteredStocks(),
-    [universe, activePreset, customRules, search, sectorFilter, sortKey, sortDir, pinned],
+    [screen, search, sectorFilter, sortKey, sortDir, pinned],
   );
 
   // screenList (pre sector/search) for sector heatmap counts
   const screenList = useMemo(
     () => useScreener.getState().screenList(),
-    [universe, activePreset, customRules],
+    [screen],
   );
 
   const matchCount = rows.length;
-  const ofTotal = ' of ' + universe.length;
+  const ofTotal = ' of ' + universeSize;
 
   const sectors = useMemo(
     () => [
       { value: 'all', label: 'All sectors' },
-      ...[...new Set(universe.map((s) => s.sector))].sort().map((x) => ({ value: x, label: x })),
+      ...sectorList.map((x) => ({ value: x, label: x })),
     ],
-    [universe],
+    [sectorList],
   );
 
   // sector heatmap — renderVals lines 1907–1917
@@ -85,8 +85,7 @@ export function Results() {
     const heatRaw: Record<string, number> = {};
     for (const s of screenList) heatRaw[s.sector] = (heatRaw[s.sector] || 0) + 1;
     const heatMax = Math.max(1, ...Object.values(heatRaw));
-    const allSectors = [...new Set(universe.map((s) => s.sector))].sort();
-    return allSectors.map((sec) => {
+    return sectorList.map((sec) => {
       const cnt = heatRaw[sec] || 0;
       const active = sectorFilter === sec;
       return {
@@ -99,28 +98,12 @@ export function Results() {
         onClick: () => onSector(active ? 'all' : sec),
       };
     });
-  }, [screenList, universe, sectorFilter, onSector]);
-
-  // diff banner — renderVals lines 1936–1946
-  const diffBanner = useMemo(() => {
-    if (!diff) return null;
-    return {
-      enteredN: diff.entered.length,
-      exitedN: diff.exited.length,
-      enteredStr: diff.entered.slice(0, 8).join('  '),
-      exitedStr: diff.exited.slice(0, 8).join('  '),
-      hasEntered: diff.entered.length > 0,
-      hasExited: diff.exited.length > 0,
-      alertsStr: diff.alerts.map((a) => a.name + ' · ' + a.count).join('   '),
-      hasAlerts: diff.alerts.length > 0,
-      none: diff.entered.length === 0 && diff.exited.length === 0 && diff.alerts.length === 0,
-    };
-  }, [diff]);
+  }, [screenList, sectorList, sectorFilter, onSector]);
 
   // tanstack column model — drives the header; data comes pre-sorted from store
-  const columnHelper = createColumnHelper<Stock>();
-  const columns = useMemo<ColumnDef<Stock, unknown>[]>(
-    () => COLS.map((c, i) => columnHelper.display({ id: c.key ?? `_col${i}`, header: c.label })) as ColumnDef<Stock, unknown>[],
+  const columnHelper = createColumnHelper<Row>();
+  const columns = useMemo<ColumnDef<Row, unknown>[]>(
+    () => COLS.map((c, i) => columnHelper.display({ id: c.key ?? `_col${i}`, header: c.label })) as ColumnDef<Row, unknown>[],
     [columnHelper],
   );
   const table = useReactTable({ data: rows, columns, getCoreRowModel: getCoreRowModel() });
@@ -155,17 +138,11 @@ export function Results() {
         </div>
       </div>
 
-      {/* diff banner */}
-      {diffBanner && (
-        <div style={{ margin: '0 20px 12px', border: '1px solid #e7e8ea', borderRadius: '11px', background: '#fff', padding: '11px 14px', display: 'flex', alignItems: 'center', gap: '14px', animation: 'popin 0.2s ease' }}>
-          <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#98a0a8', flex: 'none' }}>New session</span>
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexWrap: 'wrap', gap: '6px 16px', fontSize: '12.5px' }}>
-            {diffBanner.hasEntered && <span style={{ color: '#06865a' }}><b>+{diffBanner.enteredN} entered</b>&nbsp;&nbsp;{diffBanner.enteredStr}</span>}
-            {diffBanner.hasExited && <span style={{ color: '#e23d3d' }}><b>−{diffBanner.exitedN} exited</b>&nbsp;&nbsp;{diffBanner.exitedStr}</span>}
-            {diffBanner.hasAlerts && <span style={{ color: '#b3641a' }}><b>Alerts:</b>&nbsp;{diffBanner.alertsStr}</span>}
-            {diffBanner.none && <span style={{ color: '#8b9298' }}>No change to the active screen's matches.</span>}
-          </div>
-          <button onClick={() => dismissDiff()} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#aab0b6', fontSize: '15px', flex: 'none', lineHeight: 1 }}>✕</button>
+      {/* service-unavailable banner */}
+      {screenError && (
+        <div style={{ margin: '0 20px 12px', border: '1px solid #f3d9b8', borderRadius: '11px', background: '#fff8ef', padding: '11px 14px', display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#b3641a', flex: 'none' }}>Offline</span>
+          <div style={{ flex: 1, minWidth: 0, fontSize: '12.5px', color: '#8a6321' }}>{screenError}</div>
         </div>
       )}
 

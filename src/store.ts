@@ -1,15 +1,103 @@
 import { create } from 'zustand';
 import * as M from './lib/market';
-import { syntheticProvider } from './lib/data/synthetic';
 import type {
   Stock,
   IndicatorDef,
   IndicatorType,
   Rule,
-  RankRule,
   Screen,
   Preset,
+  InstrumentBars,
+  BacktestResult,
 } from './lib/market';
+
+// ----------------------------------------------------------------------------
+// Screening-service client (SAD#4.2, consumed by the SAD#4.1 web client).
+// The browser no longer builds or evaluates the full universe (SAD#2.5); it
+// asks the Node service over same-origin HTTP/JSON (vite proxies the paths in
+// dev). Full-universe screens and backtests run server-side over the shared
+// engine; the client computes locally only for the names it displays.
+// ----------------------------------------------------------------------------
+
+// Per-match row returned by /screen — mirrors `ScreenRow` in server/screen.ts.
+// Carries the scalars the results table renders plus the 40-day sparkline, so a
+// row draws without fetching that name's bars.
+export interface Row {
+  ticker: string;
+  name: string;
+  sector: string;
+  price: number;
+  changePct: number;
+  rsi: number;
+  macdHist: number;
+  stochK: number;
+  relVol: number;
+  ema20: number;
+  ema50: number;
+  ema200: number;
+  pct52w: number;
+  sparkline: number[];
+}
+interface ScreenResp {
+  total: number;
+  count: number;
+  offset: number;
+  limit: number;
+  elapsedMs: number;
+  tickers: string[];
+  results: Row[];
+}
+// `limit: 0` returns the full `total` + `tickers` with no row payload — used for
+// match counts and rank pass-sets. The main screen passes ALL to get the rows.
+const ALL_ROWS = 1_000_000;
+
+async function apiScreen(rules: Rule[], limit = 0): Promise<ScreenResp> {
+  const res = await fetch('/screen', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ rules, limit }),
+  });
+  if (!res.ok) throw new Error('screen failed: ' + res.status);
+  return res.json() as Promise<ScreenResp>;
+}
+
+async function apiInstrument(ticker: string): Promise<InstrumentBars | null> {
+  const res = await fetch('/instrument/' + encodeURIComponent(ticker));
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error('instrument failed: ' + res.status);
+  return res.json() as Promise<InstrumentBars>;
+}
+
+// NDJSON stream (SAD#2.4): throttled `progress` lines, then one `result` line
+// carrying the single summary payload (SAD#6.5).
+async function apiBacktest(rules: Rule[], onProgress?: (pct: number) => void): Promise<BacktestResult | null> {
+  const res = await fetch('/backtest', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ rules }),
+  });
+  if (!res.ok || !res.body) throw new Error('backtest failed: ' + res.status);
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  let result: BacktestResult | null = null;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line) continue;
+      const msg = JSON.parse(line) as { type: string; pct?: number; error?: string } & Record<string, unknown>;
+      if (msg.type === 'progress') onProgress?.(msg.pct ?? 0);
+      else if (msg.type === 'result') result = msg as unknown as BacktestResult;
+      else if (msg.type === 'error') throw new Error(String(msg.error));
+    }
+  }
+  return result;
+}
 
 // ----------------------------------------------------------------------------
 // This store is a faithful port of the POC's single `class Component extends
@@ -157,7 +245,17 @@ function replaceIndInRule(rule: Rule, id: string, newInd: IndicatorDef): Rule {
 export interface ScreenerState {
   // ---- core state (mirrors POC `state`) ----
   ready: boolean;
-  universe: Stock[];
+  // ---- service-backed data (SAD#4.2 / SAD#5.9) ----
+  screen: { total: number; tickers: string[]; rows: Row[] } | null; // last /screen result for the active rule set
+  screenLoading: boolean;
+  screenError: string | null;
+  universeSize: number;     // full-universe count (for the "of N" total)
+  sectorList: string[];     // every sector in the universe (sector facets)
+  displayed: Record<string, Stock>; // built Stocks for displayed names (detail/compare), fetched on demand
+  sampleStock: Stock | null;        // a single name for the indicator-builder live preview
+  presetCounts: Record<string, number>;  // preset id -> full-universe match count
+  screenCounts: Record<string, number>;  // saved-screen id -> full-universe match count
+  rankTickers: Record<string, string[]>; // JSON(rankRule) -> passing tickers (detail _pass)
   activePreset: string;
   customRules: Rule[];
   search: string;
@@ -185,16 +283,16 @@ export interface ScreenerState {
   ruleOpen: boolean;
   patternOpen: boolean;
   pinned: string[];
-  seed: number;
   compareSel: string[];
   compareOpen: boolean;
   backtestOpen: boolean;
-  backtestResult: M.BacktestResult | null;
+  backtestResult: BacktestResult | null;
+  backtestRunning: boolean;
+  backtestProgress: number;
   rankOpen: boolean;
   rankDraft: RankDraft;
   heatmapOpen: boolean;
   alertScreens: Record<string, boolean>;
-  diff: Diff | null;
   presetStore: PresetStore;
   editingPreset: string | null;
   presetName: string;
@@ -203,6 +301,7 @@ export interface ScreenerState {
 
   // ---- lifecycle ----
   init: () => void;
+  bootstrap: () => Promise<void>;
 
   // ---- derived (read current state via get()) ----
   presets: () => Preset[];
@@ -210,13 +309,24 @@ export interface ScreenerState {
   effectiveRules: () => Rule[];
   /** rules passed to the detail panel — rank rules annotated with `_pass` for the selected stock */
   detailRules: () => Rule[];
-  /** universe filtered by the active screen (preset + grouped custom + rank), pre sector/search */
-  screenList: () => Stock[];
+  /** the active screen's matched rows (from the service), pre sector/search */
+  screenList: () => Row[];
   /** screenList then sector + search filter + sort + pin-to-top */
-  filteredStocks: () => Stock[];
+  filteredStocks: () => Row[];
   ruleLabel: (r: Rule) => string;
   specOf: (ind: IndicatorDef) => string;
-  trendOf: (s: Stock) => [string, string, string];
+  trendOf: (s: Pick<Row, 'ema20' | 'ema50' | 'ema200'>) => [string, string, string];
+
+  // ---- service data flow (SAD#4.2 / SAD#5.9) ----
+  /** run the active rule set against the service and store the matched rows */
+  runScreen: () => Promise<void>;
+  /** fetch one name's bars and build its Stock locally (detail/compare) */
+  ensureDisplayed: (ticker: string) => Promise<void>;
+  /** full-universe match count for an ad-hoc rule set (builder previews) */
+  previewCount: (rules: Rule[]) => Promise<number>;
+  refreshPresetCounts: () => Promise<void>;
+  refreshScreenCounts: () => Promise<void>;
+  refreshRankPass: () => Promise<void>;
 
   // ---- indicator builder ----
   openBuilder: () => void;
@@ -318,13 +428,11 @@ export interface ScreenerState {
   closeCompare: () => void;
   clearCompare: () => void;
 
-  // ---- backtest / heatmap / alerts / refresh ----
+  // ---- backtest / heatmap / alerts ----
   openBacktest: () => void;
   closeBacktest: () => void;
   toggleHeatmap: () => void;
   toggleAlert: (id: string) => void;
-  refreshData: () => void;
-  dismissDiff: () => void;
 }
 
 export const useScreener = create<ScreenerState>((set, get) => {
@@ -344,7 +452,16 @@ export const useScreener = create<ScreenerState>((set, get) => {
   return {
     // ---- initial state ----
     ready: false,
-    universe: [],
+    screen: null,
+    screenLoading: false,
+    screenError: null,
+    universeSize: 0,
+    sectorList: [],
+    displayed: {},
+    sampleStock: null,
+    presetCounts: {},
+    screenCounts: {},
+    rankTickers: {},
     activePreset: 'macdmomo',
     customRules: [],
     search: '',
@@ -372,16 +489,16 @@ export const useScreener = create<ScreenerState>((set, get) => {
     ruleOpen: false,
     patternOpen: false,
     pinned: [],
-    seed: 7,
     compareSel: [],
     compareOpen: false,
     backtestOpen: false,
     backtestResult: null,
+    backtestRunning: false,
+    backtestProgress: 0,
     rankOpen: false,
     rankDraft: { field: 'relVol', scope: 'all', dir: 'top', pct: 10 },
     heatmapOpen: false,
     alertScreens: {},
-    diff: null,
     presetStore: { custom: [], overrides: {}, hidden: [] },
     editingPreset: null,
     presetName: '',
@@ -399,7 +516,6 @@ export const useScreener = create<ScreenerState>((set, get) => {
       (['activePreset', 'sortKey', 'sortDir', 'density', 'layout', 'sectorFilter'] as const).forEach((k) => { if (view[k] != null) viewOk[k] = view[k]; });
       set({
         ready: true,
-        universe: M.buildUniverse(syntheticProvider(7).getUniverse()),
         savedIndicators: saved,
         savedScreens: load<Screen[]>(SCREENS, []),
         builder: freshBuilder('ema'),
@@ -409,6 +525,26 @@ export const useScreener = create<ScreenerState>((set, get) => {
         presetStore,
         ...viewOk,
       });
+      // The active screen + match counts are driven reactively from the
+      // service by the subscription below (it fires on this `set`). Here we only
+      // fetch the universe-wide facts the UI shows (total, sector list) and one
+      // sample name for the indicator-builder preview (SAD#2.5: displayed-name
+      // compute only).
+      void get().bootstrap();
+    },
+
+    // Fetch the universe-wide facts (size, sectors) and a single sample name.
+    bootstrap: async () => {
+      try {
+        const all = await apiScreen([], ALL_ROWS);
+        const sectorList = [...new Set(all.results.map((r) => r.sector))].sort();
+        set({ universeSize: all.total, sectorList });
+        const t = all.tickers[0];
+        if (t) {
+          const bars = await apiInstrument(t);
+          if (bars) set({ sampleStock: M.buildStock(bars) });
+        }
+      } catch { /* service unavailable — leave defaults; runScreen surfaces the error */ }
     },
 
     // ---- derived ----
@@ -428,32 +564,26 @@ export const useScreener = create<ScreenerState>((set, get) => {
     detailRules: () => {
       const st = get();
       const preset = st.presetById(st.activePreset);
-      const selectedStock = st.universe.find((s) => s.ticker === st.selected) || null;
+      // Rank pass for the selected name comes from the service (the rank rule's
+      // pass-set is a full-universe computation); read it from the cache the
+      // subscription keeps warm. Falls back to false until it lands.
       return [...preset.rules, ...st.customRules.map((rr) => {
         if ((rr as { kind: string }).kind !== 'rank') return rr;
-        const pass = M.rankPassSet(st.universe, rr as RankRule);
-        return { ...rr, _pass: selectedStock ? pass.has(selectedStock.ticker) : false } as unknown as Rule;
+        const passers = st.rankTickers[JSON.stringify(rr)];
+        const _pass = !!st.selected && !!passers && passers.includes(st.selected);
+        return { ...rr, _pass } as unknown as Rule;
       })];
     },
-    screenList: () => {
-      const st = get();
-      const preset = st.presetById(st.activePreset);
-      const rankRules = st.customRules.filter((rr) => (rr as { kind: string }).kind === 'rank') as RankRule[];
-      const others = st.customRules.filter((rr) => (rr as { kind: string }).kind !== 'rank');
-      const grouped = [...preset.rules, ...others];
-      let listed = st.universe.filter((s) => M.evalGroupedRules(s, grouped));
-      for (const rr of rankRules) { const pass = M.rankPassSet(st.universe, rr); listed = listed.filter((s) => pass.has(s.ticker)); }
-      return listed;
-    },
+    screenList: () => get().screen?.rows ?? [],
     filteredStocks: () => {
       const st = get();
       const q = st.search.trim().toLowerCase();
-      let list = st.screenList();
+      let list: Row[] = st.screen?.rows ?? [];
       if (st.sectorFilter !== 'all') list = list.filter((s) => s.sector === st.sectorFilter);
       if (q) list = list.filter((s) => s.ticker.toLowerCase().includes(q) || s.name.toLowerCase().includes(q));
       list = list.slice().sort((a, b) => {
-        const va = (a as Record<string, unknown>)[st.sortKey];
-        const vb = (b as Record<string, unknown>)[st.sortKey];
+        const va = (a as unknown as Record<string, unknown>)[st.sortKey];
+        const vb = (b as unknown as Record<string, unknown>)[st.sortKey];
         const cmp = typeof va === 'string' ? va.localeCompare(vb as string) : (va as number) - (vb as number);
         return st.sortDir === 'asc' ? cmp : -cmp;
       });
@@ -866,7 +996,7 @@ export const useScreener = create<ScreenerState>((set, get) => {
     onSearch: (v) => set({ search: v }),
     onSector: (v) => { set({ sectorFilter: v }); saveView(); },
     setSort: (k) => { set((st) => ({ sortKey: k, sortDir: st.sortKey === k && st.sortDir === 'desc' ? 'asc' : 'desc' })); saveView(); },
-    selectStock: (t) => set({ selected: t }),
+    selectStock: (t) => { set({ selected: t }); void get().ensureDisplayed(t); },
     closeDetail: () => set({ selected: null }),
     setLayout: (l) => { set({ layout: l }); saveView(); },
     togglePanel: (k) => set((st) => ({ panels: { ...st.panels, [k]: !st.panels[k] } })),
@@ -894,22 +1024,28 @@ export const useScreener = create<ScreenerState>((set, get) => {
     },
 
     // ---- compare ----
-    toggleCompare: (t) => set((st) => {
-      if (st.compareSel.includes(t)) return { compareSel: st.compareSel.filter((x) => x !== t) };
-      if (st.compareSel.length >= 4) return {};
-      return { compareSel: [...st.compareSel, t] };
-    }),
+    toggleCompare: (t) => {
+      const st = get();
+      if (st.compareSel.includes(t)) { set({ compareSel: st.compareSel.filter((x) => x !== t) }); return; }
+      if (st.compareSel.length >= 4) return;
+      set({ compareSel: [...st.compareSel, t] });
+      void get().ensureDisplayed(t);
+    },
     openCompare: () => set({ compareOpen: true }),
     closeCompare: () => set({ compareOpen: false }),
     clearCompare: () => set({ compareSel: [], compareOpen: false }),
 
-    // ---- backtest / heatmap / alerts / refresh ----
+    // ---- backtest / heatmap / alerts ----
     openBacktest: () => {
       const st = get();
       const preset = st.presetById(st.activePreset);
       const eff = [...preset.rules, ...st.customRules.filter((r) => (r as { kind: string }).kind !== 'rank')];
-      const res = M.backtestRules(st.universe, eff);
-      set({ backtestOpen: true, backtestResult: res });
+      // Full-universe backtest runs server-side over the shared engine (SAD#2.5
+      // / SAD#2.4); stream progress so the UI thread is never blocked.
+      set({ backtestOpen: true, backtestResult: null, backtestRunning: true, backtestProgress: 0 });
+      apiBacktest(eff, (pct) => set({ backtestProgress: pct }))
+        .then((res) => set({ backtestResult: res, backtestRunning: false }))
+        .catch(() => set({ backtestRunning: false }));
     },
     closeBacktest: () => set({ backtestOpen: false }),
     toggleHeatmap: () => set((st) => ({ heatmapOpen: !st.heatmapOpen })),
@@ -918,32 +1054,67 @@ export const useScreener = create<ScreenerState>((set, get) => {
       save(ALERTS, alertScreens);
       return { alertScreens };
     }),
-    refreshData: () => {
-      const st = get();
-      const screenTickers = (universe: Stock[]) => {
-        const preset = st.presetById(st.activePreset);
-        const rankRules = st.customRules.filter((r) => (r as { kind: string }).kind === 'rank') as RankRule[];
-        const others = st.customRules.filter((r) => (r as { kind: string }).kind !== 'rank');
-        const evalList = [...preset.rules, ...others];
-        let list = universe.filter((s) => M.evalGroupedRules(s, evalList));
-        for (const rr of rankRules) { const pass = M.rankPassSet(universe, rr); list = list.filter((s) => pass.has(s.ticker)); }
-        return list.map((s) => s.ticker);
-      };
-      const prev = new Set(screenTickers(st.universe));
-      const seed = st.seed + 1;
-      const universe = M.buildUniverse(syntheticProvider(seed).getUniverse());
-      set({ universe, seed, selected: null, compareSel: [], compareOpen: false });
-      const now = new Set(screenTickers(universe));
-      const entered = [...now].filter((t) => !prev.has(t));
-      const exited = [...prev].filter((t) => !now.has(t));
-      const alerts: { name: string; count: number }[] = [];
-      for (const scr of get().savedScreens) {
-        if (!get().alertScreens[scr.id]) continue;
-        const cnt = universe.filter((s) => M.evalRuleAt(s, scr.rule, s.nLast)).length;
-        if (cnt > 0) alerts.push({ name: scr.name, count: cnt });
+
+    // ---- service data flow (SAD#4.2 / SAD#5.9) ----
+    runScreen: async () => {
+      set({ screenLoading: true, screenError: null });
+      try {
+        const r = await apiScreen(get().effectiveRules(), ALL_ROWS);
+        set({ screen: { total: r.total, tickers: r.tickers, rows: r.results }, screenLoading: false });
+      } catch {
+        set({ screenLoading: false, screenError: 'Screening service unavailable — start it with `node server/index.ts`.' });
       }
-      set({ diff: { entered, exited, alerts } });
     },
-    dismissDiff: () => set({ diff: null }),
+    ensureDisplayed: async (ticker) => {
+      if (!ticker || get().displayed[ticker]) return;
+      try {
+        const bars = await apiInstrument(ticker);
+        if (!bars) return;
+        const stock = M.buildStock(bars);
+        set((s) => ({ displayed: { ...s.displayed, [ticker]: stock } }));
+      } catch { /* ignore — detail panel shows its empty state */ }
+    },
+    previewCount: async (rules) => {
+      try { return (await apiScreen(rules, 0)).total; } catch { return 0; }
+    },
+    refreshPresetCounts: async () => {
+      const presets = get().presets();
+      await Promise.all(presets.map(async (p) => {
+        try { const r = await apiScreen(p.rules, 0); set((s) => ({ presetCounts: { ...s.presetCounts, [p.id]: r.total } })); } catch { /* ignore */ }
+      }));
+    },
+    refreshScreenCounts: async () => {
+      await Promise.all(get().savedScreens.map(async (scr) => {
+        try { const r = await apiScreen([scr.rule], 0); set((s) => ({ screenCounts: { ...s.screenCounts, [scr.id]: r.total } })); } catch { /* ignore */ }
+      }));
+    },
+    refreshRankPass: async () => {
+      const rankRules = get().customRules.filter((r) => (r as { kind: string }).kind === 'rank');
+      await Promise.all(rankRules.map(async (rr) => {
+        const sig = JSON.stringify(rr);
+        try { const r = await apiScreen([rr], 0); set((s) => ({ rankTickers: { ...s.rankTickers, [sig]: r.tickers } })); } catch { /* ignore */ }
+      }));
+    },
   };
+});
+
+// ----------------------------------------------------------------------------
+// Reactive service sync (SAD#5.9). The store is the single client-side source of
+// truth; whenever the active rule set, the preset library, or saved screens
+// change we re-fetch the derived data from the service rather than recomputing
+// the universe in the browser (SAD#2.5). Signature guards make each re-fetch
+// fire only when its inputs actually change (and ignore the store's own writes).
+// ----------------------------------------------------------------------------
+let rulesSig = '';
+let presetsSig = '';
+let screensSig = '';
+useScreener.subscribe(() => {
+  const st = useScreener.getState();
+  if (!st.ready) return;
+  const rs = JSON.stringify(st.effectiveRules());
+  if (rs !== rulesSig) { rulesSig = rs; void st.runScreen(); void st.refreshRankPass(); }
+  const ps = JSON.stringify(st.presets().map((p) => [p.id, p.rules]));
+  if (ps !== presetsSig) { presetsSig = ps; void st.refreshPresetCounts(); }
+  const ss = JSON.stringify(st.savedScreens.map((s) => [s.id, s.rule]));
+  if (ss !== screensSig) { screensSig = ss; void st.refreshScreenCounts(); }
 });
