@@ -129,10 +129,14 @@ Resolved on this branch; regression tests added in `tests/store.client.test.ts`
     `sampleStock` fetched once in `bootstrap()` with no retry; preview shows "—"
     for the whole session even after the service recovers. Add retry/lazy fetch.
 
-### Cleanup (CONFIRMED, lower priority — fold in if cheap)
+### Cleanup (CONFIRMED, lower priority) — extracted to STORY-028
 - `bootstrap()` fetches the full universe with 40-element sparklines per row
   just to derive the sector list + count — `src/store.ts:539`. Request a
   count/sector-only projection instead of `ALL_ROWS` full payload.
+
+### Follow-up — server-side reseed / new-session → STORY-029
+- The removed Top-bar Refresh (client-side `seed+1` reseed) → product-gated
+  follow-up for a server-side reseed/new-session affordance.
 
 ### Refuted (no action — pure style / no observable effect)
 `Row` duplicates server `ScreenRow`; debounce effect duplicated across
