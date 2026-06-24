@@ -680,10 +680,14 @@ def cmd_review_check(args):
 
         def ignorable(f):
             f = normalize_path(f)
-            # backlog data, docs, and the board tool's own audit log are
-            # tooling-managed — not part of any story's code change.
+            # Workflow-system paths are tooling-managed and change continually,
+            # independent of any single story's code change: backlog data, the
+            # board/hook tooling, Claude Code config, the board's audit log, and
+            # docs. None of these count against a story's Touch scope.
             return (
                 f.startswith("backlog/")
+                or f.startswith("tools/")
+                or f.startswith(".claude/")
                 or f.startswith(".workflow/")
                 or f.endswith(".md")
             )

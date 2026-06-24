@@ -18,6 +18,25 @@
             "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/hooks/allow_localhost_curl.py\""
           }
         ]
+      },
+      {
+        "matcher": "Skill|Task|Agent|Read|Write|Edit|MultiEdit|NotebookEdit|Glob|Grep|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/hooks/log_backlog_interaction.py\""
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/hooks/log_backlog_interaction.py\""
+          }
+        ]
       }
     ]
   },
