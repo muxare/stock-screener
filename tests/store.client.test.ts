@@ -104,3 +104,36 @@ describe('client sources full-universe data from the service (SAD#2.5)', () => {
     expect(useScreener.getState().backtestRunning).toBe(false);
   });
 });
+
+// Service failures must surface as an explicit error/unknown state, never as a
+// confident zero result — these lock the three review blockers fixed on this
+// branch (the client must not coerce a failed call to "0 matches" / "never
+// fired"). Each test swaps in a rejecting fetch for the duration of one action.
+describe('service failures are not misreported as zero results', () => {
+  async function withBrokenFetch<T>(match: string, fn: () => Promise<T>): Promise<T> {
+    const saved = globalThis.fetch;
+    globalThis.fetch = ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const url = typeof input === 'string' ? input : String((input as Request).url ?? input);
+      if (url.includes(match)) return Promise.reject(new Error('simulated outage'));
+      return saved(input, init);
+    }) as typeof fetch;
+    try { return await fn(); } finally { globalThis.fetch = saved; }
+  }
+
+  it('previewCount returns null (unknown), not 0, when the service is unreachable (finding 2)', async () => {
+    const { useScreener } = await import('../src/store.ts');
+    const n = await withBrokenFetch('/screen', () => useScreener.getState().previewCount([]));
+    expect(n).toBeNull(); // a builder rendering this as "0 matches" would mislead the user
+  });
+
+  it('a failed backtest sets backtestError and leaves no zero-signal result (finding 1)', async () => {
+    const { useScreener } = await import('../src/store.ts');
+    await withBrokenFetch('/backtest', async () => {
+      useScreener.getState().openBacktest();
+      expect(await waitFor(() => !useScreener.getState().backtestRunning, 15000)).toBe(true);
+    });
+    const st = useScreener.getState();
+    expect(st.backtestError).toBeTruthy();   // distinct error state, not "never fired"
+    expect(st.backtestResult).toBeNull();    // no phantom zero-signal result
+  });
+});

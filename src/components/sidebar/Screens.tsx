@@ -25,8 +25,10 @@ export function Screens() {
     return savedScreens.map((scr) => {
       const on = appliedScreenIds.has(scr.id);
       const alertOn = !!alertScreens[scr.id];
-      // Full-universe match count from the service (SAD#2.5), kept warm in store.
-      const cnt = screenCounts[scr.id] ?? 0;
+      // Full-universe match count from the service (SAD#2.5), kept warm in store;
+      // undefined until it lands (or if the call failed). The live badge shows
+      // only a known positive count — an unknown count is not a "0" (finding 3).
+      const cnt = screenCounts[scr.id];
       const spec = (scr.rule as { kind: string }).kind === 'group'
         ? M.groupLabel(scr.rule as never)
         : M.chainLabel(scr.rule as never);
@@ -34,7 +36,7 @@ export function Screens() {
         id: scr.id, name: scr.name, spec, active: on,
         bg: on ? '#eafaf3' : '#fff', border: on ? '#bfe8d6' : '#ececef', titleColor: on ? '#06865a' : '#15171a',
         alertOn, alertBg: alertOn ? '#fff4e6' : '#f4f5f6', alertFg: alertOn ? '#b3641a' : '#9aa1a8',
-        liveCount: cnt, showLive: alertOn && cnt > 0,
+        liveCount: cnt, showLive: alertOn && cnt != null && cnt > 0,
       };
     });
   }, [savedScreens, customRules, alertScreens, screenCounts]);

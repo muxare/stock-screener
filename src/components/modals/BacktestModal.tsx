@@ -12,6 +12,7 @@ import { HButton } from '../ui/Hoverable';
 export function BacktestModal() {
   const backtestOpen = useScreener((s) => s.backtestOpen);
   const backtestResult = useScreener((s) => s.backtestResult);
+  const backtestError = useScreener((s) => s.backtestError);
   const backtestRunning = useScreener((s) => s.backtestRunning);
   const backtestProgress = useScreener((s) => s.backtestProgress);
   const universeSize = useScreener((s) => s.universeSize);
@@ -34,7 +35,9 @@ export function BacktestModal() {
   const R = backtestResult;
   const btSignals = R ? R.signals : 0;
   const btFire = R ? R.fireRate.toFixed(1) + '%' : '';
-  const btEmpty = R ? R.signals === 0 : true;
+  // "Empty" is a genuine zero-signal RESULT — never the absence of one. A failed
+  // run (R null, backtestError set) must not read as "never fired".
+  const btEmpty = R ? R.signals === 0 : false;
   const btNoRules = btRuleLabels.length === 0;
   const btCards = R
     ? R.horizons.map((hh) => ({
@@ -81,7 +84,10 @@ export function BacktestModal() {
               <div style={{ fontSize: 22, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{btFire}</div>
             </div>
           </div>
-          {btEmpty && !backtestRunning && (
+          {backtestError && !backtestRunning && (
+            <div style={{ fontSize: 13, color: '#b3261a', lineHeight: 1.5, padding: '11px 13px', background: '#fdeceb', border: '1px solid #f5c6c0', borderRadius: 9 }}>{backtestError} The backtest could not run — this is a service error, not a zero-match result.</div>
+          )}
+          {btEmpty && !backtestRunning && !backtestError && (
             <div style={{ fontSize: 13, color: '#8b9298', lineHeight: 1.5 }}>This screen never fired across the sample. Loosen a rule and try again.</div>
           )}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12 }}>

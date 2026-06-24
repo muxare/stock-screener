@@ -31,7 +31,8 @@ export function PresetBuilderModal() {
 
   // Full-universe match count for the draft comes from the service (SAD#2.5),
   // debounced so a chip edit doesn't fire a request per keystroke.
-  const [presetDraftCount, setPresetDraftCount] = useState(0);
+  // null = count unknown (service unreachable); rendered as "—", never "0".
+  const [presetDraftCount, setPresetDraftCount] = useState<number | null>(0);
   useEffect(() => {
     let live = true;
     const id = setTimeout(() => {
@@ -71,7 +72,7 @@ export function PresetBuilderModal() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 9 }}>
               <span style={{ fontSize: 11, color: '#98a0a8', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600 }}>Filters in this preset</span>
               <span style={{ fontSize: 12, color: '#8b9298' }}>
-                <b style={{ color: '#15171a', fontVariantNumeric: 'tabular-nums' }}>{presetDraftCount}</b> / {universeSize} match
+                <b style={{ color: '#15171a', fontVariantNumeric: 'tabular-nums' }}>{presetDraftCount == null ? '—' : presetDraftCount}</b> / {universeSize} match
               </span>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>

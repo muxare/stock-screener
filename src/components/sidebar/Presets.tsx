@@ -22,8 +22,10 @@ export function Presets() {
     () =>
       presetList.map((p) => {
         // Full-universe match count comes from the service (SAD#2.5), kept warm
-        // in the store; undefined until the first /screen for this preset lands.
-        const count = presetCounts[p.id] ?? 0;
+        // in the store; undefined until the first /screen for this preset lands
+        // (or if that call failed). Render unknown as "—", never a phantom "0"
+        // (review finding 3).
+        const count = presetCounts[p.id];
         const active = p.id === activePreset;
         return {
           id: p.id,
@@ -75,7 +77,7 @@ export function Presets() {
                     ✎
                   </HButton>
                 )}
-                <span style={{ fontSize: 11, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: p.countColor, background: p.countBg, padding: '2px 7px', borderRadius: 20 }}>{p.count}</span>
+                <span style={{ fontSize: 11, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: p.countColor, background: p.countBg, padding: '2px 7px', borderRadius: 20 }}>{p.count == null ? '—' : p.count}</span>
               </div>
             </div>
             <span style={{ fontSize: 11.5, color: '#8b9298', lineHeight: 1.45 }}>{p.desc}</span>

@@ -287,6 +287,7 @@ export interface ScreenerState {
   compareOpen: boolean;
   backtestOpen: boolean;
   backtestResult: BacktestResult | null;
+  backtestError: string | null;
   backtestRunning: boolean;
   backtestProgress: number;
   rankOpen: boolean;
@@ -322,8 +323,8 @@ export interface ScreenerState {
   runScreen: () => Promise<void>;
   /** fetch one name's bars and build its Stock locally (detail/compare) */
   ensureDisplayed: (ticker: string) => Promise<void>;
-  /** full-universe match count for an ad-hoc rule set (builder previews) */
-  previewCount: (rules: Rule[]) => Promise<number>;
+  /** full-universe match count for an ad-hoc rule set (builder previews); null when the service is unreachable */
+  previewCount: (rules: Rule[]) => Promise<number | null>;
   refreshPresetCounts: () => Promise<void>;
   refreshScreenCounts: () => Promise<void>;
   refreshRankPass: () => Promise<void>;
@@ -493,6 +494,7 @@ export const useScreener = create<ScreenerState>((set, get) => {
     compareOpen: false,
     backtestOpen: false,
     backtestResult: null,
+    backtestError: null,
     backtestRunning: false,
     backtestProgress: 0,
     rankOpen: false,
@@ -570,7 +572,11 @@ export const useScreener = create<ScreenerState>((set, get) => {
       return [...preset.rules, ...st.customRules.map((rr) => {
         if ((rr as { kind: string }).kind !== 'rank') return rr;
         const passers = st.rankTickers[JSON.stringify(rr)];
-        const _pass = !!st.selected && !!passers && passers.includes(st.selected);
+        // `_pass` is tri-state: true/false when the pass-set has loaded,
+        // undefined while it is still unknown (not yet fetched, or the service
+        // call failed). The detail panel must not render unknown as a failing
+        // criterion (review finding 3).
+        const _pass = passers ? (!!st.selected && passers.includes(st.selected)) : undefined;
         return { ...rr, _pass } as unknown as Rule;
       })];
     },
@@ -1042,10 +1048,14 @@ export const useScreener = create<ScreenerState>((set, get) => {
       const eff = [...preset.rules, ...st.customRules.filter((r) => (r as { kind: string }).kind !== 'rank')];
       // Full-universe backtest runs server-side over the shared engine (SAD#2.5
       // / SAD#2.4); stream progress so the UI thread is never blocked.
-      set({ backtestOpen: true, backtestResult: null, backtestRunning: true, backtestProgress: 0 });
+      set({ backtestOpen: true, backtestResult: null, backtestError: null, backtestRunning: true, backtestProgress: 0 });
+      const failed = () => set({ backtestRunning: false, backtestError: 'Backtest service unavailable — start it with `node server/index.ts`.' });
       apiBacktest(eff, (pct) => set({ backtestProgress: pct }))
-        .then((res) => set({ backtestResult: res, backtestRunning: false }))
-        .catch(() => set({ backtestRunning: false }));
+        // A stream that ends without a `result` line yields null — that is a
+        // service failure, not a zero-signal result; surface it as an error so
+        // the modal never reports a real run as "never fired" (review finding 1).
+        .then((res) => (res ? set({ backtestResult: res, backtestRunning: false }) : failed()))
+        .catch(failed);
     },
     closeBacktest: () => set({ backtestOpen: false }),
     toggleHeatmap: () => set((st) => ({ heatmapOpen: !st.heatmapOpen })),
@@ -1075,7 +1085,10 @@ export const useScreener = create<ScreenerState>((set, get) => {
       } catch { /* ignore — detail panel shows its empty state */ }
     },
     previewCount: async (rules) => {
-      try { return (await apiScreen(rules, 0)).total; } catch { return 0; }
+      // null = count unknown (service unreachable). The builders must not render
+      // this as "0 matches", which would push the user to broaden a good screen
+      // (review finding 2).
+      try { return (await apiScreen(rules, 0)).total; } catch { return null; }
     },
     refreshPresetCounts: async () => {
       const presets = get().presets();

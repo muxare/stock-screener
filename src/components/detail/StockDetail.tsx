@@ -485,12 +485,20 @@ export function StockDetail({ stock, panels, rules, onClose, onTogglePanel, rule
           {rules.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
               {rules.map((r, i) => {
-                const pass = r.kind === 'rank' ? !!r._pass : M.evalRuleAt(s, r, s.nLast);
+                // Rank pass comes from the service and is tri-state: a rank rule
+                // whose pass-set has not loaded (or whose call failed) is unknown
+                // (`_pass === undefined`), not failing — show a neutral pending
+                // marker rather than a ✕ (review finding 3).
+                const rankPass = r.kind === 'rank' ? (r as { _pass?: boolean })._pass : undefined;
+                const unknown = r.kind === 'rank' && rankPass === undefined;
+                const pass = r.kind === 'rank' ? rankPass === true : M.evalRuleAt(s, r, s.nLast);
+                const badgeBg = unknown ? '#e2e4e6' : pass ? '#06a96b' : '#cfd4d8';
+                const badgeMark = unknown ? '·' : pass ? '✓' : '✕';
                 return (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
-                    <span style={{ width: 18, height: 18, borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: '#fff', background: pass ? '#06a96b' : '#cfd4d8', flex: 'none' }}>{pass ? '✓' : '✕'}</span>
+                    <span title={unknown ? 'Pending — fetching the full-universe rank' : undefined} style={{ width: 18, height: 18, borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: '#fff', background: badgeBg, flex: 'none' }}>{badgeMark}</span>
                     <span style={{ color: pass ? '#15171a' : '#9aa1a8', flex: 1, minWidth: 0 }}>{ruleLabel(r)}</span>
-                    <span style={{ flex: 'none', opacity: 0.92 }}>{whySpark(s, r, pass)}</span>
+                    <span style={{ flex: 'none', opacity: 0.92 }}>{unknown ? null : whySpark(s, r, pass)}</span>
                   </div>
                 );
               })}

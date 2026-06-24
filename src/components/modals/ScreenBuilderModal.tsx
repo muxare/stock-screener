@@ -79,7 +79,8 @@ export function ScreenBuilderModal() {
 
   // Full-universe preview count comes from the service (SAD#2.5), debounced so a
   // keystroke doesn't fire a request per character.
-  const [screenMatchN, setScreenMatchN] = useState(0);
+  // null = count unknown (service unreachable); rendered as "—", never "0".
+  const [screenMatchN, setScreenMatchN] = useState<number | null>(0);
   useEffect(() => {
     if (!screenDraft) return;
     let live = true;
@@ -197,7 +198,7 @@ export function ScreenBuilderModal() {
             {view.setupPreview && <div style={{ fontSize: 11.5, color: '#6b7280', lineHeight: 1.55, wordBreak: 'break-word' }}>{view.setupPreview}</div>}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
               <span style={{ fontSize: 12, color: '#8b9298' }}>Matches right now</span>
-              <span style={{ fontSize: 16, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{screenMatchN}<span style={{ fontSize: 11, color: '#9aa1a8', fontWeight: 500 }}> / {universeSize}</span></span>
+              <span style={{ fontSize: 16, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{screenMatchN == null ? '—' : screenMatchN}<span style={{ fontSize: 11, color: '#9aa1a8', fontWeight: 500 }}> / {universeSize}</span></span>
             </div>
           </div>
 
