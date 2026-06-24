@@ -5,9 +5,10 @@
 // per SAD#5.7 — it resolves a rule set and delegates evaluation to the engine.
 
 import { PRESETS } from '../src/lib/market.ts';
-import type { Rule, Stock } from '../src/lib/market.ts';
+import type { BacktestProgress, BacktestResult, Rule, Stock } from '../src/lib/market.ts';
 import { runScreen, toRow } from './screen.ts';
 import type { ScreenRow } from './screen.ts';
+import { runBacktest, NAIVE_LABEL } from './backtest.ts';
 
 export interface ScreenRequest {
   // Built-in preset id (resolved from the shared engine's PRESETS) whose rules
@@ -32,7 +33,14 @@ export interface ScreenResponse {
 
 const DEFAULT_LIMIT = 500;
 
-function resolveRules(req: ScreenRequest): Rule[] {
+// Shared shape of a rule-bearing request: a built-in preset, custom rules, or
+// both. Screen and backtest resolve their rule set the same way.
+interface RuleRequest {
+  preset?: string;
+  rules?: Rule[];
+}
+
+function resolveRules(req: RuleRequest): Rule[] {
   const rules: Rule[] = [];
   if (req.preset) {
     const preset = PRESETS.find((p) => p.id === req.preset);
@@ -69,4 +77,33 @@ export function handleScreen(universe: Stock[], req: ScreenRequest): ScreenRespo
     tickers: matched.map((s) => s.ticker),
     results: page.map(toRow),
   };
+}
+
+export interface BacktestRequest {
+  // Built-in preset id whose rules seed the backtest; optional.
+  preset?: string;
+  // Additional rules ANDed onto the preset (the client's "custom rules"). Rank
+  // rules are accepted but excluded from history (SAD#3.8), as on the client.
+  rules?: Rule[];
+}
+
+// Single summary payload (SAD#6.5): the engine's BacktestResult plus the
+// server-side elapsed time and the SAD#2.7 naive-fidelity label.
+export interface BacktestResponse extends BacktestResult {
+  elapsedMs: number;
+  label: string;
+}
+
+export function handleBacktest(
+  universe: Stock[],
+  req: BacktestRequest,
+  onProgress?: (p: BacktestProgress) => void,
+): BacktestResponse {
+  const rules = resolveRules(req);
+
+  const start = performance.now();
+  const result = runBacktest(universe, rules, onProgress);
+  const elapsedMs = performance.now() - start;
+
+  return { ...result, elapsedMs, label: NAIVE_LABEL };
 }

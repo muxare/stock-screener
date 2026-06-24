@@ -5,15 +5,18 @@
 // Stateless w.r.t. user identity. Run with:  node server/index.ts
 //
 // Endpoints:
-//   GET  /health  -> { ok, universe }   liveness + warm-universe size
-//   POST /screen  -> ScreenResponse      body: ScreenRequest (see handlers.ts)
+//   GET  /health   -> { ok, universe }   liveness + warm-universe size
+//   POST /screen   -> ScreenResponse     body: ScreenRequest (see handlers.ts)
+//   POST /backtest -> NDJSON stream      body: BacktestRequest; progress lines
+//                                        followed by one result line (SAD#2.4)
 
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { productionUniverse } from './universe.ts';
 import type { UniverseStore } from './universe.ts';
-import { handleScreen, RequestError } from './handlers.ts';
-import type { ScreenRequest } from './handlers.ts';
+import { handleScreen, handleBacktest, RequestError } from './handlers.ts';
+import type { ScreenRequest, BacktestRequest } from './handlers.ts';
+import type { Stock } from '../src/lib/market.ts';
 
 const MAX_BODY_BYTES = 1 << 20; // 1 MiB — rule sets are small
 
@@ -46,6 +49,42 @@ function readJsonBody(req: IncomingMessage): Promise<unknown> {
   });
 }
 
+// Stream a full-universe backtest as NDJSON (SAD#2.4): one `progress` line per
+// throttled step while the engine runs, then exactly one `result` line carrying
+// the single summary payload (SAD#6.5). Progress is reported so a long backtest
+// is observable; the heavy compute runs server-side, off the browser UI thread
+// (SAD#2.5). A bad request before any line is written still yields a 400.
+function runBacktestStream(res: ServerResponse, universe: Stock[], req: BacktestRequest): void {
+  // Emit at most ~20 progress lines regardless of universe size.
+  const step = Math.max(1, Math.floor(universe.length / 20));
+  let headersSent = false;
+  const ensureHeaders = () => {
+    if (headersSent) return;
+    res.writeHead(200, { 'content-type': 'application/x-ndjson; charset=utf-8' });
+    headersSent = true;
+  };
+  const writeLine = (obj: unknown) => { ensureHeaders(); res.write(JSON.stringify(obj) + '\n'); };
+
+  try {
+    const summary = handleBacktest(universe, req, ({ name, total }) => {
+      if (name === total || name % step === 0) {
+        writeLine({ type: 'progress', name, total, pct: Math.round((name / total) * 100) });
+      }
+    });
+    writeLine({ type: 'result', ...summary });
+    res.end();
+  } catch (err) {
+    // If compute hasn't written anything yet we can still send a clean status.
+    if (!headersSent) {
+      if (err instanceof RequestError) sendJson(res, 400, { error: err.message });
+      else sendJson(res, 500, { error: 'internal error' });
+    } else {
+      writeLine({ type: 'error', error: err instanceof RequestError ? err.message : 'internal error' });
+      res.end();
+    }
+  }
+}
+
 export function createScreenServer(store: UniverseStore = productionUniverse) {
   return createServer((req: IncomingMessage, res: ServerResponse) => {
     const url = req.url ?? '/';
@@ -61,6 +100,16 @@ export function createScreenServer(store: UniverseStore = productionUniverse) {
           const result = handleScreen(store.get(), body as ScreenRequest);
           sendJson(res, 200, result);
         })
+        .catch((err: unknown) => {
+          if (err instanceof RequestError) sendJson(res, 400, { error: err.message });
+          else sendJson(res, 500, { error: 'internal error' });
+        });
+      return;
+    }
+
+    if (req.method === 'POST' && url === '/backtest') {
+      readJsonBody(req)
+        .then((body) => runBacktestStream(res, store.get(), body as BacktestRequest))
         .catch((err: unknown) => {
           if (err instanceof RequestError) sendJson(res, 400, { error: err.message });
           else sendJson(res, 500, { error: 'internal error' });

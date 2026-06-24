@@ -1149,11 +1149,23 @@ export function evalGroupedRules(stock: Stock, rules: Rule[], i?: number | null)
 // ---- backtest -----------------------------------------------------------
 // Walk every bar of every stock; wherever the (grouped) rule set fires, record
 // forward returns at each horizon. Returns aggregate hit-rates + return stats.
-export function backtestRules(stocks: Stock[], rules: Rule[], horizons = [5, 10, 20]): BacktestResult {
+// Optional per-name progress callback. The full-universe backtest can be a long
+// batch (SAD#2.4), so the host (the SAD#5.7 service) may pass this to report
+// progress while staying on the SAME engine — it is advisory only and does not
+// affect the deterministic result.
+export interface BacktestProgress { name: number; total: number; }
+
+export function backtestRules(
+  stocks: Stock[],
+  rules: Rule[],
+  horizons = [5, 10, 20],
+  onProgress?: (p: BacktestProgress) => void,
+): BacktestResult {
   const maxH = Math.max(...horizons), warmup = 30;
   const buckets: Record<number, number[]> = {}; horizons.forEach(h => buckets[h] = []);
   let signals = 0, evaluated = 0;
-  for (const s of stocks) {
+  for (let si = 0; si < stocks.length; si++) {
+    const s = stocks[si];
     const c = s.full.c, L = c.length;
     for (let i = warmup; i < L - maxH; i++) {
       evaluated++;
@@ -1161,6 +1173,7 @@ export function backtestRules(stocks: Stock[], rules: Rule[], horizons = [5, 10,
       signals++;
       for (const h of horizons) buckets[h].push((c[i + h] - c[i]) / c[i] * 100);
     }
+    onProgress?.({ name: si + 1, total: stocks.length });
   }
   const stat = (arr: number[]) => {
     const n = arr.length;

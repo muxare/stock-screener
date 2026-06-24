@@ -50,6 +50,37 @@ Response (`ScreenResponse`):
 }
 ```
 
+### `POST /backtest`
+Backtest a screen over the full universe and full available history, server-side
+(SAD#2.4 / SAD#3.8). Rank (cross-sectional) rules are excluded from history, as
+on the client.
+
+Request (`BacktestRequest`):
+
+```jsonc
+{
+  "preset": "oversold",      // optional: a built-in preset id (engine PRESETS)
+  "rules": [ /* Rule[] */ ]  // optional: extra rules; rank rules are dropped
+}
+```
+
+Response — **NDJSON stream** (`application/x-ndjson`): zero or more `progress`
+lines while the engine runs, then exactly one `result` line carrying the single
+summary payload (SAD#6.5) with the SAD#2.7 naive-fidelity `label`:
+
+```jsonc
+{ "type": "progress", "name": 22, "total": 44, "pct": 50 }
+// …
+{ "type": "result", "signals": 1234, "evaluated": 98765, "fireRate": 1.25,
+  "horizons": [ { "h": 5, "n": 1234, "avg": 0.4, "median": 0.2,
+                  "winRate": 53.1, "best": 18.0, "worst": -12.0 } ],
+  "elapsedMs": 210.5, "label": "Demo data for illustrating the workflow — …" }
+```
+
+Compute runs server-side so the browser UI thread is never blocked (SAD#2.5);
+progress is streamed so a long batch is observable. Pinned by
+`server/backtest.test.ts`.
+
 ## Design notes
 
 - **Stateless** w.r.t. user identity — no sessions; the shared universe is
@@ -66,5 +97,4 @@ Response (`ScreenResponse`):
 
 ## Out of scope
 
-- Backtest endpoint — STORY-017.
 - Client wiring to this service — STORY-018.
