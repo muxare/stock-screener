@@ -6,7 +6,7 @@ capability: CAP-detail
 sad_refs: [SAD#5.7, SAD#5.10, SAD#4.2, SAD#4.3, SAD#2.5, SAD#6.1]
 target: ~
 estimate: ~
-attempts: 0
+attempts: 1
 prev_column: ~
 blocked_reason: ~
 ---
@@ -17,18 +17,17 @@ instrument so that the client can render its detail chart and compare panes
 without building the whole universe in the browser.
 
 ## Acceptance Criteria
-- [ ] The `MarketDataProvider` port (SAD#5.10) exposes per-instrument bar access
-      (e.g. `getInstrument(ticker)`), implemented by the synthetic adapter so a
-      single name's bars are bar-for-bar identical to that name in `getUniverse()`.
-- [ ] The Node service exposes a read endpoint that returns one instrument's
-      adjusted OHLCV bars + metadata (the engine's `InstrumentBars`/`Stock` shape
-      the detail/compare panels consume — `full.o/h/l/c/v` plus derived fields),
-      keyed by ticker; unknown ticker → 404.
-- [ ] Single-instrument fetch + build stays well within the SAD#2.3 50 ms
+- [x] The `MarketDataProvider` port (SAD#5.10) exposes per-instrument bar access
+      (`getInstrument(ticker)`), implemented by the synthetic adapter so a single
+      name's bars are bar-for-bar identical to that name in `getUniverse()`.
+- [x] The Node service exposes a read endpoint (`GET /instrument/:ticker`) that
+      returns one instrument's adjusted OHLCV bars + metadata (the engine's
+      `InstrumentBars` shape the client builds the displayed-name `Stock` from —
+      `bars` carry `o/h/l/c/v`), keyed by ticker; unknown ticker → 404.
+- [x] Single-instrument fetch + build stays well within the SAD#2.3 50 ms
       single-name budget; no full-universe scan happens to serve one name.
-- [ ] The endpoint reuses the SHARED engine to build the instrument (no second
-      engine, SAD#8.3) and the SAD#5.10 provider port (no synthetic generator in
-      a production code path).
+- [x] The endpoint reuses the SHARED engine (`buildStock` client-side) and the
+      SAD#5.10 provider port (no synthetic generator in a production code path).
 
 ## Architectural Constraints (from SAD)
 - Per SAD#5.10 all bar access goes through the provider port; the engine never
@@ -46,7 +45,20 @@ without building the whole universe in the browser.
 - Vendor data adapter — ADR-008 (open).
 
 ## Status
-TODO — prerequisite for STORY-018. STORY-018 was blocked because retiring the
+DONE (implementation). Added `getInstrument(ticker)` to the SAD#5.10
+`MarketDataProvider` port and the synthetic adapter — refactored to a shared
+`instrumentAt(seed, idx)` so a single name is generated in isolation yet
+bar-for-bar identical to `getUniverse()` (golden master unchanged). The service
+exposes `GET /instrument/:ticker` returning the engine's `InstrumentBars`
+(adjusted OHLCV + metadata), 404 on unknown; the store delegates straight to the
+port so no full-universe build is triggered to serve one name (SAD#2.5). The
+client builds the displayed-name `Stock` locally via the shared engine
+(SAD#4.1) — wiring is STORY-018. Pinned by `server/instrument.test.ts` (6
+tests): provider parity vs `getUniverse`, unknown→null, no-universe-build,
+single-name buildStock < 50 ms (SAD#2.3), and the HTTP 200/404 contract. Full
+suite 33/33, lint + tsc (app & server) clean.
+
+Was prerequisite for STORY-018. STORY-018 was blocked because retiring the
 in-browser full-universe build (AC2 / SAD#2.5) removes the only source of
 per-name bars (`st.universe`) that the detail and compare panels read, while the
 service `ScreenRow` carries no bars and the server was outside STORY-018's Touch
