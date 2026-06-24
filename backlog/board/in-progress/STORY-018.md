@@ -102,7 +102,7 @@ Resolved on this branch; regression tests added in `tests/store.client.test.ts`
    detail rank criterion is tri-state (`_pass: undefined` → neutral pending
    marker, not a ✕).
 
-### Races & stale state
+### Races & stale state — extracted to STORY-025
 4. **`runScreen()` has no request-sequencing guard** — `src/store.ts:1037`/`1059`.
    Out-of-order `/screen` responses show the wrong list for the active rule set.
    Add last-write-wins (request id / abort prior).
@@ -114,7 +114,7 @@ Resolved on this branch; regression tests added in `tests/store.client.test.ts`
    detail/compare show a name absent from the current result set. Clear or
    reconcile selection when rows change.
 
-### Silent failures & dead-on-boot
+### Silent failures & dead-on-boot — findings 7–8 → STORY-026, findings 9–10 → STORY-027
 7. **Detail overlay silently does nothing on fetch failure** — `src/components/detail/DetailPanels.tsx:69`/`38`.
    `ensureDisplayed` swallows 404/network errors; overlay returns null → row
    looks unclickable (no chart/error/spinner). Add error/loading affordance.
