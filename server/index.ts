@@ -5,10 +5,11 @@
 // Stateless w.r.t. user identity. Run with:  node server/index.ts
 //
 // Endpoints:
-//   GET  /health   -> { ok, universe }   liveness + warm-universe size
-//   POST /screen   -> ScreenResponse     body: ScreenRequest (see handlers.ts)
-//   POST /backtest -> NDJSON stream      body: BacktestRequest; progress lines
-//                                        followed by one result line (SAD#2.4)
+//   GET  /health            -> { ok, universe }  liveness + warm-universe size
+//   GET  /instrument/:ticker -> InstrumentBars   one name's bars (404 unknown)
+//   POST /screen            -> ScreenResponse     body: ScreenRequest (handlers.ts)
+//   POST /backtest          -> NDJSON stream      body: BacktestRequest; progress
+//                                                  lines then one result (SAD#2.4)
 
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -91,6 +92,17 @@ export function createScreenServer(store: UniverseStore = productionUniverse) {
 
     if (req.method === 'GET' && url === '/health') {
       sendJson(res, 200, { ok: true, universe: store.get().length });
+      return;
+    }
+
+    // One instrument's adjusted bars + metadata (SAD#4.3): the client builds the
+    // Stock locally for the names it displays (SAD#4.1 / SAD#2.5). No
+    // full-universe build is triggered to serve a single name.
+    if (req.method === 'GET' && url.startsWith('/instrument/')) {
+      const ticker = decodeURIComponent(url.slice('/instrument/'.length).split('?')[0]);
+      const bars = store.getInstrument(ticker);
+      if (!bars) sendJson(res, 404, { error: 'unknown ticker' });
+      else sendJson(res, 200, bars);
       return;
     }
 

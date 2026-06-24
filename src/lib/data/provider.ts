@@ -20,4 +20,13 @@ export interface MarketDataProvider {
    * (SAD#2.2 / ADR-005).
    */
   getUniverse(): InstrumentBars[];
+
+  /**
+   * A single instrument's adjusted OHLCV bars + metadata, by ticker, or `null`
+   * if the ticker is not in the universe. Serves the client's displayed-name
+   * compute (detail/compare) without building the whole universe — the client
+   * computes only the names it shows (SAD#2.5 / SAD#4.1). The returned bars are
+   * identical to the same name in `getUniverse()`.
+   */
+  getInstrument(ticker: string): InstrumentBars | null;
 }

@@ -7,7 +7,7 @@
 // depends on the port, never a concrete vendor SDK.
 
 import { buildUniverse } from '../src/lib/market.ts';
-import type { Stock } from '../src/lib/market.ts';
+import type { InstrumentBars, Stock } from '../src/lib/market.ts';
 import { syntheticProvider } from '../src/lib/data/synthetic.ts';
 import type { MarketDataProvider } from '../src/lib/data/provider.ts';
 
@@ -21,6 +21,11 @@ export interface UniverseStore {
   // The warm, memoized universe. Repeated calls return the SAME Stock[] so
   // indicator caches accumulated during evaluation are honoured.
   get(): Stock[];
+  // One instrument's adjusted bars + metadata by ticker (SAD#4.3 / SAD#5.10),
+  // or null if the ticker is unknown. Delegates straight to the provider port —
+  // serving a single name never triggers a full-universe build (SAD#2.5). The
+  // client builds the Stock locally for the names it displays (SAD#4.1).
+  getInstrument(ticker: string): InstrumentBars | null;
 }
 
 export function createUniverseStore(provider: MarketDataProvider = defaultProvider): UniverseStore {
@@ -29,6 +34,9 @@ export function createUniverseStore(provider: MarketDataProvider = defaultProvid
     get(): Stock[] {
       if (!cached) cached = buildUniverse(provider.getUniverse());
       return cached;
+    },
+    getInstrument(ticker: string): InstrumentBars | null {
+      return provider.getInstrument(ticker);
     },
   };
 }

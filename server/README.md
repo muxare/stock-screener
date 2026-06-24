@@ -22,6 +22,23 @@ npx tsc -p server/tsconfig.json
 ### `GET /health`
 Liveness plus the warm universe size: `{ "ok": true, "universe": 44 }`.
 
+### `GET /instrument/:ticker`
+One instrument's adjusted OHLCV bars + metadata (SAD#4.3 / SAD#6.1), so the
+client can build the Stock locally for the names it displays (detail/compare)
+without holding the whole universe in the browser (SAD#4.1 / SAD#2.5). Serving a
+single name never triggers a full-universe build. Unknown ticker → `404`.
+
+Response (`InstrumentBars`):
+
+```jsonc
+{
+  "ticker": "AAPL",
+  "name": "Apple Inc.",
+  "sector": "Technology",
+  "bars": [ { "o": 191.2, "h": 193.4, "l": 190.1, "c": 192.8, "v": 4210000 } /* … */ ]
+}
+```
+
 ### `POST /screen`
 Evaluate the full production universe against a rule set.
 

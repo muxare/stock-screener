@@ -105,6 +105,22 @@ function genSeries(rand: () => number, startPrice: number): Bar[] {
   return bars;
 }
 
+// Generate instrument `idx` exactly as the full universe does. `getUniverse`
+// draws every instrument's `startPrice` from ONE seed-stream advanced once per
+// instrument in order, so reproducing instrument `idx` in isolation means
+// advancing a fresh stream `idx + 1` times for its `startPrice`; the bar series
+// then uses the same independent per-instrument stream. The result is therefore
+// bar-for-bar identical to the matching name in `getUniverse()` — the single
+// source of truth both entry points share (pinned in server/instrument.test.ts).
+function instrumentAt(seed: number, idx: number): InstrumentBars {
+  const [ticker, name, sector] = TICKERS[idx];
+  const priceRand = mulberry32(seed);
+  let startPrice = 0;
+  for (let i = 0; i <= idx; i++) startPrice = 18 + priceRand() * 380;
+  const bars = genSeries(mulberry32(seed * 131 + idx * 977), startPrice);
+  return { ticker, name, sector, bars };
+}
+
 /**
  * A synthetic `MarketDataProvider` seeded for deterministic output. The same
  * `seed` always yields the same universe — used to simulate a fresh session in
@@ -114,12 +130,11 @@ function genSeries(rand: () => number, startPrice: number): Bar[] {
 export function syntheticProvider(seed = 7): MarketDataProvider {
   return {
     getUniverse(): InstrumentBars[] {
-      const rand = mulberry32(seed);
-      return TICKERS.map(([ticker, name, sector], idx) => {
-        const startPrice = 18 + rand() * 380;
-        const bars = genSeries(mulberry32(seed * 131 + idx * 977), startPrice);
-        return { ticker, name, sector, bars };
-      });
+      return TICKERS.map((_, idx) => instrumentAt(seed, idx));
+    },
+    getInstrument(ticker: string): InstrumentBars | null {
+      const idx = TICKERS.findIndex((t) => t[0] === ticker);
+      return idx < 0 ? null : instrumentAt(seed, idx);
     },
   };
 }
