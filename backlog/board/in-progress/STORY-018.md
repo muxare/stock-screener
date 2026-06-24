@@ -6,9 +6,8 @@ capability: CAP-screen
 sad_refs: [SAD#4.1, SAD#5.9, SAD#2.5]
 target: ~
 estimate: ~
-attempts: 1
-prev_column: in-progress
-blocked_reason: Needs a per-displayed-name bar source. AC3 keeps detail/compare computing client-side, but retiring the full-universe build (AC2/SAD#2.5) removes the only bar source (st.universe); the service ScreenRow carries no bars and the server is out of 018's Touch scope. Prerequisite: a per-instrument bars provider/endpoint.
+attempts: 2
+blocked_reason: ~
 ---
 
 ## User Story
