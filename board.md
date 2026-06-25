@@ -1,6 +1,11 @@
 # Kanban Board
 _generated view — the folder structure is the source of truth_
 
+**Active batch:** none (Gate 3 open) · WIP 1/3
+
+**Exception queue:**
+- **STORY-015** (🔶 decision) — ADR-008 market-data vendor decision + redistribution legal sign-off pending (SAD#8.8)
+
 
 ## Todo (9)
 

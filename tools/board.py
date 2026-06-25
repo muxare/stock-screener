@@ -23,9 +23,15 @@ Commands:
   check <id> [--criterion SUBSTR | --all] [--uncheck]  # tick acceptance criteria
   set <id> <field> <value>      # set an allowlisted frontmatter field (e.g. sad_refs)
   reject <id> --reason TEXT     # Gate-4 reject: review -> in-progress, re-enters loop
+  batch-new --capabilities CAP-a,CAP-b [--goal ...] [--wip N] [--id BATCH-NNN]
+      Gate 3: record the committed batch (capabilities + WIP limit); one active
+      batch at a time. The active batch's wip_limit caps in-progress.
+  batch-close <id>              # close a batch once its commitment is complete
+  batch-list [--json]           # batches + live WIP usage
+  exceptions [--json]           # Gate 2/5 queue: blocked work split decision vs process
   show <id>
   render            # write a human-readable board.md (pure read, not state)
-  validate          # check invariants across the whole board
+  validate          # check invariants across the whole board (incl. WIP + batch)
   logs [--tail N]   # show workflow audit log (.workflow/events.jsonl)
 """
 import argparse, glob, json, os, re, sys, shutil
@@ -43,6 +49,8 @@ EPICS = os.path.join(ROOT, "backlog", "epics")
 IDEAS = os.path.join(ROOT, "backlog", "ideas")
 PLANS = os.path.join(ROOT, "backlog", "plans")
 SAD_DIR = os.path.join(ROOT, "backlog", "sad")
+BATCHES = os.path.join(ROOT, "backlog", "batches")
+BATCH_TEMPLATE = os.path.join(BATCHES, "BATCH.template.md")
 ANCHOR_RE = re.compile(r"SAD#\d+(?:\.\d+)*")
 CAPABILITY_RE = re.compile(r"### SAD#3(?:\.\d+)?\s+([\w.*-]+):")
 IDEA_ID = re.compile(r"^IDEA-\d{3}$")
@@ -51,7 +59,20 @@ SAD_ID = re.compile(r"^SAD-\d{3}$")
 EPIC_ID = re.compile(r"^EPIC-\d{3}$")
 FEAT_ID = re.compile(r"^FEAT-\d{3}$")
 STORY_ID = re.compile(r"^STORY-\d{3}$")
+BATCH_ID = re.compile(r"^BATCH-\d{3}$")
 SENTINELS = ("", "[]", "~", "None")
+
+# Gate 3: how many stories may sit in-progress at once when no active batch
+# overrides it. The cap turns "fan debt out into the backlog" (F3) into a visible
+# signal — at the limit you must finish or explicitly defer, not silently widen WIP.
+DEFAULT_WIP_LIMIT = 3
+# Exception queue (#8): a blocked_reason mentioning any of these reads as a
+# decision only a human can make (architecture / vendor / legal) → Gate 2/5,
+# versus an ordinary process block an agent can clear itself.
+DECISION_SIGNAL = re.compile(
+    r"\b(ADR|SAD#|vendor|legal|licen[sc]e|licensing|architecture|sign-?off)\b",
+    re.I,
+)
 
 
 def _log(event, outcome="ok", message="", **fields):
@@ -130,6 +151,61 @@ def parse_sad_refs(value):
 
 def sad_refs_nonempty(fm):
     return len(parse_sad_refs(fm.get("sad_refs"))) > 0
+
+
+def parse_list(value):
+    """Parse a frontmatter list field: bare, comma-separated, or [a, b]."""
+    if value is None:
+        return []
+    v = str(value).strip()
+    if v in SENTINELS:
+        return []
+    if v.startswith("[") and v.endswith("]"):
+        v = v[1:-1]
+    return [p.strip() for p in v.split(",") if p.strip() and p.strip() not in SENTINELS]
+
+
+# ---------- batch (Gate 3) + WIP helpers ----------
+def all_batches():
+    """Return (fm, body) for every BATCH-NNN.md, newest id last."""
+    out = []
+    for p in sorted(glob.glob(os.path.join(BATCHES, "BATCH-*.md"))):
+        if p.endswith(".template.md"):
+            continue
+        out.append(read_backlog_file(p))
+    return out
+
+
+def active_batches():
+    return [(fm, body) for fm, body in all_batches()
+            if (fm.get("status") or "").strip() == "active"]
+
+
+def active_batch():
+    """The single active batch (fm, body), or (None, None) if zero/ambiguous."""
+    actives = active_batches()
+    return actives[0] if len(actives) == 1 else (None, None)
+
+
+def batch_capabilities(fm):
+    return parse_list(fm.get("capabilities"))
+
+
+def batch_wip_limit():
+    """WIP cap for in-progress: the active batch's override, else the default."""
+    fm, _ = active_batch()
+    if fm:
+        raw = (fm.get("wip_limit") or "").strip()
+        if raw and raw not in SENTINELS:
+            try:
+                return int(raw)
+            except ValueError:
+                pass
+    return DEFAULT_WIP_LIMIT
+
+
+def column_count(column):
+    return sum(1 for fm in all_stories() if fm["_column"] == column)
 
 
 def prev_column_valid(fm):
@@ -479,6 +555,20 @@ def cmd_move(args):
             _log("move", outcome="refused", message=msg, story_id=args.id, **{"from": src, "to": dst})
             sys.exit(f"refused: {msg}")
 
+    # WIP signal (#6): starting work past the limit is allowed but SURFACED, not
+    # silent — the loop keeps moving while making overload visible at Gate 3. src
+    # is never in-progress here (same-column moves are refused above), so the new
+    # post-move count is current + 1.
+    if dst == "in-progress":
+        limit = batch_wip_limit()
+        post = column_count("in-progress") + 1
+        if post > limit:
+            warn = (f"WIP at {post} in-progress (limit {limit}). Finish or defer "
+                    f"one, or raise the batch wip_limit at Gate 3.")
+            print(f"⚠ {warn}")
+            _log("move", outcome="warn", message=warn, story_id=args.id,
+                 count=post, **{"from": src, "to": dst})
+
     # hard review-check gate: a story cannot reach `review` or `done` unless the
     # anti-cheat gate ran against the pre-story base and passed. This is what
     # makes the loop trustworthy enough to leave unattended (Phase 1, #1).
@@ -576,6 +666,134 @@ def cmd_reject(args):
     print(f"rejected {args.id}: review -> in-progress (re-enters the build loop)")
     _log("reject", story_id=args.id, message=args.reason,
          **{"from": "review", "to": "in-progress"})
+
+
+def cmd_batch_new(args):
+    """Gate 3: record a batch — the capabilities you commit /build-toward to.
+
+    A batch is the prioritisation checkpoint, not a timebox: a named, dated set
+    of capabilities plus the WIP limit for this run. Only one batch is active at
+    a time, so this is the single standing answer to "what are we building now".
+    """
+    caps = [c.strip() for c in (args.capabilities or "").split(",") if c.strip()]
+    if not caps:
+        _fatal("batch-new needs --capabilities CAP-a,CAP-b", event="batch-new")
+    if active_batches():
+        ids = ", ".join(fm.get("id", "?") for fm, _ in active_batches())
+        _fatal(f"an active batch already exists ({ids}); close it first "
+               f"(board.py batch-close <id>) — Gate 3 is one commitment at a time",
+               event="batch-new")
+    existing = [int(re.search(r"BATCH-(\d+)", os.path.basename(p)).group(1))
+                for p in glob.glob(os.path.join(BATCHES, "BATCH-*.md"))
+                if not p.endswith(".template.md")]
+    bid = args.id or f"BATCH-{(max(existing) + 1 if existing else 1):03d}"
+    if not BATCH_ID.match(bid):
+        _fatal(f"{bid}: invalid batch id (use BATCH-NNN)", event="batch-new")
+    from datetime import datetime, timezone
+    created = datetime.now(timezone.utc).date().isoformat()
+    wip = str(args.wip if args.wip is not None else DEFAULT_WIP_LIMIT)
+    fm = {
+        "id": bid,
+        "type": "batch",
+        "status": "active",
+        "created": created,
+        "wip_limit": wip,
+        "capabilities": "[" + ", ".join(caps) + "]",
+    }
+    cap_lines = "\n".join(f"- {c}" for c in caps)
+    body = (f"\n## Goal\n{args.goal or '<batch goal — the Gate-3 commitment>'}\n\n"
+            f"## Capabilities committed\n{cap_lines}\n\n## Notes\n")
+    os.makedirs(BATCHES, exist_ok=True)
+    out = os.path.join(BATCHES, f"{bid}.md")
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(dump_fm(fm, body))
+    print(f"created {bid} (active): caps={caps} wip_limit={wip}")
+    _log("batch-new", message=f"caps={','.join(caps)} wip={wip}",
+         batch_id=bid, count=len(caps))
+
+
+def cmd_batch_close(args):
+    """Close a batch — the Gate-3 commitment is complete, freeing the next one."""
+    path = os.path.join(BATCHES, f"{args.id}.md")
+    if not os.path.exists(path):
+        _fatal(f"error: {args.id} not found in backlog/batches/", event="batch-close",
+               batch_id=args.id)
+    fm, body = read_backlog_file(path)
+    if (fm.get("status") or "").strip() == "closed":
+        sys.exit(f"{args.id} is already closed")
+    fm.pop("_path", None)
+    fm["status"] = "closed"
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(dump_fm(fm, body))
+    print(f"closed {args.id}")
+    _log("batch-close", batch_id=args.id)
+
+
+def cmd_batch_list(args):
+    """Show batches (active first) with capabilities and live WIP usage."""
+    batches = all_batches()
+    if args.json:
+        slim = [{k: v for k, v in fm.items() if not k.startswith("_")}
+                for fm, _ in batches]
+        print(json.dumps(slim, indent=2))
+        return
+    if not batches:
+        print("(no batches — board.py batch-new --capabilities … to open Gate 3)")
+        return
+    ip = column_count("in-progress")
+    for fm, _ in batches:
+        status = (fm.get("status") or "?").strip()
+        mark = "▶" if status == "active" else " "
+        line = (f"{mark} {fm.get('id', '?'):<10} [{status}] "
+                f"caps={fm.get('capabilities', '[]')} wip_limit={fm.get('wip_limit', '?')}")
+        if status == "active":
+            line += f"  (in-progress now: {ip})"
+        print(line)
+
+
+def cmd_exceptions(args):
+    """Gate 2/5 queue (#8): everything stuck waiting on a human, in one place.
+
+    Blocked stories are split into the ones an agent cannot clear — architecture,
+    vendor, or legal decisions (Gate 2/5) — and ordinary process blocks. This is
+    the surface the Scrum-Master lens and `/loop` read to ping you, instead of you
+    watching the stream.
+    """
+    blocked = [fm for fm in all_stories() if fm["_column"] == "blocked"]
+    rows = []
+    for fm in sorted(blocked, key=lambda f: f.get("id", "")):
+        reason = (fm.get("blocked_reason") or "").strip()
+        kind = "decision" if DECISION_SIGNAL.search(reason) else "process"
+        rows.append({
+            "id": fm.get("id", "?"),
+            "kind": kind,
+            "gate": "Gate 2/5" if kind == "decision" else "agent/SM",
+            "reason": reason or "unspecified",
+            "from": fm.get("prev_column", "?"),
+            "attempts": fm.get("attempts", "0"),
+        })
+    if args.json:
+        print(json.dumps(rows, indent=2))
+        return
+    if not rows:
+        print("exception queue: empty (nothing blocked)")
+        _log("exceptions", count=0)
+        return
+    decisions = [r for r in rows if r["kind"] == "decision"]
+    process = [r for r in rows if r["kind"] == "process"]
+    print(f"EXCEPTION QUEUE — {len(rows)} blocked "
+          f"({len(decisions)} need a human decision, {len(process)} process)\n")
+    if decisions:
+        print("  ▼ NEEDS A HUMAN DECISION (Gate 2/5):")
+        for r in decisions:
+            print(f"    {r['id']:<10} (from {r['from']}, attempts {r['attempts']})\n"
+                  f"        {r['reason']}")
+    if process:
+        print("  ▼ process blocks (agent/SM may clear):")
+        for r in process:
+            print(f"    {r['id']:<10} (from {r['from']}, attempts {r['attempts']})\n"
+                  f"        {r['reason']}")
+    _log("exceptions", count=len(rows), message=f"{len(decisions)} decisions")
 
 
 def cmd_list(args):
@@ -700,6 +918,29 @@ def cmd_show(args):
 
 def cmd_render(args):
     out = ["# Kanban Board", "_generated view — the folder structure is the source of truth_\n"]
+
+    # Gate 3 header: the active batch commitment + live WIP usage (#6, #7).
+    fm_b, _ = active_batch()
+    ip = column_count("in-progress")
+    limit = batch_wip_limit()
+    wip_flag = " ⚠ over limit" if ip > limit else ""
+    if fm_b:
+        out.append(f"**Active batch:** {fm_b.get('id','?')} · "
+                   f"caps `{fm_b.get('capabilities','[]')}` · "
+                   f"WIP {ip}/{limit}{wip_flag}\n")
+    else:
+        out.append(f"**Active batch:** none (Gate 3 open) · WIP {ip}/{limit}{wip_flag}\n")
+
+    # Exception queue (#8): blocked items needing a human, pulled to the top.
+    blocked = [fm for fm in all_stories() if fm["_column"] == "blocked"]
+    if blocked:
+        out.append("**Exception queue:**")
+        for fm in sorted(blocked, key=lambda f: f.get("id", "")):
+            reason = (fm.get("blocked_reason") or "unspecified").strip()
+            tag = "🔶 decision" if DECISION_SIGNAL.search(reason) else "process"
+            out.append(f"- **{fm.get('id','?')}** ({tag}) — {reason}")
+        out.append("")
+
     for col in COLUMNS:
         items = [fm for fm in all_stories() if fm["_column"] == col]
         out.append(f"\n## {col.replace('-',' ').title()} ({len(items)})\n")
@@ -727,6 +968,29 @@ def cmd_validate(args):
         )
     elif sad_id and not os.path.exists(sad_file_path(sad_id)):
         problems.append(f"{sad_id}: SAD file not found in backlog/sad/")
+
+    # Gate 3 + WIP (#6, #7): at most one active batch, and in-progress within cap.
+    batches = all_batches()
+    actives = active_batches()
+    for fm, _ in batches:
+        bid = fm.get("id", "?")
+        if not BATCH_ID.match(bid):
+            problems.append(f"{bid}: invalid batch id format (use BATCH-NNN)")
+        if not id_matches_filename(bid, fm["_path"]):
+            problems.append(f"{bid}: frontmatter id does not match filename")
+    if len(actives) > 1:
+        ids = ", ".join(fm.get("id", "?") for fm, _ in actives)
+        problems.append(
+            f"{len(actives)} active batches ({ids}); only one may be active "
+            f"— close the others (Gate 3 is a single commitment)"
+        )
+    ip = column_count("in-progress")
+    limit = batch_wip_limit()
+    if ip > limit:
+        problems.append(
+            f"WIP breach: {ip} stories in-progress (limit {limit}) — finish or "
+            f"defer one, or raise the active batch's wip_limit (Gate 3)"
+        )
 
     epic_ids = {}
     for fm in all_epics():
@@ -798,6 +1062,11 @@ def cmd_validate(args):
             for cap in sorted(caps):
                 if cap not in story_caps:
                     problems.append(f"capability {cap}: no story coverage")
+        for fm, _ in actives:
+            bid = fm.get("id", "?")
+            for cap in batch_capabilities(fm):
+                if caps and cap not in caps:
+                    problems.append(f"{bid}: unknown capability {cap} (not a SAD#3 cap)")
 
     if problems:
         print("INVARIANT VIOLATIONS:")
@@ -934,6 +1203,25 @@ def main():
     rj.add_argument("id")
     rj.add_argument("--reason", required=True, help="rework brief read by the loop on re-entry")
     rj.set_defaults(fn=cmd_reject)
+
+    bn = sub.add_parser("batch-new", help="Gate 3: commit a batch of capabilities")
+    bn.add_argument("--capabilities", required=True, help="comma-separated CAP ids")
+    bn.add_argument("--goal", help="one-line batch goal")
+    bn.add_argument("--wip", type=int, help=f"in-progress WIP limit (default {DEFAULT_WIP_LIMIT})")
+    bn.add_argument("--id", help="BATCH-NNN (default: auto-numbered)")
+    bn.set_defaults(fn=cmd_batch_new)
+
+    bc = sub.add_parser("batch-close", help="close a batch (Gate-3 commitment done)")
+    bc.add_argument("id")
+    bc.set_defaults(fn=cmd_batch_close)
+
+    bl = sub.add_parser("batch-list", help="show batches + live WIP usage")
+    bl.add_argument("--json", action="store_true")
+    bl.set_defaults(fn=cmd_batch_list)
+
+    ex = sub.add_parser("exceptions", help="Gate 2/5 queue: blocked work needing a human")
+    ex.add_argument("--json", action="store_true")
+    ex.set_defaults(fn=cmd_exceptions)
 
     s = sub.add_parser("show"); s.add_argument("id"); s.set_defaults(fn=cmd_show)
     sub.add_parser("render").set_defaults(fn=cmd_render)

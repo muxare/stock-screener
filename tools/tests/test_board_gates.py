@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""Black-box tests for the Phase 1 board.py gates (#1 hard review-check, #4
-sanctioned check/set commands).
+"""Black-box tests for the board.py gates:
+  Phase 1 — #1 hard review-check, #4 sanctioned check/set commands
+  Phase 2 — #11 reject auto-demote
+  Phase 3 — #6 WIP limits, #7 batch=Gate 3, #8 exception queue
 
 Self-contained: builds a throwaway git repo + board in a tempdir, copies the
 real board.py + workflow_log.py into it, and drives the actual CLI via
@@ -91,6 +93,25 @@ test story
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, f"{sid}.md"), "w", encoding="utf-8") as f:
             f.write(text)
+
+    def write_batch(self, bid, status="active", wip_limit=3, capabilities="[CAP-x]"):
+        text = (f"---\nid: {bid}\ntype: batch\nstatus: {status}\n"
+                f"created: 2026-06-25\nwip_limit: {wip_limit}\n"
+                f"capabilities: {capabilities}\n---\n\n## Goal\ntest batch\n")
+        d = os.path.join(self.root, "backlog", "batches")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, f"{bid}.md"), "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def write_sad(self, caps=("CAP-x",)):
+        lines = ["---", "id: SAD-001", "status: Approved", "---", "",
+                 "## SAD#1 Scope", "anchor SAD#1.1", "", "## SAD#3 Capabilities"]
+        for i, c in enumerate(caps, 1):
+            lines.append(f"### SAD#3.{i} {c}: capability {c}")
+        d = os.path.join(self.root, "backlog", "sad")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "SAD-001.md"), "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
 
 
 def setup_repo(root):
@@ -217,6 +238,97 @@ def run():
         r = repo.board("reject", "STORY-201", "--reason", "nope")
         check("reject refused when not in review",
               r.returncode != 0 and "not review" in (r.stdout + r.stderr))
+
+        print("\n[#7] batch-new records a Gate-3 commitment (auto-numbered, active)")
+        r = repo.board("batch-new", "--capabilities", "CAP-x,CAP-y",
+                       "--goal", "ship the slice", "--wip", "5")
+        check("batch-new succeeds", r.returncode == 0)
+        bpath = os.path.join(tmp, "backlog", "batches", "BATCH-001.md")
+        check("BATCH-001 created", os.path.exists(bpath))
+        r = repo.board("batch-list")
+        check("batch-list shows active batch", "BATCH-001" in r.stdout and "active" in r.stdout)
+
+        print("\n[#7] only one active batch at a time")
+        r = repo.board("batch-new", "--capabilities", "CAP-z")
+        check("second active batch refused", r.returncode != 0 and "active batch already exists" in (r.stdout + r.stderr))
+        r = repo.board("batch-close", "BATCH-001")
+        check("batch-close succeeds", r.returncode == 0)
+        r = repo.board("batch-new", "--capabilities", "CAP-z")
+        check("batch-new succeeds once prior batch is closed", r.returncode == 0)
+        repo.board("batch-close", "BATCH-002")  # leave no active batch → default WIP applies
+
+        print("\n[#6] WIP: starting past the limit is allowed but SURFACED")
+        # baseline in-progress here is 0 (earlier stories ended in review/done/todo)
+        for n in range(300, 304):  # 300,301,302,303 → counts 1,2,3,4 with default limit 3
+            repo.write_story(f"STORY-{n}", "todo")
+            r = repo.board("move", f"STORY-{n}", "in-progress")
+            if n == 303:
+                check("4th in-progress move still succeeds (non-blocking)", r.returncode == 0)
+                check("4th in-progress move warns about WIP", "WIP" in (r.stdout + r.stderr))
+            elif n == 302:
+                check("3rd in-progress move (at limit) does not warn", "WIP" not in (r.stdout + r.stderr))
+
+        print("\n[#6] validate flags the WIP breach")
+        r = repo.board("validate")
+        check("validate reports WIP breach (4 > limit 3)",
+              r.returncode != 0 and "WIP breach" in (r.stdout + r.stderr) and "limit 3" in (r.stdout + r.stderr))
+
+        print("\n[#6] an active batch's wip_limit overrides the default")
+        repo.write_batch("BATCH-010", status="active", wip_limit=5)
+        r = repo.board("validate")
+        check("no WIP breach when active batch raises the limit to 5",
+              "WIP breach" not in (r.stdout + r.stderr))
+        r = repo.board("batch-list")
+        check("batch-list shows live in-progress count", "in-progress now: 4" in r.stdout)
+        # tighten the cap below the live count → breach reappears
+        repo.write_batch("BATCH-010", status="active", wip_limit=2)
+        r = repo.board("validate")
+        check("WIP breach reappears when batch tightens limit to 2",
+              "WIP breach" in (r.stdout + r.stderr) and "limit 2" in (r.stdout + r.stderr))
+
+        print("\n[#7] validate flags more than one active batch")
+        repo.write_batch("BATCH-011", status="active", wip_limit=5)
+        r = repo.board("validate")
+        check("validate flags >1 active batch",
+              "active batches" in (r.stdout + r.stderr))
+        os.remove(os.path.join(tmp, "backlog", "batches", "BATCH-011.md"))
+
+        print("\n[#7] validate flags an unknown batch capability against the SAD")
+        repo.write_sad(caps=("CAP-x", "CAP-y"))
+        repo.write_batch("BATCH-010", status="active", wip_limit=9, capabilities="[CAP-bogus]")
+        r = repo.board("validate", "--sad", "SAD-001")
+        check("validate flags unknown batch capability",
+              "unknown capability CAP-bogus" in (r.stdout + r.stderr))
+        # restore a valid, generously-capped active batch for the remaining tests
+        repo.write_batch("BATCH-010", status="active", wip_limit=99, capabilities="[CAP-x]")
+
+        print("\n[#8] exception queue splits decision vs process blocks")
+        repo.write_story("STORY-400", "todo")
+        repo.board("move", "STORY-400", "in-progress")
+        repo.board("move", "STORY-400", "blocked", "--reason",
+                   "ADR-008 vendor decision + legal sign-off pending")
+        repo.write_story("STORY-401", "todo")
+        repo.board("move", "STORY-401", "in-progress")
+        repo.board("move", "STORY-401", "blocked", "--reason", "waiting on STORY-300 helper")
+        r = repo.board("exceptions", "--json")
+        check("exceptions --json lists blocked stories", r.returncode == 0)
+        import json as _json
+        rows = {row["id"]: row for row in _json.loads(r.stdout)}
+        check("ADR/legal block classified as a human decision (Gate 2/5)",
+              rows.get("STORY-400", {}).get("kind") == "decision")
+        check("ordinary block classified as a process block",
+              rows.get("STORY-401", {}).get("kind") == "process")
+        r = repo.board("exceptions")
+        check("human exceptions view groups the decision block",
+              "NEEDS A HUMAN DECISION" in r.stdout and "STORY-400" in r.stdout)
+
+        print("\n[#8] render surfaces batch, WIP, and the exception queue")
+        r = repo.board("render")
+        check("render succeeds", r.returncode == 0)
+        board_md = open(os.path.join(tmp, "board.md"), encoding="utf-8").read()
+        check("board.md shows the active batch", "Active batch:" in board_md)
+        check("board.md shows WIP usage", "WIP " in board_md)
+        check("board.md surfaces the exception queue", "Exception queue:" in board_md and "STORY-400" in board_md)
 
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

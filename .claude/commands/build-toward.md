@@ -12,6 +12,19 @@ fires on each story.
 first, fall back to target. The selector is generic on purpose — the
 vocabulary lives in the data, not this command.
 
+## Gate 3 — the active batch (commit before you build)
+The committed slice is recorded as a **batch** — the Gate-3 prioritisation
+checkpoint. Before looping, read it: `python tools/board.py batch-list`.
+- The `<selector>` should name a capability **inside the active batch's
+  `capabilities`**. Building outside the committed batch is a Gate-3 decision —
+  surface it to the human, don't widen scope yourself.
+- The active batch sets the **WIP limit** (`wip_limit`). `move in-progress`
+  prints a WIP warning past the limit and `board.py validate` flags a breach —
+  when WIP is full, finish or defer a story rather than starting another.
+- No active batch? Ask the human to commit one
+  (`board.py batch-new --capabilities … --goal … [--wip N]`) before a bulk run;
+  the default WIP limit applies until then.
+
 ## Autonomy tier (default A2)
 - **A2 (default)** — implement matching stories automatically and commit per
   story *without* per-commit human confirmation, then pause at `review` (don't
@@ -101,4 +114,8 @@ A story that reaches `review` waits for the human. Two sanctioned outcomes:
 
 ## Termination report
 Print: done / review / blocked per story, plus any flagged SAD conflicts that
-need a human decision (likely a new ADR in `SAD#8`).
+need a human decision (likely a new ADR in `SAD#8`). Then run
+`python tools/board.py exceptions` — every story you blocked lands in the
+**Gate 2/5 queue**, split into "needs a human decision" (ADR / vendor / legal)
+vs ordinary process blocks. That queue is the single surface the human (or the
+Scrum-Master lens) reads; you do not need to chase blocked items yourself.

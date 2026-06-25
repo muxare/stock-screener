@@ -102,7 +102,22 @@ Use when CI and review-check gates are trusted and humans batch-review.
 python tools/board.py list --capability <id> --json
 python tools/board.py review-check STORY-NNN --base <commit>
 python tools/board.py reject STORY-NNN --reason "…"   # Gate-4 reject -> back to in-progress
+python tools/board.py batch-list                      # Gate 3: the committed batch + live WIP
+python tools/board.py batch-new --capabilities CAP-a,CAP-b --goal "…" [--wip N]
+python tools/board.py exceptions                      # Gate 2/5 queue: blocked work needing a human
 python tools/sync_board.py push --dry-run    # optional, after review in A3
 ```
+
+## Gate 3 (Commit) and the exception queue
+
+The tiers above govern *how* a story is built; **Gate 3** governs *which* stories
+a run is allowed to touch. The committed slice is an **active batch**
+(`batch-new`) — a named set of capabilities plus a `wip_limit`. The build loop
+should only `/build-toward` capabilities inside the active batch, and the
+`wip_limit` caps how many stories sit `in-progress` (warned on `move`, flagged in
+`validate`). Anything that blocks lands in the **exception queue**
+(`board.py exceptions`), split into human-decision blocks (ADR / vendor / legal →
+Gate 2/5) and process blocks — so "in the loop on exceptions" means reading one
+queue, not watching the stream.
 
 See also: `sad-grounding` skill (Review gate checklist), `build-toward` command.
