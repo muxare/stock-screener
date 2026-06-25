@@ -76,6 +76,10 @@ Revise, then present.
   `python tools/board.py new --capability <id> --parent FEAT-007 --title "..."`
   It auto-assigns the next `STORY-NNN` id. Then edit the new file to fill
   `sad_refs`, acceptance criteria, constraints, prompt, and Touch scope.
+  While the story sits in `todo` (authoring), direct edits to all of these are
+  fine — the edit guard doesn't apply. Once a story goes active, `sad_refs`
+  changes must go through `python tools/board.py set <id> sad_refs "…"` (and
+  criteria checkboxes through `board.py check`).
 - Epics/features are plain files under `backlog/epics/` and `backlog/features/`
   using `EPIC.template.md` and `FEAT.template.md` (`EPIC-001`, `FEAT-001`,
   zero-padded, monotonic, never reused). Frontmatter `id` must match filename.

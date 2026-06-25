@@ -21,18 +21,29 @@ Map these labels to your team's conventions if you use different names — the
 
 Before **`move review`** for any story:
 
-1. Capture **base commit** before `move in-progress`: `git rev-parse HEAD`
-2. Implement within **Touch scope** only; tick met acceptance criteria `[x]`
+1. **base_commit** is auto-stamped on the first `move in-progress` (bounces keep
+   the original pre-story base); no manual capture needed
+2. Implement within **Touch scope** only; tick met acceptance criteria via
+   `python tools/board.py check <id> --criterion "…"` (the edit guard blocks
+   flipping checkboxes by hand on an active story)
 3. Run tests; failures block the gate
-4. Run **`python tools/board.py review-check <id> --base <base>`**
-5. Paste full review-check stdout in the transcript (see `sad-grounding` skill)
-6. Only then: `python tools/board.py move <id> review`
+4. **Run a code-review pass** on the story diff vs `base_commit` (the
+   `/code-review` skill or a code-review agent); address blocking findings, fan
+   out-of-scope findings into new stories — mandatory loop step, not enforced by
+   board.py
+5. Optionally pre-flight `python tools/board.py review-check <id>` and paste the
+   stdout (inspection only — see `sad-grounding` skill)
+6. `python tools/board.py move <id> review` — the move **automatically re-runs
+   the review-check gate** against `base_commit` and is **refused** on problems;
+   human-only override is `move --skip-review-check` (logged as an `override`)
 
 Before **`move done`**:
 
 1. All acceptance criteria `[x]` (board.py refuses otherwise)
 2. Human review completed (A1/A2) or explicit A3 policy documented in repo
-3. Column change via `board.py` only (hooks block manual `mv`)
+3. `move done` also re-runs the review-check gate (same `--skip-review-check`
+   override applies)
+4. Column change via `board.py` only (hooks block manual `mv`)
 
 ---
 

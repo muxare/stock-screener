@@ -28,18 +28,25 @@ stories = board.py list --capability <selector> --json   (fall back to --target)
           filter to column in {todo, in-progress}
 order by parent/dependency, then id
 for story in stories:
-    board.py move <id> in-progress          # refused if sad_refs empty; stamps attempts
+    board.py move <id> in-progress          # refused if sad_refs empty; stamps attempts;
+                                            # stamps base_commit=HEAD on FIRST entry only
     -> invoke sad-grounding: read sad_refs sections, restate constraints
     implement within Touch scope only
-    run tests / check acceptance criteria; tick the boxes you truly met
+    run tests / check acceptance criteria; tick met boxes via board.py check (NOT by editing the file)
+        board.py check <id> --criterion "<substring>"   # ticks the matching criterion
     if all criteria pass and tests green:
-        board.py review-check <id> --base <pre-story commit>   # anti-cheat gate
-        if review-check passes:
-            board.py move <id> review            # (A3: then story-syncer push)
-        else:
+        # MANDATORY code-review pass (loop discipline, not enforced by board.py):
+        run /code-review (or spawn a code-review agent) on the story diff vs base_commit
+        address blocking findings; fan out-of-scope findings into new stories (existing pattern)
+        board.py review-check <id>            # pre-flight inspection (optional --base override)
+        board.py move <id> review            # the move RE-RUNS the review-check gate and
+                                             # REFUSES if it finds problems; (A3: then syncer push)
+                                             # human override: move --skip-review-check (logged)
+        if move refused:
             fix the flagged scope/test issues, or
             board.py move <id> blocked --reason "review-check: <summary>"
-        # board.py also refuses `done` while any criterion box is unchecked
+        # move review/done also refuses while any criterion box is unchecked,
+        # or if the story has no base_commit (re-run move in-progress, or pass --base)
     elif scope/SAD conflict detected:
         board.py move <id> blocked --reason "<conflict>"   # STOP this story, flag
     elif attempts >= MAX (default 3):
@@ -51,13 +58,25 @@ run board.py validate --sad <sad-id> at the end (resolve sad-id from the
 epic `sad` field on stories in this slice; ask if multiple)
 ```
 Never edit a story's column by hand or `mv` files — the CLI is the only
-sanctioned mutation path, which is what makes the board deterministic.
+sanctioned mutation path, which is what makes the board deterministic. Story-file
+mutations on **active** stories (in-progress/review/done/blocked) also go through
+the CLI: tick acceptance criteria via `board.py check <id> --criterion "…"` and
+change allowlisted frontmatter (sad_refs, capability, target, estimate, parent)
+via `board.py set <id> <field> <value>`. The edit guard hook blocks direct
+`Edit`/`Write` that flips a criterion checkbox or touches protected frontmatter
+on an active story; free-text body edits (notes, Decisions) stay allowed.
 
-**Capture the base commit before starting each story** (e.g. `git rev-parse HEAD`)
-so `review-check --base <that>` diffs only this story's changes. Follow the
-**Review gate checklist** in `sad-grounding`: paste `git rev-parse` output and
-full `review-check` stdout before `move review`. The check verifies Touch scope
-and test integrity (deleted tests, count regression, weakened assertions).
+**The base commit is stamped automatically** as `base_commit` on the first
+`move in-progress` (bounces keep the original pre-story base), so `move review`/
+`move done` runs the review-check gate against the right diff without you tracking
+it by hand. You can still inspect it (`git rev-parse HEAD`) and override the gate's
+base with `review-check --base <ref>` / `move --base <ref>`. The gate runs
+**automatically on the move** to review or done and refuses on problems; the human
+override is `move --skip-review-check` (logged to events.jsonl as an `override`).
+Running `board.py review-check` by hand beforehand is now a **pre-flight
+inspection**, not the enforced gate. The check verifies acceptance criteria,
+Touch scope, and test integrity (deleted tests, count regression, weakened
+assertions). Follow the **Review gate checklist** in `sad-grounding`.
 
 ## Scope firewall
 Stories whose `capability`/`target` don't match the selector are invisible to

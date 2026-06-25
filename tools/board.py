@@ -15,9 +15,13 @@ Transition policy (configured for this project):
   - moving to `done` is REFUSED while any acceptance-criteria box is unchecked
 
 Commands:
-  move <id> <column> [--reason TEXT] [--force-attempts]
+  move <id> <column> [--reason TEXT] [--base REF] [--skip-review-check]
+      moving to `review`/`done` runs the review-check gate against the story's
+      stamped base_commit and is REFUSED on problems unless --skip-review-check
   list [--column C] [--capability ID] [--target T] [--json]
   new --capability ID --parent FEAT-ID [--id STORY-NNN] [--title ...]
+  check <id> [--criterion SUBSTR | --all] [--uncheck]  # tick acceptance criteria
+  set <id> <field> <value>      # set an allowlisted frontmatter field (e.g. sad_refs)
   show <id>
   render            # write a human-readable board.md (pure read, not state)
   validate          # check invariants across the whole board
@@ -130,6 +134,12 @@ def sad_refs_nonempty(fm):
 def prev_column_valid(fm):
     v = (fm.get("prev_column") or "").strip()
     return v not in ("", "~", "None")
+
+
+def base_commit_of(fm):
+    """Return the stamped pre-story base commit, or '' if unset/sentinel."""
+    v = (fm.get("base_commit") or "").strip()
+    return "" if v in SENTINELS else v
 
 
 def unchecked_criteria(body):
@@ -468,8 +478,41 @@ def cmd_move(args):
             _log("move", outcome="refused", message=msg, story_id=args.id, **{"from": src, "to": dst})
             sys.exit(f"refused: {msg}")
 
+    # hard review-check gate: a story cannot reach `review` or `done` unless the
+    # anti-cheat gate ran against the pre-story base and passed. This is what
+    # makes the loop trustworthy enough to leave unattended (Phase 1, #1).
+    if dst in ("review", "done"):
+        base = (args.base or "").strip() or base_commit_of(fm)
+        if not base:
+            msg = (f"{args.id} has no base_commit (legacy/in-flight story). "
+                   f"Re-run `move {args.id} in-progress` to stamp it, or pass "
+                   f"--base <pre-story commit>, or override with --skip-review-check")
+            _log("move", outcome="refused", message=msg, story_id=args.id, **{"from": src, "to": dst})
+            sys.exit(f"refused: {msg}")
+        problems, warnings = run_review_check(fm, body, base)
+        if problems and not args.skip_review_check:
+            print(f"REVIEW-CHECK FAILED for {args.id} (base {base}):")
+            for p in problems:
+                print("  ✗ " + p)
+            for w in warnings:
+                print("  ! " + w)
+            msg = f"review-check: {len(problems)} problem(s)"
+            _log("move", outcome="refused", message=msg, story_id=args.id, base=base,
+                 count=len(problems), **{"from": src, "to": dst})
+            sys.exit(f"refused: {msg}; not eligible for {dst}. Fix, or re-run with --skip-review-check to override.")
+        if problems and args.skip_review_check:
+            _log("move", outcome="override", story_id=args.id, base=base,
+                 message=f"--skip-review-check over {len(problems)} problem(s)",
+                 count=len(problems), **{"from": src, "to": dst})
+
     # frontmatter stamping
     fm.pop("_path", None); fm.pop("_column", None)
+    if dst == "in-progress" and not base_commit_of(fm):
+        # Stamp the pre-story base ONCE (first entry), so review-check on a later
+        # bounce still diffs against the original pre-story HEAD, not partial work.
+        head = _git_run(["git", "rev-parse", "HEAD"]).strip()
+        if head:
+            fm["base_commit"] = head
     if dst == "blocked":
         fm["prev_column"] = src
         fm["blocked_reason"] = args.reason or fm.get("blocked_reason", "unspecified")
@@ -536,6 +579,76 @@ def cmd_new(args):
         f.write(dump_fm(fm, body))
     print(f"created {nid} in todo/  (remember to fill sad_refs before starting)")
     _log("new", story_id=nid, capability=args.capability, parent=args.parent, title=args.title or "")
+
+
+CRITERION_BOX = re.compile(r"^(\s*-\s*)\[( |x|X)\](\s.*)$")
+SETTABLE_FIELDS = {"sad_refs", "capability", "target", "estimate", "parent"}
+
+
+def cmd_check(args):
+    """Tick/untick acceptance-criteria boxes — the sanctioned (logged) path.
+
+    Direct Edit of checkboxes on an active story is blocked by the guard hook so
+    the `done` gate can't be self-certified by an unaudited edit (Phase 1, #4).
+    """
+    if not args.all and not args.criterion:
+        _fatal("specify --criterion <substr> or --all", event="check", story_id=args.id)
+    path = find_story(args.id)
+    if not path:
+        _fatal(f"error: {args.id} not found", event="check", story_id=args.id)
+    fm, body = read_story(path)
+    m = re.search(r"(##\s*Acceptance Criteria\s*\n)(.*?)(\n##|\Z)", body, re.DOTALL)
+    if not m:
+        _fatal(f"{args.id} has no Acceptance Criteria section", event="check", story_id=args.id)
+    want = not args.uncheck
+    lines = m.group(2).split("\n")
+    matched, changed = 0, 0
+    for i, line in enumerate(lines):
+        bm = CRITERION_BOX.match(line)
+        if not bm:
+            continue
+        text = bm.group(3)
+        if args.all or (args.criterion and args.criterion.lower() in text.lower()):
+            matched += 1
+            is_checked = bm.group(2).lower() == "x"
+            if is_checked != want:
+                lines[i] = f"{bm.group(1)}[{'x' if want else ' '}]{text}"
+                changed += 1
+    if args.criterion and matched == 0:
+        _fatal(f"no acceptance criterion matches '{args.criterion}'",
+               event="check", story_id=args.id)
+    new_body = body[:m.start()] + m.group(1) + "\n".join(lines) + m.group(3) + body[m.end():]
+    fm.pop("_path", None); fm.pop("_column", None)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(dump_fm(fm, new_body))
+    verb = "unchecked" if args.uncheck else "checked"
+    print(f"{verb} {changed}/{matched} criteria in {args.id}")
+    _log("check", story_id=args.id, message=f"{verb} {changed}/{matched}",
+         count=changed, **{"uncheck": args.uncheck})
+
+
+def cmd_set(args):
+    """Set an allowlisted frontmatter field — the sanctioned (logged) path.
+
+    Routes gate-critical frontmatter (notably sad_refs) through an audited
+    command; direct Edit of these on an active story is blocked by the guard
+    hook. base_commit / attempts / column are deliberately NOT settable here.
+    """
+    if args.field not in SETTABLE_FIELDS:
+        _fatal(f"field '{args.field}' not settable via board.py set "
+               f"(allowed: {', '.join(sorted(SETTABLE_FIELDS))})",
+               event="set", story_id=args.id)
+    path = find_story(args.id)
+    if not path:
+        _fatal(f"error: {args.id} not found", event="set", story_id=args.id)
+    fm, body = read_story(path)
+    old = fm.get(args.field, "")
+    fm.pop("_path", None); fm.pop("_column", None)
+    fm[args.field] = args.value
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(dump_fm(fm, body))
+    print(f"set {args.field}: {old!r} -> {args.value!r} on {args.id}")
+    _log("set", story_id=args.id, field=args.field, message=f"{old} -> {args.value}")
 
 
 def cmd_show(args):
@@ -657,13 +770,11 @@ def cmd_validate(args):
     _log("validate", message="no violations")
 
 
-def cmd_review_check(args):
-    """Did the loop cheat? Check scope adherence + test integrity before done."""
-    path = find_story(args.id)
-    if not path:
-        _fatal(f"error: {args.id} not found", event="review-check", story_id=args.id)
-    fm, body = read_story(path)
-    base = args.base
+def run_review_check(fm, body, base):
+    """Core anti-cheat checks. Return (problems, warnings) — no logging, no exit.
+
+    Shared by the `review-check` command and the hard gate on move review/done.
+    """
     problems, warnings = [], []
 
     # 1. acceptance criteria actually ticked
@@ -700,6 +811,18 @@ def cmd_review_check(args):
     # 3. test integrity (deletions, count regression, weakening)
     for flag in git_test_integrity_issues(base):
         problems.append(f"test integrity: {flag}")
+
+    return problems, warnings
+
+
+def cmd_review_check(args):
+    """Did the loop cheat? Check scope adherence + test integrity before done."""
+    path = find_story(args.id)
+    if not path:
+        _fatal(f"error: {args.id} not found", event="review-check", story_id=args.id)
+    fm, body = read_story(path)
+    base = args.base
+    problems, warnings = run_review_check(fm, body, base)
 
     label = args.id
     if problems:
@@ -741,6 +864,12 @@ def main():
 
     m = sub.add_parser("move"); m.add_argument("id"); m.add_argument("column")
     m.add_argument("--reason"); m.add_argument("--force-attempts", action="store_true")
+    m.add_argument("--base", default="",
+                   help="git ref for the review/done review-check gate "
+                        "(default: the story's stamped base_commit)")
+    m.add_argument("--skip-review-check", action="store_true",
+                   help="human override: move to review/done despite review-check "
+                        "problems (logged as an override)")
     m.set_defaults(fn=cmd_move)
 
     l = sub.add_parser("list"); l.add_argument("--column"); l.add_argument("--capability")
@@ -750,6 +879,17 @@ def main():
     n = sub.add_parser("new"); n.add_argument("--capability", required=True)
     n.add_argument("--parent", required=True); n.add_argument("--id"); n.add_argument("--title")
     n.set_defaults(fn=cmd_new)
+
+    ck = sub.add_parser("check")
+    ck.add_argument("id")
+    ck.add_argument("--criterion", help="substring of the criterion to (un)tick")
+    ck.add_argument("--all", action="store_true", help="(un)tick every criterion")
+    ck.add_argument("--uncheck", action="store_true", help="clear instead of tick")
+    ck.set_defaults(fn=cmd_check)
+
+    st = sub.add_parser("set")
+    st.add_argument("id"); st.add_argument("field"); st.add_argument("value")
+    st.set_defaults(fn=cmd_set)
 
     s = sub.add_parser("show"); s.add_argument("id"); s.set_defaults(fn=cmd_show)
     sub.add_parser("render").set_defaults(fn=cmd_render)

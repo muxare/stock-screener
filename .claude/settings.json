@@ -2,7 +2,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|Write|Delete",
+        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|Delete",
         "hooks": [
           {
             "type": "command",

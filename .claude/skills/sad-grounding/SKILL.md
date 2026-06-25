@@ -34,7 +34,9 @@ weakening them.
 
 ## Verifying (anti-cheat)
 
-- Check each acceptance criterion explicitly; tick the boxes you actually met.
+- Check each acceptance criterion explicitly; tick the boxes you actually met
+  via `python tools/board.py check <id> --criterion "<substring>"` (the edit
+  guard blocks flipping checkboxes by hand on an active story).
 - Do NOT weaken or delete tests to make them pass. A failing test that
   reflects a real criterion stays failing and gets reported.
 - If you couldn't satisfy a criterion within scope, say so plainly and move the
@@ -45,21 +47,30 @@ weakening them.
 Complete every step and **show the output** in the transcript. Do not skip or
 summarize — the user must be able to audit the gate.
 
-1. **Capture base commit** before `move in-progress`:
-   `git rev-parse HEAD` → record as `<base>`.
-2. **Run review-check** after tests are green and criteria are ticked:
-   `python tools/board.py review-check <id> --base <base>`
-   Paste the full stdout. **Stop if exit code is non-zero** — fix or
-   `move blocked --reason "review-check: …"`.
-3. **Move to review** only after review-check passes:
-   `python tools/board.py move <id> review`
-4. **Move to done** only after human review (or tier A3 policy) and with all
-   acceptance boxes `[x]`:
-   `python tools/board.py move <id> done`
+1. **Base commit is auto-stamped.** `move in-progress` records `base_commit=HEAD`
+   on the story's FIRST entry (bounces keep the original pre-story base), so the
+   gate diffs only this story's changes. No manual capture needed; you may still
+   override with `--base <ref>` on review-check/move.
+2. **Run a code-review pass** after tests are green and criteria are ticked,
+   BEFORE moving to review: run `/code-review` (or spawn a code-review agent) on
+   the story diff vs `base_commit`. Address blocking findings; fan out-of-scope
+   findings into new stories. This is a mandatory loop step (it catches the
+   defect class review-check's heuristics miss — the STORY-018 lesson).
+3. **Pre-flight inspect (optional):** `python tools/board.py review-check <id>`
+   and paste the stdout. This is now an inspection, not the enforced gate.
+4. **Move to review:** `python tools/board.py move <id> review`. The move
+   **automatically re-runs the review-check gate** against `base_commit` and is
+   **refused** if it finds problems (so the gate no longer depends on you
+   remembering to run it). Human-only override: `move --skip-review-check`
+   (logged to events.jsonl as an `override`). If the story has no `base_commit`
+   the move is refused — re-run `move in-progress` or pass `--base`.
+5. **Move to done** only after human review (or tier A3 policy) and with all
+   acceptance boxes `[x]`: `python tools/board.py move <id> done` — this also
+   re-runs the gate.
 
 Hooks block manual `mv`/`rm` of story files; column changes through `board.py`
-only. `review-check` verifies Touch scope and test integrity (deletions,
-count regression, weakened assertions).
+only. The gate verifies acceptance criteria, Touch scope, and test integrity
+(deletions, count regression, weakened assertions).
 
 ## State is the folder, not your head, and you change it ONLY via board.py
 
@@ -76,5 +87,15 @@ go through the CLI, which enforces legal transitions and the invariants:
   conflict or max attempts; remembers the origin column.
 - `python tools/board.py move <id> unblock`       — returns it where it came from.
 
-Edit `blocked_reason`/criteria checkboxes in the file as needed, but column
-changes happen through `board.py` so the rules can't be bypassed.
+On an **active** story (in-progress/review/done/blocked) the edit guard blocks
+direct edits that flip a criterion checkbox or touch protected frontmatter, so
+change those through the CLI:
+
+- `python tools/board.py check <id> --criterion "<substring>"` — tick a
+  criterion (`--all` for every one, `--uncheck` to clear).
+- `python tools/board.py set <id> <field> <value>` — set an allowlisted field
+  (sad_refs, capability, target, estimate, parent; NOT base_commit/attempts/column).
+
+Free-text body edits (notes, Decisions, blocked_reason prose) and ALL edits while
+the story is in `todo` (authoring) stay allowed. Column changes always go through
+`board.py` so the rules can't be bypassed.
