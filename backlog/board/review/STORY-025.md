@@ -6,9 +6,10 @@ capability: CAP-screen
 sad_refs: [SAD#5.9, SAD#2.3, SAD#2.4]
 target: ~
 estimate: ~
-attempts: 0
+attempts: 1
 prev_column: ~
 blocked_reason: ~
+base_commit: 993441bd1444dbad67e07b83723a4edf2f402b45
 ---
 
 ## User Story
@@ -21,20 +22,20 @@ in-browser compute had: results now race, streams overlap, and selection state
 outlives the rows it pointed at. All three live in the client store (SAD#5.9).
 
 ## Acceptance Criteria
-- [ ] `runScreen()` is sequenced last-write-wins: when rule-set changes fire
+- [x] `runScreen()` is sequenced last-write-wins: when rule-set changes fire
       overlapping `/screen` requests, only the newest response is committed to
       `screen` (a slower earlier response can never overwrite a newer one).
       (finding 4 — `src/store.ts` `runScreen`)
-- [ ] `openBacktest()` is not re-entrant: starting a new backtest (or closing
+- [x] `openBacktest()` is not re-entrant: starting a new backtest (or closing
       the modal mid-run) cancels/ignores any in-flight stream so a stale
       `.then` can never overwrite the current `backtestResult`/progress.
       (finding 5 — `src/store.ts` `openBacktest`/`closeBacktest`)
-- [ ] When the effective rule set changes, `selected` and `compareSel` are
+- [x] When the effective rule set changes, `selected` and `compareSel` are
       reconciled with the new result set: a selection that is no longer a match
       is cleared (or visibly reconciled) so detail/compare never show a name
       absent from the current screen. (finding 6 — `src/store.ts` reactive
       `runScreen`/subscription)
-- [ ] Tests cover: out-of-order `/screen` responses commit the newest only; a
+- [x] Tests cover: out-of-order `/screen` responses commit the newest only; a
       superseded backtest stream does not overwrite the current result; a
       rule change drops a now-absent selection.
 
