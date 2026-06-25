@@ -51,11 +51,12 @@ interface ScreenResp {
 // match counts and rank pass-sets. The main screen passes ALL to get the rows.
 const ALL_ROWS = 1_000_000;
 
-async function apiScreen(rules: Rule[], limit = 0): Promise<ScreenResp> {
+async function apiScreen(rules: Rule[], limit = 0, signal?: AbortSignal): Promise<ScreenResp> {
   const res = await fetch('/screen', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ rules, limit }),
+    signal,
   });
   if (!res.ok) throw new Error('screen failed: ' + res.status);
   return res.json() as Promise<ScreenResp>;
@@ -70,11 +71,12 @@ async function apiInstrument(ticker: string): Promise<InstrumentBars | null> {
 
 // NDJSON stream (SAD#2.4): throttled `progress` lines, then one `result` line
 // carrying the single summary payload (SAD#6.5).
-async function apiBacktest(rules: Rule[], onProgress?: (pct: number) => void): Promise<BacktestResult | null> {
+async function apiBacktest(rules: Rule[], onProgress?: (pct: number) => void, signal?: AbortSignal): Promise<BacktestResult | null> {
   const res = await fetch('/backtest', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ rules }),
+    signal,
   });
   if (!res.ok || !res.body) throw new Error('backtest failed: ' + res.status);
   const reader = res.body.getReader();
@@ -435,6 +437,23 @@ export interface ScreenerState {
   toggleHeatmap: () => void;
   toggleAlert: (id: string) => void;
 }
+
+// Request sequencing (SAD#5.9, STORY-025). The service calls are async, so rapid
+// rule changes / re-runs race: a slower earlier response could overwrite a newer
+// one. Generation counters make the LATEST call the only one allowed to commit
+// state (last-write-wins); an AbortController cancels the superseded in-flight
+// request so we guard/cancel rather than serialize (keeps SAD#2.3 / SAD#2.4
+// budgets). Single store instance, so module scope is the right place (mirrors
+// the `rulesSig` guards in the reactive subscription below).
+let screenGen = 0;
+let screenAbort: AbortController | null = null;
+let btGen = 0;
+let btAbort: AbortController | null = null;
+// The keyed-count refreshers race the same way (review finding 3); each gets its
+// own generation so a slower earlier batch can never overwrite a newer one.
+let presetCountGen = 0;
+let screenCountGen = 0;
+let rankPassGen = 0;
 
 export const useScreener = create<ScreenerState>((set, get) => {
   const saveView = () => {
@@ -1046,18 +1065,37 @@ export const useScreener = create<ScreenerState>((set, get) => {
       const st = get();
       const preset = st.presetById(st.activePreset);
       const eff = [...preset.rules, ...st.customRules.filter((r) => (r as { kind: string }).kind !== 'rank')];
+      // Not re-entrant (review finding 5): stamp this run's generation and cancel
+      // any in-flight stream so a stale `.then`/`progress` from a superseded run
+      // (a re-run, or a close mid-run) can never overwrite the current state.
+      const gen = ++btGen;
+      btAbort?.abort();
+      const ac = new AbortController();
+      btAbort = ac;
       // Full-universe backtest runs server-side over the shared engine (SAD#2.5
       // / SAD#2.4); stream progress so the UI thread is never blocked.
       set({ backtestOpen: true, backtestResult: null, backtestError: null, backtestRunning: true, backtestProgress: 0 });
-      const failed = () => set({ backtestRunning: false, backtestError: 'Backtest service unavailable — start it with `node server/index.ts`.' });
-      apiBacktest(eff, (pct) => set({ backtestProgress: pct }))
+      const failed = () => { if (gen === btGen) set({ backtestRunning: false, backtestError: 'Backtest service unavailable — start it with `node server/index.ts`.' }); };
+      apiBacktest(eff, (pct) => { if (gen === btGen) set({ backtestProgress: pct }); }, ac.signal)
         // A stream that ends without a `result` line yields null — that is a
         // service failure, not a zero-signal result; surface it as an error so
         // the modal never reports a real run as "never fired" (review finding 1).
-        .then((res) => (res ? set({ backtestResult: res, backtestRunning: false }) : failed()))
+        .then((res) => {
+          if (gen !== btGen) return; // superseded — drop this stream's result
+          if (res) set({ backtestResult: res, backtestRunning: false }); else failed();
+        })
         .catch(failed);
     },
-    closeBacktest: () => set({ backtestOpen: false }),
+    closeBacktest: () => {
+      // Closing mid-run supersedes the in-flight stream (review finding 5): bump the
+      // generation and abort so its pending `.then` becomes a no-op. The superseded
+      // stream can no longer settle the running flag, so clear it here — otherwise
+      // backtestRunning leaks `true` until the next openBacktest.
+      btGen++;
+      btAbort?.abort();
+      btAbort = null;
+      set({ backtestOpen: false, backtestRunning: false, backtestProgress: 0 });
+    },
     toggleHeatmap: () => set((st) => ({ heatmapOpen: !st.heatmapOpen })),
     toggleAlert: (id) => set((st) => {
       const alertScreens = { ...st.alertScreens, [id]: !st.alertScreens[id] };
@@ -1067,11 +1105,30 @@ export const useScreener = create<ScreenerState>((set, get) => {
 
     // ---- service data flow (SAD#4.2 / SAD#5.9) ----
     runScreen: async () => {
+      // Last-write-wins: stamp this run's generation and cancel the prior in-flight
+      // request. A response whose generation is no longer current must never commit
+      // — that is the race in review finding 4 (out-of-order /screen responses).
+      const gen = ++screenGen;
+      screenAbort?.abort();
+      const ac = new AbortController();
+      screenAbort = ac;
       set({ screenLoading: true, screenError: null });
       try {
-        const r = await apiScreen(get().effectiveRules(), ALL_ROWS);
-        set({ screen: { total: r.total, tickers: r.tickers, rows: r.results }, screenLoading: false });
+        const r = await apiScreen(get().effectiveRules(), ALL_ROWS, ac.signal);
+        if (gen !== screenGen) return; // superseded by a newer run — drop this result
+        // Commit the result AND reconcile the selection against the new match set
+        // (STORY-018 finding 6) in one functional set, so a name that is no longer a
+        // match cannot linger in detail/compare — and we notify subscribers once.
+        const matched = new Set(r.tickers);
+        set((s) => {
+          const next: Partial<ScreenerState> = { screen: { total: r.total, tickers: r.tickers, rows: r.results }, screenLoading: false };
+          if (s.selected && !matched.has(s.selected)) next.selected = null;
+          const cs = s.compareSel.filter((t) => matched.has(t));
+          if (cs.length !== s.compareSel.length) next.compareSel = cs;
+          return next;
+        });
       } catch {
+        if (gen !== screenGen) return; // superseded (incl. our own abort) — stay silent
         set({ screenLoading: false, screenError: 'Screening service unavailable — start it with `node server/index.ts`.' });
       }
     },
@@ -1090,22 +1147,29 @@ export const useScreener = create<ScreenerState>((set, get) => {
       // (review finding 2).
       try { return (await apiScreen(rules, 0)).total; } catch { return null; }
     },
+    // These keyed-count refreshers fire from the reactive subscription on rapid
+    // preset/screen/rule edits, so they race exactly like runScreen did (review
+    // finding 3): an older response could overwrite a newer count. Each carries its
+    // own last-write-wins generation so only the latest batch commits.
     refreshPresetCounts: async () => {
+      const gen = ++presetCountGen;
       const presets = get().presets();
       await Promise.all(presets.map(async (p) => {
-        try { const r = await apiScreen(p.rules, 0); set((s) => ({ presetCounts: { ...s.presetCounts, [p.id]: r.total } })); } catch { /* ignore */ }
+        try { const r = await apiScreen(p.rules, 0); if (gen !== presetCountGen) return; set((s) => ({ presetCounts: { ...s.presetCounts, [p.id]: r.total } })); } catch { /* ignore */ }
       }));
     },
     refreshScreenCounts: async () => {
+      const gen = ++screenCountGen;
       await Promise.all(get().savedScreens.map(async (scr) => {
-        try { const r = await apiScreen([scr.rule], 0); set((s) => ({ screenCounts: { ...s.screenCounts, [scr.id]: r.total } })); } catch { /* ignore */ }
+        try { const r = await apiScreen([scr.rule], 0); if (gen !== screenCountGen) return; set((s) => ({ screenCounts: { ...s.screenCounts, [scr.id]: r.total } })); } catch { /* ignore */ }
       }));
     },
     refreshRankPass: async () => {
+      const gen = ++rankPassGen;
       const rankRules = get().customRules.filter((r) => (r as { kind: string }).kind === 'rank');
       await Promise.all(rankRules.map(async (rr) => {
         const sig = JSON.stringify(rr);
-        try { const r = await apiScreen([rr], 0); set((s) => ({ rankTickers: { ...s.rankTickers, [sig]: r.tickers } })); } catch { /* ignore */ }
+        try { const r = await apiScreen([rr], 0); if (gen !== rankPassGen) return; set((s) => ({ rankTickers: { ...s.rankTickers, [sig]: r.tickers } })); } catch { /* ignore */ }
       }));
     },
   };
