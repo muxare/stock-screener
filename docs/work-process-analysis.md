@@ -606,6 +606,134 @@ the later phases, since they presuppose the gate is real:
 
 ---
 
+## 10. Meta-layer implementation plan (§8 → buildable steps)
+
+_Added 2026-06-25. Phases 1–4 of §7 are landed (see git history); this section turns the
+§8 meta-layer (#16–#18) into a concrete, ordered build. **Decision (locked):** the two
+lenses are built as **advisory agents in `.claude/agents/` plus thin slash-commands** —
+the agent prompt carries the judgement, `board.py` supplies the data. They never mutate
+the board; they prepare decisions that land at a gate._
+
+### 10.0 Guiding invariants (carry into every step)
+
+- **Capture ≠ commit.** An idea is not a story and cannot reach the build loop without a
+  human at Gate 1. The inbox is firewalled from `backlog/board/`.
+- **Agents prepare and enforce; the human decides at the gates.** No SM/PO output is
+  self-acting, and the meta-layer adds **no sixth gate** — it makes the existing five
+  cheaper.
+- **Every lens output must land at a named gate** (SM → Gate 5/retro; PO → Gate 1/3) or
+  it isn't built. No orphan reports.
+- **The PO lens never invents scope** — it orders existing anchored work and triages the
+  inbox; it cannot author stories.
+
+### 10.1 Recommended order of implementation
+
+```mermaid
+flowchart TD
+    M16["STEP A — #16 Idea capture\n(the return-edge + inbox surface)"] --> M17
+    M17["STEP B — #17 SM + PO lens agents\n(read the surfaces A exposes)"] --> M18
+    M18["STEP C — #18 Loops/routines\n(point the clock at A + B)"]
+    M16 -. tests/render/docs ride along .-> M16
+```
+
+The order is dependency-driven, not preference: **#16 first** because the idea inbox is
+the surface the PO lens (#17) triages and the triage loop (#18) nudges; **#17 next**
+because the lenses are what the loops (#18) actually run; **#18 last** because a clock
+with nothing to drive is noise. Within each step, tests + `render` + doc updates ride
+alongside rather than trailing.
+
+Build **Step A end-to-end and stop for review** before Step B — it is the smallest safe
+increment and everything downstream depends on its shape.
+
+---
+
+### STEP A — #16 Idea capture (do first, then review)
+
+**Goal:** a one-command, provenance-stamped return-edge so a discovery found mid-flow has
+a sanctioned home instead of being smuggled into the current story (F3) or dropped.
+
+1. **A1 — Enrich `backlog/ideas/IDEA.template.md` with provenance frontmatter.** Add
+   `status: inbox`, `captured: <date>`, `discovery_type: out-of-scope`, `born_from:`
+   (origin story id), `found_by:`, and a `why:` line (what SAD section / ADR the idea
+   would need). Today the template is 6 lines and carries none of this.
+2. **A2 — Add `board.py idea-new`.** Auto-number `IDEA-NNN` (reuse `_next_item_id`;
+   `IDEA_ID` regex already exists), stamp provenance from flags
+   (`--title`, `--born-from`, `--why`, `--found-by`), default `discovery_type` to
+   `out-of-scope`, write to `backlog/ideas/`, and `_log("idea-new", …)`. Implement as a
+   dedicated `cmd_idea_new` (provenance handling is richer than the generic
+   `cmd_new_item`); register the subparser next to `new-*`.
+3. **A3 — Add `board.py idea-list`.** Print the inbox (id, `born_from`, age from
+   `captured`, `status`) with a `--json` mode, mirroring `batch-list`/`exceptions`. This
+   is the surface the PO lens (Step B) and the triage loop (Step C) read.
+4. **A4 — Make the firewall explicit in `board.py validate`.** Add a check that no story
+   `parent` resolves *directly* to an `IDEA-NNN` (the legal chain is
+   story→feature→epic→SAD→plan→idea). Ideas are already physically firewalled (the build
+   loop only picks `board/todo`); this makes smuggling a *validation failure*, not a
+   convention. Closes the F3 back-door.
+5. **A5 — Stale-idea archival.** Using the `captured` stamp, add archival (a
+   `board.py idea-archive` subcommand and/or a `validate` warning) that moves ideas not
+   promoted within N cycles to `backlog/ideas/archive/`, keeping the inbox high-signal.
+   N is a constant alongside `DEFAULT_WIP_LIMIT`.
+6. **A6 — `/capture-idea` thin command.** A wrapper any agent or human fires from
+   anywhere mid-flow. Its prose makes the discovery-type fork explicit: **in-scope**
+   (anchored to an existing `SAD#3` capability) → a new **STORY** via the existing path;
+   **out-of-scope** (needs architecture the SAD lacks) → `idea-new`.
+7. **A7 — Tests** in `tools/tests/test_board_gates.py`: `idea-new` numbering + provenance,
+   the firewall `validate` rule (a story parented on an IDEA fails), and stale-archive.
+8. **A8 — `board.py render`** should list the idea inbox (and batches) in `board.md` —
+   neither appears today.
+
+_Review gate: stop here. Confirm the inbox shape and firewall before building the lenses._
+
+---
+
+### STEP B — #17 SM + PO lens agents
+
+**Goal:** two horizontal, advisory agents that retire the four-hats picture (§5) by
+preparing the Gate 2/3/4/5 decisions you still own. Form: **`.claude/agents/*.md` +
+thin `/`-commands** (no `.claude/agents/` dir exists yet — create it).
+
+9. **B1 — Scrum-Master lens** — `.claude/agents/scrum-master-lens.md` + `/sm-health`
+   command. Reads `events.jsonl` + board folders; runs `board.py metrics` and
+   `board.py exceptions`; emits the **health digest** + **exception queue** that land at
+   Gate 5/retro. Detects: WIP breaches, aging/stalled stories, climbing `attempts`,
+   guard-fights (F5), review-check refusal patterns, demo-sweep pollution (F7).
+   **High delegability** — the job is mostly rules; the agent assembles and explains, it
+   does not decide.
+10. **B2 — Product-Owner lens** — `.claude/agents/product-owner-lens.md` + `/po-batch`
+    command. Reads backlog-vs-SAD coverage + plan success-metrics + `idea-list`; produces
+    a **prioritised, anchored proposed next batch** whose landing point is
+    `board.py batch-new` (Gate 3), plus **idea-triage recommendations** for Gate 1.
+    **Prep only** — it proposes ordering of *existing anchored work* and triages the
+    inbox; it must never author a story or invent scope.
+11. **B3 — Guardrail wiring.** Both agent prompts state the invariant explicitly:
+    *prepare and enforce, never decide; every output names the gate it feeds.* Add a line
+    to each `/`-command pointing the human at the gate the output expects.
+
+---
+
+### STEP C — #18 Loops / routines as the clock
+
+**Goal:** give timebox-free Kanban a heartbeat, partitioned by risk.
+
+12. **C1 — Observation loops (safe now).** Document/enable `/loop` for the SM health sweep
+    and PO batch-prep, plus an idea-inbox triage nudge. Read-only; cannot harm flow.
+13. **C2 — Scheduled routine for the nightly SM retro digest** (cron-style) so the
+    heartbeat survives across sessions, complementing the in-session `/loop`.
+14. **C3 — Action loop `/loop /build-toward <batch>` — now eligible** (Phase 1 is
+    complete). It must carry the **WIP/batch bound as its stop condition** or it churns.
+    Spell this out in `.claude/commands/build-toward.md`.
+
+---
+
+### 10.2 Closeout
+
+15. **Mark #16–#18 landed in this document** (mirroring how Phases 1–4 were closed) and
+    cross off the matching friction items (F3 idea back-edge; the four-hats retirement in
+    §5) once Steps A–C are verified.
+
+---
+
 _Appendix — sources: `.workflow/events.jsonl` (182+ events, 2026-06-22→24); `tools/board.py`,
 `tools/hooks/*`, `.claude/settings.json`; `.claude/skills/{idea-refiner,poc-to-plan,sad-author,
 backlog-decomposer,sad-grounding,story-syncer}/SKILL.md` and matching `.claude/commands/*`;
