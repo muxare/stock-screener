@@ -28,9 +28,6 @@ As a trader, I want to evaluate a composable rule set against the universe with 
 - Server-side / full-universe scale (STORY-016).
 - Automated POC-parity tests (STORY-020).
 
-## Status
-DONE — as-built in `src/lib/market.ts` + `src/store.ts`. Automated golden-master verification (SAD#2.1) is tracked in STORY-020.
-
 ## Claude Code Prompt
 > Already implemented (as-built capture). If reopened, READ the `sad_refs` sections first and preserve POC semantics exactly; flag any conflict rather than improvising. Stay within Touch scope.
 

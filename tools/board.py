@@ -15,11 +15,17 @@ Transition policy (configured for this project):
   - moving to `done` is REFUSED while any acceptance-criteria box is unchecked
 
 Commands:
-  move <id> <column> [--reason TEXT] [--base REF] [--skip-review-check]
+  move <id> <column> [--reason TEXT] [--base REF] [--skip-review-check] [--skip-ready]
       moving to `review`/`done` runs the review-check gate against the story's
-      stamped base_commit and is REFUSED on problems unless --skip-review-check
+      stamped base_commit and is REFUSED on problems unless --skip-review-check.
+      moving to `in-progress` enforces the Definition of Ready (#5) — real
+      acceptance criteria, a declared Touch scope, a valid capability — REFUSED
+      unless --skip-ready.
   list [--column C] [--capability ID] [--target T] [--json]
   new --capability ID --parent FEAT-ID [--id STORY-NNN] [--title ...]
+  new-epic|new-feature|new-plan|new-sad [--parent ID] [--id ID] [--title ...]
+      Gate-free authoring scaffold: auto-number the next id and write a file
+      from the matching template (closes F10, the manual-ID-assignment touch).
   check <id> [--criterion SUBSTR | --all] [--uncheck]  # tick acceptance criteria
   set <id> <field> <value>      # set an allowlisted frontmatter field (e.g. sad_refs)
   reject <id> --reason TEXT     # Gate-4 reject: review -> in-progress, re-enters loop
@@ -32,6 +38,8 @@ Commands:
   show <id>
   render            # write a human-readable board.md (pure read, not state)
   validate          # check invariants across the whole board (incl. WIP + batch)
+  metrics [--json]  # retrospective off events.jsonl: cycle time, refusal/bounce
+                    # rate, attempts spread, blocked time, demo-sweep (F7) flag
   logs [--tail N]   # show workflow audit log (.workflow/events.jsonl)
 """
 import argparse, glob, json, os, re, sys, shutil
@@ -51,6 +59,9 @@ PLANS = os.path.join(ROOT, "backlog", "plans")
 SAD_DIR = os.path.join(ROOT, "backlog", "sad")
 BATCHES = os.path.join(ROOT, "backlog", "batches")
 BATCH_TEMPLATE = os.path.join(BATCHES, "BATCH.template.md")
+# Optional ledger of SAD#3 capabilities consciously NOT scheduled yet, so the
+# coverage invariant (#10) can tell "deferred on purpose" from "silently dropped".
+DEFERRED_CAPS = os.path.join(ROOT, "backlog", "deferred-capabilities.md")
 ANCHOR_RE = re.compile(r"SAD#\d+(?:\.\d+)*")
 CAPABILITY_RE = re.compile(r"### SAD#3(?:\.\d+)?\s+([\w.*-]+):")
 IDEA_ID = re.compile(r"^IDEA-\d{3}$")
@@ -61,6 +72,16 @@ FEAT_ID = re.compile(r"^FEAT-\d{3}$")
 STORY_ID = re.compile(r"^STORY-\d{3}$")
 BATCH_ID = re.compile(r"^BATCH-\d{3}$")
 SENTINELS = ("", "[]", "~", "None")
+
+# Auto-numbered authoring artifacts (#14, closes F10). Each entry:
+#   dir, id-prefix, parent-id matcher (None = no parent field), parent-required.
+# `new` already auto-numbers stories; these extend it to the rest of the chain.
+ITEM_KINDS = {
+    "epic":    (EPICS,     "EPIC", None,     False),
+    "feature": (FEATURES,  "FEAT", EPIC_ID,  True),
+    "plan":    (PLANS,     "PLAN", None,     False),
+    "sad":     (SAD_DIR,   "SAD",  PLAN_ID,  False),
+}
 
 # Gate 3: how many stories may sit in-progress at once when no active batch
 # overrides it. The cap turns "fan debt out into the backlog" (F3) into a visible
@@ -240,6 +261,49 @@ def touch_scope(body):
     return globs
 
 
+PLACEHOLDER = re.compile(r"<[^>]+>")
+
+
+def real_criteria(body):
+    """Acceptance-criteria lines that carry a real, non-placeholder requirement."""
+    m = re.search(r"##\s*Acceptance Criteria\s*\n(.*?)(\n##|\Z)", body, re.DOTALL)
+    if not m:
+        return []
+    out = []
+    for line in m.group(1).splitlines():
+        bm = re.match(r"^\s*-\s*\[( |x|X)\]\s*(.*\S)?\s*$", line)
+        if not bm:
+            continue
+        text = (bm.group(2) or "").strip()
+        if text and not PLACEHOLDER.search(text):
+            out.append(text)
+    return out
+
+
+def has_status_section(body):
+    """True if the story still carries the deprecated `## Status` prose (F6/#12)."""
+    return bool(re.search(r"^##\s*Status\s*$", body, re.MULTILINE))
+
+
+def definition_of_ready(fm, body):
+    """Machine-checkable Definition of Ready, enforced at `move in-progress` (#5).
+
+    Beyond the long-standing `sad_refs` gate: a story is only ready to start when
+    it states real acceptance criteria, declares a Touch scope (closing the
+    "no scope = pass" loophole), and names a valid capability. Returns a list of
+    problems (empty = ready).
+    """
+    problems = []
+    cap = (fm.get("capability") or "").strip()
+    if not cap or cap in SENTINELS or PLACEHOLDER.search(cap):
+        problems.append("no valid capability (still a placeholder)")
+    if not real_criteria(body):
+        problems.append("no real acceptance criteria (empty or placeholder)")
+    if not touch_scope(body):
+        problems.append("no Touch scope declared (cannot bound the change)")
+    return problems
+
+
 def normalize_path(path):
     """Repo-relative path with forward slashes and no leading ./"""
     p = path.replace("\\", "/").strip()
@@ -336,6 +400,45 @@ def sad_anchors(text):
 
 def sad_capabilities(text):
     return set(CAPABILITY_RE.findall(text))
+
+
+def sad_status(text):
+    """Return the SAD's frontmatter `status` (Draft|Reviewed|Approved), or ''."""
+    fm, _ = split_fm(text)
+    return ((fm or {}).get("status") or "").strip()
+
+
+def sad_out_of_scope_tokens(text):
+    """Concrete code-span identifiers named in `SAD#1.2` (out of scope).
+
+    SAD#1.2 is prose, so we mechanise only the unambiguous half: the backtick-
+    quoted artifacts a story must never build against (e.g. `dc-runtime`,
+    `mulberry32`, `<x-dc>`). A token must look like a real identifier/path —
+    plain English in backticks is ignored to avoid false positives.
+    """
+    m = re.search(r"###\s*SAD#1\.2\b.*?\n(.*?)(\n###|\n##\s|\Z)", text, re.DOTALL)
+    if not m:
+        return set()
+    tokens = set()
+    for span in re.findall(r"`([^`]+)`", m.group(1)):
+        s = span.strip()
+        if re.search(r"[./<>-]", s) and not re.search(r"\s", s) and len(s) >= 3:
+            tokens.add(s)
+    return tokens
+
+
+def deferred_capabilities():
+    """CAP ids consciously deferred (optional ledger), so coverage (#10) can tell
+    a deliberate deferral from a silent capability drop. Lines like `- CAP-x: …`."""
+    if not os.path.exists(DEFERRED_CAPS):
+        return {}
+    out = {}
+    with open(DEFERRED_CAPS, encoding="utf-8") as f:
+        for line in f:
+            mm = re.match(r"\s*-\s*(CAP-[\w.-]+)\s*[:\-—]?\s*(.*)$", line)
+            if mm:
+                out[mm.group(1).strip()] = mm.group(2).strip()
+    return out
 
 
 def feature_exists(feat_id):
@@ -548,6 +651,23 @@ def cmd_move(args):
         msg = f"{args.id} has empty sad_refs; cannot start untraceable work"
         _log("move", outcome="refused", message=msg, story_id=args.id, **{"from": src, "to": dst})
         sys.exit(f"refused: {msg}")
+    # Definition of Ready (#5): don't start work that isn't ready. sad_refs is
+    # already gated above; here we add real criteria, a declared Touch scope, and
+    # a valid capability. Overridable, like the review-check gate, with a flag.
+    if dst == "in-progress":
+        not_ready = definition_of_ready(fm, body)
+        if not_ready and not args.skip_ready:
+            print(f"NOT READY for {args.id} (Definition of Ready):")
+            for p in not_ready:
+                print("  ✗ " + p)
+            msg = f"definition-of-ready: {len(not_ready)} problem(s)"
+            _log("move", outcome="refused", message=msg, story_id=args.id,
+                 count=len(not_ready), **{"from": src, "to": dst})
+            sys.exit(f"refused: {msg}. Fix, or re-run with --skip-ready to override.")
+        if not_ready and args.skip_ready:
+            _log("move", outcome="override", story_id=args.id,
+                 message=f"--skip-ready over {len(not_ready)} problem(s)",
+                 count=len(not_ready), **{"from": src, "to": dst})
     if dst == "done":
         n = unchecked_criteria(body)
         if n:
@@ -838,6 +958,64 @@ def cmd_new(args):
     _log("new", story_id=nid, capability=args.capability, parent=args.parent, title=args.title or "")
 
 
+def _next_item_id(dirpath, prefix):
+    nums = []
+    for p in glob.glob(os.path.join(dirpath, f"{prefix}-*.md")):
+        if p.endswith(".template.md"):
+            continue
+        mm = re.search(rf"{prefix}-(\d+)", os.path.basename(p))
+        if mm:
+            nums.append(int(mm.group(1)))
+    return f"{prefix}-{(max(nums) + 1 if nums else 1):03d}"
+
+
+def cmd_new_item(args):
+    """Auto-number and scaffold an epic/feature/plan/sad from its template (#14).
+
+    Removes the last manual-ID-assignment touch (F10): ids never collide because
+    board.py is the single allocator, exactly as it already is for stories.
+    """
+    kind = args.kind
+    dirpath, prefix, parent_re, parent_required = ITEM_KINDS[kind]
+    id_re = {"epic": EPIC_ID, "feature": FEAT_ID, "plan": PLAN_ID, "sad": SAD_ID}[kind]
+
+    new_id = args.id or _next_item_id(dirpath, prefix)
+    if not id_re.match(new_id):
+        _fatal(f"{new_id}: invalid {kind} id (use {prefix}-NNN)", event="new-" + kind)
+    if os.path.exists(os.path.join(dirpath, f"{new_id}.md")):
+        _fatal(f"{new_id} already exists", event="new-" + kind)
+
+    parent = (args.parent or "").strip()
+    if parent_required and not parent:
+        _fatal(f"new-{kind} needs --parent ({parent_re.pattern})", event="new-" + kind)
+    if parent and parent_re and not parent_re.match(parent):
+        _fatal(f"{parent}: bad parent id for {kind}", event="new-" + kind)
+    if parent and parent_re is EPIC_ID and not epic_exists(parent):
+        _fatal(f"parent epic {parent} not found", event="new-" + kind)
+    if parent and parent_re is PLAN_ID and not os.path.exists(os.path.join(PLANS, f"{parent}.md")):
+        _fatal(f"parent plan {parent} not found", event="new-" + kind)
+
+    tpl_path = os.path.join(dirpath, f"{prefix}.template.md")
+    if not os.path.exists(tpl_path):
+        _fatal(f"missing template {tpl_path}", event="new-" + kind)
+    with open(tpl_path, encoding="utf-8") as f:
+        fm, body = split_fm(f.read())
+    fm = fm or {}
+    fm["id"] = new_id
+    if parent and "parent" in fm:
+        fm["parent"] = parent
+    if args.title:
+        body = re.sub(r"(^#\s+)[^\n]*", rf"\g<1>{new_id} — {args.title}",
+                      body, count=1, flags=re.MULTILINE)
+    os.makedirs(dirpath, exist_ok=True)
+    out = os.path.join(dirpath, f"{new_id}.md")
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(dump_fm(fm, body))
+    print(f"created {new_id} in {os.path.relpath(dirpath, ROOT)}/"
+          + (f"  (parent {parent})" if parent else ""))
+    _log("new-" + kind, message=new_id, **({"parent": parent} if parent else {}))
+
+
 CRITERION_BOX = re.compile(r"^(\s*-\s*)\[( |x|X)\](\s.*)$")
 SETTABLE_FIELDS = {"sad_refs", "capability", "target", "estimate", "parent"}
 
@@ -957,6 +1135,7 @@ def cmd_render(args):
 
 def cmd_validate(args):
     problems = []
+    warnings = []  # surfaced but non-blocking (e.g. Draft SAD, stale ## Status)
     stories = all_stories()
     ids_seen = {}
     story_caps = set()
@@ -1046,10 +1225,27 @@ def cmd_validate(args):
         if col == "blocked" and not prev_column_valid(fm):
             problems.append(f"{sid}: blocked without prev_column (can't unblock cleanly)")
 
+    # Stale `## Status` prose (F6/#12): the section was dropped — flag any that
+    # creep back so the column stays the single source of truth, non-blocking.
+    for fm in stories:
+        _, sbody = read_story(fm["_path"])
+        if has_status_section(sbody):
+            warnings.append(f"{fm.get('id','?')}: has a stale `## Status` section "
+                            f"(removed in Phase 4 — the column is the status)")
+
     sad_text = load_sad_content(sad_id)
     if sad_text:
         anchors = sad_anchors(sad_text)
         caps = sad_capabilities(sad_text)
+        # Gate 2 (#10): a non-Approved SAD is decomposed/built at your own risk.
+        # Surfaced as a warning, not a hard block, so continuous validate stays
+        # green while a Draft SAD is being worked.
+        status = sad_status(sad_text)
+        if status and status != "Approved":
+            warnings.append(f"governing SAD is '{status}', not Approved "
+                            f"(Gate 2: architecture not signed off)")
+        oos_tokens = sad_out_of_scope_tokens(sad_text)
+        deferred = deferred_capabilities()
         for fm in stories:
             sid = fm.get("id", "?")
             for ref in parse_sad_refs(fm.get("sad_refs")):
@@ -1058,9 +1254,24 @@ def cmd_validate(args):
             cap = (fm.get("capability") or "").strip()
             if cap and cap not in SENTINELS and caps and cap not in caps:
                 problems.append(f"{sid}: unknown capability {cap}")
+            # SAD#1.2 out-of-scope guard (#10): a story may not aim its Touch
+            # scope at an artifact the SAD explicitly excludes.
+            if oos_tokens:
+                _, sbody = read_story(fm["_path"])
+                for g in touch_scope(sbody):
+                    segs = set(re.split(r"[/*]+", g)) | {g}
+                    hit = oos_tokens & {s for s in segs if s}
+                    if hit:
+                        problems.append(f"{sid}: Touch scope targets out-of-scope "
+                                        f"(SAD#1.2) artifact {', '.join(sorted(hit))}")
         if stories and caps:
             for cap in sorted(caps):
-                if cap not in story_caps:
+                if cap in story_caps:
+                    continue
+                if cap in deferred:
+                    warnings.append(f"capability {cap}: no story yet — deferred "
+                                    f"({deferred[cap] or 'see deferred-capabilities.md'})")
+                else:
                     problems.append(f"capability {cap}: no story coverage")
         for fm, _ in actives:
             bid = fm.get("id", "?")
@@ -1068,14 +1279,20 @@ def cmd_validate(args):
                 if caps and cap not in caps:
                     problems.append(f"{bid}: unknown capability {cap} (not a SAD#3 cap)")
 
+    if warnings:
+        print("WARNINGS (non-blocking):")
+        for w in warnings:
+            print("  ! " + w)
     if problems:
         print("INVARIANT VIOLATIONS:")
         for p in problems:
             print("  - " + p)
-        _log("validate", outcome="refused", message=f"{len(problems)} violations", count=len(problems))
+        _log("validate", outcome="refused", message=f"{len(problems)} violations",
+             count=len(problems), warnings=len(warnings))
         sys.exit(1)
-    print("ok: no invariant violations")
-    _log("validate", message="no violations")
+    print("ok: no invariant violations"
+          + (f" ({len(warnings)} warning(s))" if warnings else ""))
+    _log("validate", message="no violations", warnings=len(warnings))
 
 
 def run_review_check(fm, body, base):
@@ -1155,6 +1372,171 @@ def cmd_review_check(args):
     _log("review-check", story_id=label, base=base, warnings=len(warnings))
 
 
+# Below this wall-clock span a done story's whole todo→done march reads as a
+# demo-sweep / as-built capture rather than a real build loop (F7).
+INSTANT_SECONDS = 30
+
+
+def _parse_ts(value):
+    from datetime import datetime
+    try:
+        return datetime.fromisoformat(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def _median(values):
+    if not values:
+        return None
+    s = sorted(values)
+    n = len(s)
+    mid = n // 2
+    return s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2
+
+
+def _percentile(values, pct):
+    if not values:
+        return None
+    s = sorted(values)
+    k = max(0, min(len(s) - 1, int(round((pct / 100) * (len(s) - 1)))))
+    return s[k]
+
+
+def _fmt_dur(seconds):
+    if seconds is None:
+        return "—"
+    seconds = int(seconds)
+    if seconds < 90:
+        return f"{seconds}s"
+    mins = seconds // 60
+    if mins < 90:
+        return f"{mins}m"
+    hours = mins / 60
+    if hours < 48:
+        return f"{hours:.1f}h"
+    return f"{hours / 24:.1f}d"
+
+
+def compute_metrics():
+    """Retrospective aggregates off the event log (#9) — the agile feedback loop.
+
+    Cycle time, review-check refusal rate, bounce rate, attempts spread, blocked
+    duration, and the demo-sweep (F7) flag for done stories that never really ran
+    the loop. Returns a plain dict (also drives the --json output)."""
+    import collections
+    events = workflow_log.read_events(tail=0)
+    moves = [e for e in events if e.get("tool") == "board"
+             and e.get("event") == "move" and e.get("outcome") == "ok"]
+    by_story = collections.defaultdict(list)
+    for e in moves:
+        sid = e.get("story_id")
+        ts = _parse_ts(e.get("ts"))
+        if sid and ts:
+            by_story[sid].append((ts, e.get("from"), e.get("to")))
+    for sid in by_story:
+        by_story[sid].sort(key=lambda r: r[0])
+
+    cycles, instant = {}, {}
+    blocked_time = {}
+    for sid, seq in by_story.items():
+        first_start = next((ts for ts, _f, t in seq if t == "in-progress"), None)
+        done_ts = next((ts for ts, _f, t in reversed(seq) if t == "done"), None)
+        if first_start and done_ts and done_ts >= first_start:
+            secs = (done_ts - first_start).total_seconds()
+            (instant if secs < INSTANT_SECONDS else cycles)[sid] = secs
+        # blocked spans: pair each enter-blocked with the next leave-blocked
+        enter = None
+        for ts, _f, t in seq:
+            if t == "blocked":
+                enter = ts
+            elif enter is not None:
+                blocked_time[sid] = blocked_time.get(sid, 0) + (ts - enter).total_seconds()
+                enter = None
+
+    # review-check gate health (explicit runs + hard-gate move blocks)
+    rc = [e for e in events if e.get("tool") == "board" and e.get("event") == "review-check"]
+    rc_refused = sum(1 for e in rc if e.get("outcome") == "refused")
+    rc_total = len(rc)
+    gate_blocks = sum(
+        1 for e in events
+        if e.get("tool") == "board" and e.get("event") == "move"
+        and e.get("outcome") == "refused"
+        and str(e.get("message", "")).startswith("review-check")
+    )
+
+    # bounce rate: rejects + any review→in-progress demote, over stories that
+    # ever reached review.
+    rejects = sum(1 for e in events if e.get("tool") == "board" and e.get("event") == "reject")
+    demotes = sum(1 for ts, f, t in
+                  [(ts, f, t) for seq in by_story.values() for ts, f, t in seq]
+                  if f == "review" and t == "in-progress")
+    bounces = rejects + demotes
+    reached_review = sum(1 for seq in by_story.values()
+                         if any(t == "review" for _ts, _f, t in seq))
+
+    attempts = collections.Counter()
+    for fm in all_stories():
+        try:
+            attempts[int(fm.get("attempts", "0") or "0")] += 1
+        except ValueError:
+            attempts[0] += 1
+
+    cyc_vals = list(cycles.values())
+    return {
+        "events_total": len(events),
+        "done_count": sum(1 for fm in all_stories() if fm["_column"] == "done"),
+        "cycle": {
+            "n": len(cyc_vals),
+            "median_s": _median(cyc_vals),
+            "p90_s": _percentile(cyc_vals, 90),
+            "max_s": max(cyc_vals) if cyc_vals else None,
+            "max_story": max(cycles, key=cycles.get) if cycles else None,
+        },
+        "review_check": {"runs": rc_total, "refused": rc_refused,
+                         "refusal_rate": (rc_refused / rc_total) if rc_total else None,
+                         "hard_gate_blocks": gate_blocks},
+        "bounce": {"bounces": bounces, "reached_review": reached_review,
+                   "rate": (bounces / reached_review) if reached_review else None},
+        "blocked": {"total_s": sum(blocked_time.values()),
+                    "longest_story": max(blocked_time, key=blocked_time.get) if blocked_time else None,
+                    "longest_s": max(blocked_time.values()) if blocked_time else None},
+        "attempts": dict(sorted(attempts.items())),
+        "demo_sweep": sorted(instant.keys()),
+    }
+
+
+def cmd_metrics(args):
+    m = compute_metrics()
+    if args.json:
+        print(json.dumps(m, indent=2))
+        _log("metrics", count=m["done_count"])
+        return
+    c, rcheck, b, bl = m["cycle"], m["review_check"], m["bounce"], m["blocked"]
+    print(f"RETROSPECTIVE — {m['events_total']} logged events, {m['done_count']} done\n")
+    print(f"Cycle time (n={c['n']}, demo-sweep excluded):")
+    print(f"  median {_fmt_dur(c['median_s'])} · p90 {_fmt_dur(c['p90_s'])} · "
+          f"max {_fmt_dur(c['max_s'])}" + (f" ({c['max_story']})" if c['max_story'] else ""))
+    rate = rcheck["refusal_rate"]
+    print(f"\nReview-check gate: {rcheck['refused']}/{rcheck['runs']} runs refused"
+          + (f" ({rate*100:.0f}%)" if rate is not None else "")
+          + f" · {rcheck['hard_gate_blocks']} hard-gate move block(s)")
+    brate = b["rate"]
+    print(f"Bounce rate: {b['bounces']} bounce(s) across {b['reached_review']} "
+          f"stories that reached review"
+          + (f" ({brate*100:.0f}%)" if brate is not None else ""))
+    print(f"Blocked time: {_fmt_dur(bl['total_s'])} total"
+          + (f" · longest {bl['longest_story']} ({_fmt_dur(bl['longest_s'])})"
+             if bl["longest_story"] else ""))
+    if m["attempts"]:
+        hist = " ".join(f"{k}×{v}" for k, v in m["attempts"].items())
+        print(f"Attempts distribution (stories by attempt count): {hist}")
+    if m["demo_sweep"]:
+        print(f"\n⚠ demo-sweep / as-built (F7) — {len(m['demo_sweep'])} done "
+              f"in <{INSTANT_SECONDS}s, no real loop:")
+        print("    " + ", ".join(m["demo_sweep"]))
+    _log("metrics", count=m["done_count"])
+
+
 def cmd_logs(args):
     rows = workflow_log.read_events(
         tail=args.tail,
@@ -1178,6 +1560,9 @@ def main():
     m.add_argument("--skip-review-check", action="store_true",
                    help="human override: move to review/done despite review-check "
                         "problems (logged as an override)")
+    m.add_argument("--skip-ready", action="store_true",
+                   help="human override: start a story despite a failing "
+                        "Definition of Ready (logged as an override)")
     m.set_defaults(fn=cmd_move)
 
     l = sub.add_parser("list"); l.add_argument("--column"); l.add_argument("--capability")
@@ -1187,6 +1572,13 @@ def main():
     n = sub.add_parser("new"); n.add_argument("--capability", required=True)
     n.add_argument("--parent", required=True); n.add_argument("--id"); n.add_argument("--title")
     n.set_defaults(fn=cmd_new)
+
+    for kind in ITEM_KINDS:
+        ni = sub.add_parser(f"new-{kind}", help=f"scaffold a new {kind} (auto-numbered)")
+        ni.add_argument("--parent", help="parent id (required for feature)")
+        ni.add_argument("--id", help=f"explicit id (default: auto-numbered)")
+        ni.add_argument("--title")
+        ni.set_defaults(fn=cmd_new_item, kind=kind)
 
     ck = sub.add_parser("check")
     ck.add_argument("id")
@@ -1237,6 +1629,10 @@ def main():
     lg.add_argument("--outcome")
     lg.add_argument("--json", action="store_true")
     lg.set_defaults(fn=cmd_logs)
+
+    mt = sub.add_parser("metrics", help="retrospective off events.jsonl (#9)")
+    mt.add_argument("--json", action="store_true")
+    mt.set_defaults(fn=cmd_metrics)
 
     rc = sub.add_parser("review-check"); rc.add_argument("id")
     rc.add_argument("--base", default="HEAD",

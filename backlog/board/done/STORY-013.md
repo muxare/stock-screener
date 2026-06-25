@@ -27,9 +27,6 @@ As a trader, I want to backtest a screen's forward returns so that I can judge w
 - Server-side full-universe scaling (STORY-017).
 - Costs/slippage/significance rigor (deferred per ADR-010).
 
-## Status
-DONE (client-side) — as-built in `BacktestModal.tsx` + `market.ts`; runs in-browser over the demo universe, scaling tracked in STORY-017.
-
 ## Claude Code Prompt
 > Already implemented (as-built capture). If reopened, READ the `sad_refs` sections first and preserve POC semantics exactly; flag any conflict rather than improvising. Stay within Touch scope.
 

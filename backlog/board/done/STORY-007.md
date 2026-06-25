@@ -25,9 +25,6 @@ As a trader, I want a preset library plus custom presets so that I can apply pro
 ## Out of scope
 - Repository abstraction (STORY-019).
 
-## Status
-DONE — as-built in `PresetBuilderModal.tsx` + `store.ts` `presetStore`.
-
 ## Claude Code Prompt
 > Already implemented (as-built capture). If reopened, READ the `sad_refs` sections first and preserve POC semantics exactly; flag any conflict rather than improvising. Stay within Touch scope.
 

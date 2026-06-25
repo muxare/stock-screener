@@ -27,9 +27,6 @@ As a trader, I want screens to run on real, corporate-action-adjusted market dat
 ## Out of scope
 - Intraday/real-time streaming (SAD#1.2 — daily/EOD only in v1).
 
-## Status
-TODO — not started; depends on STORY-014 and ADR-008.
-
 ## Claude Code Prompt
 > Implement the acceptance criteria above. READ the SAD sections listed in `sad_refs` BEFORE writing code and treat them as binding. If any requirement conflicts with the SAD, STOP and flag it. Stay within Touch scope; add nothing beyond the acceptance criteria.
 

@@ -25,9 +25,6 @@ As a trader, I want to save ordered comparison chains by name so that I can reus
 ## Out of scope
 - Repository abstraction for saved screens (STORY-019).
 
-## Status
-DONE — as-built in the screen builder + `market.ts`; persisted via `store.ts`.
-
 ## Claude Code Prompt
 > Already implemented (as-built capture). If reopened, READ the `sad_refs` sections first and preserve POC semantics exactly; flag any conflict rather than improvising. Stay within Touch scope.
 

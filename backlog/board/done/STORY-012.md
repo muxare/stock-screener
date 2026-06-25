@@ -24,9 +24,6 @@ As a trader, I want to compare names side-by-side so that I can choose between c
 ## Out of scope
 - Nothing beyond the acceptance criteria.
 
-## Status
-DONE — as-built in `compare/Compare.tsx` + `store.ts`.
-
 ## Claude Code Prompt
 > Already implemented (as-built capture). If reopened, READ the `sad_refs` sections first and preserve POC semantics exactly; flag any conflict rather than improvising. Stay within Touch scope.
 

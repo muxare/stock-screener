@@ -26,9 +26,6 @@ As a user, I want a not-investment-advice disclosure on every signal surface so 
 ## Out of scope
 - Nothing beyond the acceptance criteria.
 
-## Status
-TODO — partial: disclosure exists only in `BacktestModal.tsx` today; results and detail lack it.
-
 ## Claude Code Prompt
 > Implement the acceptance criteria above. READ the SAD sections listed in `sad_refs` BEFORE writing code and treat them as binding. If any requirement conflicts with the SAD, STOP and flag it. Stay within Touch scope; add nothing beyond the acceptance criteria.
 

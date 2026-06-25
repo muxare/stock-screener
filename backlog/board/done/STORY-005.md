@@ -25,9 +25,6 @@ As a trader, I want top/bottom percentile ranking so that I can screen relative 
 ## Out of scope
 - Automated parity tests (STORY-020).
 
-## Status
-DONE — as-built in `market.ts` + sidebar; backtest exclusion honoured in `store.ts`.
-
 ## Claude Code Prompt
 > Already implemented (as-built capture). If reopened, READ the `sad_refs` sections first and preserve POC semantics exactly; flag any conflict rather than improvising. Stay within Touch scope.
 

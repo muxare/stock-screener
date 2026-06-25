@@ -26,9 +26,6 @@ As a trader, I want to build custom indicators so that I can screen and chart on
 ## Out of scope
 - Repository abstraction (STORY-019).
 
-## Status
-DONE — as-built in `IndicatorBuilderModal.tsx` + `market.ts`.
-
 ## Claude Code Prompt
 > Already implemented (as-built capture). If reopened, READ the `sad_refs` sections first and preserve POC semantics exactly; flag any conflict rather than improvising. Stay within Touch scope.
 

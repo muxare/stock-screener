@@ -27,17 +27,6 @@ As an engineer, I want a `MarketDataProvider` port with the synthetic generator 
 ## Out of scope
 - Choosing a real vendor (STORY-015 / ADR-008).
 
-## Status
-DONE (implementation) — `MarketDataProvider` port added at `src/lib/data/provider.ts`; the
-synthetic generator (`mulberry32`/`genSeries`/`TICKERS`/`DAYS`) was extracted to a dev/test-only
-adapter `src/lib/data/synthetic.ts` (`syntheticProvider(seed)`). The engine's `generateUniverse`
-was split: the data generator left the engine entirely, and Stock-building became the pure
-`buildUniverse(InstrumentBars[])` / `buildStock(InstrumentBars)` which take bars as arguments.
-`store.ts` now sources bars via `syntheticProvider(seed).getUniverse()` and builds with
-`M.buildUniverse(...)`. Verified bar-for-bar identical to the pre-refactor `generateUniverse`
-across seeds 7/8/42/100 (~4MB serialized universe each). `tsc -b`, `eslint`, and `vite build`
-all green.
-
 ## Claude Code Prompt
 > Implement the acceptance criteria above. READ the SAD sections listed in `sad_refs` BEFORE writing code and treat them as binding. If any requirement conflicts with the SAD, STOP and flag it. Stay within Touch scope; add nothing beyond the acceptance criteria.
 

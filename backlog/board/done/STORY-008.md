@@ -25,9 +25,6 @@ As a trader, I want to paste a TC2000 PCF so that I can reuse an existing formul
 ## Out of scope
 - Expanding the PCF subset beyond the POC (SAD#1.2 — not a TC2000 clone).
 
-## Status
-DONE — as-built in `market.ts` `parsePCF` + screen builder.
-
 ## Claude Code Prompt
 > Already implemented (as-built capture). If reopened, READ the `sad_refs` sections first and preserve POC semantics exactly; flag any conflict rather than improvising. Stay within Touch scope.
 

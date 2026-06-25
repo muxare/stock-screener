@@ -26,14 +26,6 @@ As an engineer, I want a golden-master fidelity harness so that any divergence f
 ## Out of scope
 - Nothing beyond the acceptance criteria.
 
-## Status
-DONE (pending review) — Vitest configured (`npm test` → `vitest run`). Golden-master
-suite at `tests/engine.golden.test.ts` pins `ema`/`sma`/`rsi`/`stochRsi`/`macd`,
-`evalGroupedRules`, `parsePCF`, and `backtestRules` bar-for-bar over the STORY-014
-synthetic series (`syntheticProvider(7)`); the committed `__snapshots__/*.snap` is the
-golden master. Divergence verified to fail (`vitest run` exits 1 when EMA smoothing is
-perturbed), so a CI runner invoking `npm test` fails on any numeric drift (SAD#2.1).
-
 ## Claude Code Prompt
 > Implement the acceptance criteria above. READ the SAD sections listed in `sad_refs` BEFORE writing code and treat them as binding. If any requirement conflicts with the SAD, STOP and flag it. Stay within Touch scope; add nothing beyond the acceptance criteria.
 

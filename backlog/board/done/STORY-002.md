@@ -26,9 +26,6 @@ As a trader, I want to build condition groups of pairwise comparisons with bar o
 ## Out of scope
 - Automated parity tests (STORY-020).
 
-## Status
-DONE — as-built in `src/components/modals/ScreenBuilderModal.tsx` + `market.ts`.
-
 ## Claude Code Prompt
 > Already implemented (as-built capture). If reopened, READ the `sad_refs` sections first and preserve POC semantics exactly; flag any conflict rather than improvising. Stay within Touch scope.
 

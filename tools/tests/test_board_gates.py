@@ -10,6 +10,7 @@ subprocess. No pytest required — run directly:
 
     python3 tools/tests/test_board_gates.py
 """
+import json
 import os
 import re
 import shutil
@@ -65,12 +66,13 @@ class Repo:
             return f.read()
 
     def write_story(self, sid, column, sad_refs="[SAD#1.1]", scope="src/foo/**",
-                    criteria=("first criterion alpha", "second criterion beta")):
+                    criteria=("first criterion alpha", "second criterion beta"),
+                    parent="FEAT-001"):
         crit = "\n".join(f"- [ ] {c}" for c in criteria)
         text = f"""---
 id: {sid}
 type: story
-parent: FEAT-001
+parent: {parent}
 capability: CAP-x
 sad_refs: {sad_refs}
 target: ~
@@ -103,15 +105,44 @@ test story
         with open(os.path.join(d, f"{bid}.md"), "w", encoding="utf-8") as f:
             f.write(text)
 
-    def write_sad(self, caps=("CAP-x",)):
-        lines = ["---", "id: SAD-001", "status: Approved", "---", "",
-                 "## SAD#1 Scope", "anchor SAD#1.1", "", "## SAD#3 Capabilities"]
+    def write_sad(self, caps=("CAP-x",), status="Approved", oos_tokens=()):
+        lines = ["---", "id: SAD-001", f"status: {status}", "---", "",
+                 "## SAD#1 Context & Scope", "anchor SAD#1.1", ""]
+        if oos_tokens:
+            lines += ["### SAD#1.2 Out of scope (non-goals)"]
+            lines += [f"- The `{t}` artifact is out of scope." for t in oos_tokens]
+            lines += [""]
+        lines += ["## SAD#3 Capabilities"]
         for i, c in enumerate(caps, 1):
             lines.append(f"### SAD#3.{i} {c}: capability {c}")
         d = os.path.join(self.root, "backlog", "sad")
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, "SAD-001.md"), "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
+
+    def write_templates(self):
+        """Minimal authoring templates so new-epic/feature/plan/sad can scaffold."""
+        items = {
+            ("epics", "EPIC"): "parent: ~\nsad: SAD-000",
+            ("features", "FEAT"): "parent: EPIC-000",
+            ("plans", "PLAN"): "parent: IDEA-000",
+            ("sad", "SAD"): "parent: PLAN-000\nstatus: Draft",
+        }
+        for (sub, prefix), extra in items.items():
+            d = os.path.join(self.root, "backlog", sub)
+            os.makedirs(d, exist_ok=True)
+            text = (f"---\nid: {prefix}-000\ntype: {prefix.lower()}\n{extra}\n---\n\n"
+                    f"# {prefix}-000 — <title>\n\nScaffold body.\n")
+            with open(os.path.join(d, f"{prefix}.template.md"), "w", encoding="utf-8") as f:
+                f.write(text)
+
+    def write_events(self, lines):
+        """Seed a controlled .workflow/events.jsonl for the metrics retrospective."""
+        d = os.path.join(self.root, ".workflow")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "events.jsonl"), "w", encoding="utf-8") as f:
+            for obj in lines:
+                f.write(json.dumps(obj) + "\n")
 
 
 def setup_repo(root):
@@ -333,6 +364,136 @@ def run():
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+
+def run_phase4():
+    """Phase 4 — close the loop: #5 Definition of Ready, #9 metrics, #10 validate
+    invariants, #14 auto-numbered scaffolding. Runs in its OWN clean repo so the
+    exit-code assertions aren't muddied by state the main run() accumulates."""
+    tmp = tempfile.mkdtemp(prefix="board-gate-p4-")
+    try:
+        repo = setup_repo(tmp)
+        repo.write_templates()
+
+        print("\n[#5] Definition of Ready blocks an unready start")
+        # placeholder criteria + no real Touch scope, but sad_refs is non-empty
+        repo.write_story("STORY-500", "todo", scope="<path/glob>",
+                         criteria=("<criterion placeholder>",), parent="FEAT-000")
+        r = repo.board("move", "STORY-500", "in-progress")
+        check("move in-progress REFUSED when not ready",
+              r.returncode != 0 and "Definition of Ready" in (r.stdout + r.stderr))
+        check("STORY-500 stayed in todo", repo.column_of("STORY-500") == "todo")
+        r = repo.board("move", "STORY-500", "in-progress", "--skip-ready")
+        check("--skip-ready overrides the DoR gate", r.returncode == 0
+              and repo.column_of("STORY-500") == "in-progress")
+
+        print("\n[#5] a ready story (real criteria + scope) starts cleanly")
+        repo.write_story("STORY-501", "todo", parent="FEAT-000")  # real criteria + scope
+        r = repo.board("move", "STORY-501", "in-progress")
+        check("ready story moves to in-progress", r.returncode == 0
+              and repo.column_of("STORY-501") == "in-progress")
+
+        print("\n[#9] metrics retrospective off a controlled event log")
+        repo.write_events([
+            ev("STORY-900", "todo", "in-progress", "2026-06-20T10:00:00+00:00"),
+            ev("STORY-900", "in-progress", "review", "2026-06-20T12:00:00+00:00"),
+            ev("STORY-900", "review", "done", "2026-06-20T13:00:00+00:00"),
+            ev("STORY-901", "todo", "in-progress", "2026-06-20T09:00:00+00:00"),
+            ev("STORY-901", "in-progress", "review", "2026-06-20T09:00:02+00:00"),
+            ev("STORY-901", "review", "done", "2026-06-20T09:00:03+00:00"),
+            {"ts": "2026-06-20T11:00:00+00:00", "tool": "board",
+             "event": "review-check", "outcome": "refused", "story_id": "STORY-900"},
+            {"ts": "2026-06-20T11:30:00+00:00", "tool": "board",
+             "event": "review-check", "outcome": "ok", "story_id": "STORY-900"},
+            {"ts": "2026-06-20T12:30:00+00:00", "tool": "board",
+             "event": "reject", "outcome": "ok", "story_id": "STORY-900",
+             "from": "review", "to": "in-progress"},
+        ])
+        r = repo.board("metrics", "--json")
+        check("metrics --json succeeds", r.returncode == 0)
+        m = json.loads(r.stdout)
+        check("cycle excludes the instant story (n=1)", m["cycle"]["n"] == 1)
+        check("median cycle is the 3h real story", m["cycle"]["median_s"] == 10800)
+        check("demo-sweep flags the instant story (F7)",
+              m["demo_sweep"] == ["STORY-901"])
+        check("review-check refusal counted (1/2)",
+              m["review_check"]["refused"] == 1 and m["review_check"]["runs"] == 2)
+        check("bounce counted across stories that reached review",
+              m["bounce"]["bounces"] == 1 and m["bounce"]["reached_review"] == 2)
+
+        print("\n[#10] validate warns (non-blocking) on a non-Approved SAD")
+        repo.write_sad(caps=("CAP-x",), status="Draft")
+        repo.write_story("STORY-510", "todo", parent="FEAT-000")  # cap CAP-x, sad SAD#1.1
+        r = repo.board("validate", "--sad", "SAD-001")
+        out = r.stdout + r.stderr
+        check("Draft SAD surfaces a warning", "not Approved" in out)
+        check("Draft SAD does NOT fail validate", r.returncode == 0)
+
+        print("\n[#10] validate flags a story scoped at an out-of-scope artifact")
+        repo.write_sad(caps=("CAP-x",), status="Approved", oos_tokens=("dc-runtime",))
+        repo.write_story("STORY-511", "todo", scope="src/dc-runtime/support.js", parent="FEAT-000")
+        r = repo.board("validate", "--sad", "SAD-001")
+        check("out-of-scope Touch scope is a violation",
+              r.returncode != 0 and "out-of-scope" in (r.stdout + r.stderr)
+              and "dc-runtime" in (r.stdout + r.stderr))
+        os.remove(repo.story_path("STORY-511"))
+
+        print("\n[#10] explicit deferral turns a coverage gap into a warning")
+        repo.write_sad(caps=("CAP-x", "CAP-y"), status="Approved")
+        r = repo.board("validate", "--sad", "SAD-001")
+        check("uncovered CAP-y is a violation by default",
+              r.returncode != 0 and "CAP-y: no story coverage" in (r.stdout + r.stderr))
+        with open(os.path.join(tmp, "backlog", "deferred-capabilities.md"), "w") as f:
+            f.write("# Deferred\n- CAP-y: parked until the vendor decision\n")
+        r = repo.board("validate", "--sad", "SAD-001")
+        out = r.stdout + r.stderr
+        check("deferred CAP-y no longer fails validate", r.returncode == 0)
+        check("deferred CAP-y is surfaced as a warning", "deferred" in out)
+
+        print("\n[#10] a re-introduced ## Status section is warned about")
+        sp = repo.story_path("STORY-510")
+        with open(sp, "a", encoding="utf-8") as f:
+            f.write("\n## Status\nDONE — stale prose\n")
+        r = repo.board("validate", "--sad", "SAD-001")
+        check("stale ## Status surfaces a warning",
+              "stale `## Status`" in (r.stdout + r.stderr))
+
+        print("\n[#14] new-epic / new-feature auto-number and scaffold")
+        r = repo.board("new-epic", "--title", "First epic")
+        check("new-epic creates EPIC-001", r.returncode == 0
+              and os.path.exists(os.path.join(tmp, "backlog", "epics", "EPIC-001.md")))
+        r = repo.board("new-epic", "--title", "Second epic")
+        check("new-epic auto-increments to EPIC-002", r.returncode == 0
+              and os.path.exists(os.path.join(tmp, "backlog", "epics", "EPIC-002.md")))
+        r = repo.board("new-feature", "--title", "Orphan")
+        check("new-feature without --parent is refused", r.returncode != 0)
+        r = repo.board("new-feature", "--parent", "EPIC-001", "--title", "Real feature")
+        fpath = os.path.join(tmp, "backlog", "features", "FEAT-001.md")
+        check("new-feature with valid parent scaffolds FEAT-001",
+              r.returncode == 0 and os.path.exists(fpath))
+        if os.path.exists(fpath):
+            ftext = open(fpath, encoding="utf-8").read()
+            check("scaffolded feature records its parent epic", "parent: EPIC-001" in ftext)
+            check("scaffolded feature title is set", "FEAT-001 — Real feature" in ftext)
+        r = repo.board("new-feature", "--parent", "EPIC-099", "--title", "Bad parent")
+        check("new-feature with a missing parent is refused", r.returncode != 0)
+        r = repo.board("new-plan", "--title", "The plan")
+        check("new-plan creates PLAN-001", r.returncode == 0
+              and os.path.exists(os.path.join(tmp, "backlog", "plans", "PLAN-001.md")))
+        r = repo.board("new-sad", "--parent", "PLAN-001", "--title", "Arch")
+        check("new-sad auto-numbers SAD-002 (SAD-001 already exists)",
+              r.returncode == 0
+              and os.path.exists(os.path.join(tmp, "backlog", "sad", "SAD-002.md")))
+
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def ev(story, frm, to, ts):
+    return {"ts": ts, "tool": "board", "event": "move", "outcome": "ok",
+            "story_id": story, "from": frm, "to": to}
+
+
+def report():
     print()
     if failures:
         print(f"FAILED: {len(failures)} check(s)")
@@ -344,3 +505,5 @@ def run():
 
 if __name__ == "__main__":
     run()
+    run_phase4()
+    report()

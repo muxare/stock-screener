@@ -27,9 +27,6 @@ As a trader, I want an interactive detail chart with the screen's overlays and a
 - Chart keyboard accessibility (STORY-023, SAD#2.9).
 - Disclosure on the detail surface (STORY-022).
 
-## Status
-DONE — as-built in `detail/StockDetail.tsx`, `detail/DetailPanels.tsx`, `ui/Spark.tsx`.
-
 ## Claude Code Prompt
 > Already implemented (as-built capture). If reopened, READ the `sad_refs` sections first and preserve POC semantics exactly; flag any conflict rather than improvising. Stay within Touch scope.
 

@@ -44,27 +44,6 @@ without building the whole universe in the browser.
 - The full-universe screen/backtest endpoints — STORY-016 / STORY-017 (done).
 - Vendor data adapter — ADR-008 (open).
 
-## Status
-DONE (implementation). Added `getInstrument(ticker)` to the SAD#5.10
-`MarketDataProvider` port and the synthetic adapter — refactored to a shared
-`instrumentAt(seed, idx)` so a single name is generated in isolation yet
-bar-for-bar identical to `getUniverse()` (golden master unchanged). The service
-exposes `GET /instrument/:ticker` returning the engine's `InstrumentBars`
-(adjusted OHLCV + metadata), 404 on unknown; the store delegates straight to the
-port so no full-universe build is triggered to serve one name (SAD#2.5). The
-client builds the displayed-name `Stock` locally via the shared engine
-(SAD#4.1) — wiring is STORY-018. Pinned by `server/instrument.test.ts` (6
-tests): provider parity vs `getUniverse`, unknown→null, no-universe-build,
-single-name buildStock < 50 ms (SAD#2.3), and the HTTP 200/404 contract. Full
-suite 33/33, lint + tsc (app & server) clean.
-
-Was prerequisite for STORY-018. STORY-018 was blocked because retiring the
-in-browser full-universe build (AC2 / SAD#2.5) removes the only source of
-per-name bars (`st.universe`) that the detail and compare panels read, while the
-service `ScreenRow` carries no bars and the server was outside STORY-018's Touch
-scope. This story supplies that missing per-displayed-name bar source so 018 can
-become a pure client-wiring change.
-
 ## Claude Code Prompt
 > Implement the acceptance criteria above.
 > READ the SAD sections listed in `sad_refs` BEFORE writing code and treat

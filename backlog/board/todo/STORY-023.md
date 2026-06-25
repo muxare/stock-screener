@@ -24,9 +24,6 @@ As a keyboard user, I want the detail chart to be operable without a pointer so 
 ## Out of scope
 - Builder-modal accessibility (tracked with each builder story).
 
-## Status
-TODO — not started; not assessed in the as-built chart.
-
 ## Claude Code Prompt
 > Implement the acceptance criteria above. READ the SAD sections listed in `sad_refs` BEFORE writing code and treat them as binding. If any requirement conflicts with the SAD, STOP and flag it. Stay within Touch scope; add nothing beyond the acceptance criteria.
 

@@ -24,9 +24,6 @@ As a trader, I want ticker/company search and quick-signal toggles so that I can
 ## Out of scope
 - Nothing beyond the acceptance criteria.
 
-## Status
-DONE — as-built in `TopBar.tsx` + `sidebar/QuickSignals.tsx`.
-
 ## Claude Code Prompt
 > Already implemented (as-built capture). If reopened, READ the `sad_refs` sections first and preserve POC semantics exactly; flag any conflict rather than improvising. Stay within Touch scope.
 

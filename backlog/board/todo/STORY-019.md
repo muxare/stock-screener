@@ -28,9 +28,6 @@ As an engineer, I want artifacts persisted behind a repository interface so that
 ## Out of scope
 - Accounts/auth (SAD#1.2 — out of scope until persistence forces it).
 
-## Status
-TODO — partial today: persistence works but as direct `localStorage` in `store.ts`, not behind an interface.
-
 ## Claude Code Prompt
 > Implement the acceptance criteria above. READ the SAD sections listed in `sad_refs` BEFORE writing code and treat them as binding. If any requirement conflicts with the SAD, STOP and flag it. Stay within Touch scope; add nothing beyond the acceptance criteria.
 

@@ -25,9 +25,6 @@ As an engineer, I want latency instrumentation so that screen/backtest performan
 ## Out of scope
 - The service itself (STORY-016/017).
 
-## Status
-TODO — not started; unmeasurable until the service exists.
-
 ## Claude Code Prompt
 > Implement the acceptance criteria above. READ the SAD sections listed in `sad_refs` BEFORE writing code and treat them as binding. If any requirement conflicts with the SAD, STOP and flag it. Stay within Touch scope; add nothing beyond the acceptance criteria.
 
