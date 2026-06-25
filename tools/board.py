@@ -22,6 +22,7 @@ Commands:
   new --capability ID --parent FEAT-ID [--id STORY-NNN] [--title ...]
   check <id> [--criterion SUBSTR | --all] [--uncheck]  # tick acceptance criteria
   set <id> <field> <value>      # set an allowlisted frontmatter field (e.g. sad_refs)
+  reject <id> --reason TEXT     # Gate-4 reject: review -> in-progress, re-enters loop
   show <id>
   render            # write a human-readable board.md (pure read, not state)
   validate          # check invariants across the whole board
@@ -524,6 +525,9 @@ def cmd_move(args):
             fm["attempts"] = str(int(fm.get("attempts", "0") or "0") + 1)
         except ValueError:
             fm["attempts"] = "1"
+    if dst == "review":
+        # the rework brief is consumed once the story is re-submitted for review
+        fm.pop("reject_reason", None)
 
     dst_dir = os.path.join(BOARD, dst)
     os.makedirs(dst_dir, exist_ok=True)
@@ -537,6 +541,41 @@ def cmd_move(args):
         story_id=args.id,
         **{"from": src, "to": dst, "reason": args.reason or "", "capability": fm.get("capability", "")},
     )
+
+
+def cmd_reject(args):
+    """Gate-4 reject: bounce a reviewed story back into the loop (Phase 2, #11).
+
+    The single sanctioned "no" at the acceptance gate. Returns the story to
+    `in-progress` (so `/build-toward` re-picks it without a manual move) and
+    stamps the rework brief as `reject_reason`, which the loop reads on re-entry.
+    """
+    path = find_story(args.id)
+    if not path:
+        _fatal(f"error: {args.id} not found", event="reject", story_id=args.id)
+    fm, body = read_story(path)
+    src = fm["_column"]
+    if src != "review":
+        msg = f"{args.id} is in {src}, not review; reject applies at the review gate"
+        _log("reject", outcome="refused", message=msg, story_id=args.id)
+        sys.exit(f"refused: {msg}")
+
+    fm.pop("_path", None); fm.pop("_column", None)
+    fm["reject_reason"] = args.reason
+    try:
+        fm["attempts"] = str(int(fm.get("attempts", "0") or "0") + 1)
+    except ValueError:
+        fm["attempts"] = "1"
+
+    dst_dir = os.path.join(BOARD, "in-progress")
+    os.makedirs(dst_dir, exist_ok=True)
+    new_path = os.path.join(dst_dir, f"{args.id}.md")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(dump_fm(fm, body))
+    shutil.move(path, new_path)
+    print(f"rejected {args.id}: review -> in-progress (re-enters the build loop)")
+    _log("reject", story_id=args.id, message=args.reason,
+         **{"from": "review", "to": "in-progress"})
 
 
 def cmd_list(args):
@@ -890,6 +929,11 @@ def main():
     st = sub.add_parser("set")
     st.add_argument("id"); st.add_argument("field"); st.add_argument("value")
     st.set_defaults(fn=cmd_set)
+
+    rj = sub.add_parser("reject")
+    rj.add_argument("id")
+    rj.add_argument("--reason", required=True, help="rework brief read by the loop on re-entry")
+    rj.set_defaults(fn=cmd_reject)
 
     s = sub.add_parser("show"); s.add_argument("id"); s.set_defaults(fn=cmd_show)
     sub.add_parser("render").set_defaults(fn=cmd_render)

@@ -12,14 +12,19 @@ fires on each story.
 first, fall back to target. The selector is generic on purpose — the
 vocabulary lives in the data, not this command.
 
-## Autonomy tier (default A1)
+## Autonomy tier (default A2)
+- **A2 (default)** — implement matching stories automatically and commit per
+  story *without* per-commit human confirmation, then pause at `review` (don't
+  sync, don't close). The human acts only at the review gate (accept or reject).
 - **A1** — decompose/propose only or stop after one story; confirm with the
-  human before each commit.
-- **A2** — implement matching stories automatically, but pause at `review`
-  (don't sync, don't close).
+  human before each commit. Reserve for when architecture or scope is still
+  settling.
 - **A3** — implement to green tests, set `review`, then sync via story-syncer.
 Map these to the user's A1/A2/A3 conventions if they have them. See
 `docs/autonomy-tiers.md` for checkpoints and review-check requirements.
+The Phase-1 gates still apply at every tier: the hard review-check gate runs on
+`move review`/`move done` and refuses on problems — A2 drops per-commit
+confirmation, not the review gate.
 
 ## Loop (driven entirely through tools/board.py)
 ```
@@ -30,6 +35,8 @@ order by parent/dependency, then id
 for story in stories:
     board.py move <id> in-progress          # refused if sad_refs empty; stamps attempts;
                                             # stamps base_commit=HEAD on FIRST entry only
+    if story has a reject_reason:           # bounced at Gate 4 — rework brief
+        read it and address that feedback FIRST (it clears on next move review)
     -> invoke sad-grounding: read sad_refs sections, restate constraints
     implement within Touch scope only
     run tests / check acceptance criteria; tick met boxes via board.py check (NOT by editing the file)
@@ -82,6 +89,15 @@ assertions). Follow the **Review gate checklist** in `sad-grounding`.
 Stories whose `capability`/`target` don't match the selector are invisible to
 this run. That's the feature: to build more, flip a story into the slice
 deliberately. The loop never widens its own scope.
+
+## Gate 4 — acceptance (human)
+A story that reaches `review` waits for the human. Two sanctioned outcomes:
+- **Accept:** `board.py move <id> done` (re-runs the gate; refused on problems).
+- **Reject:** `board.py reject <id> --reason "<rework brief>"` — bounces the
+  story `review → in-progress` and stamps `reject_reason`. Because the loop
+  picks `{todo, in-progress}`, the rejected story **re-enters automatically** —
+  no manual demote (closes friction F9). On re-entry the loop reads
+  `reject_reason` first and addresses that feedback before re-running the gate.
 
 ## Termination report
 Print: done / review / blocked per story, plus any flagged SAD conflicts that

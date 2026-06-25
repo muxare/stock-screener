@@ -1,15 +1,15 @@
 # Autonomy tiers (A1 / A2 / A3)
 
 The build loop (`/build-toward <capability> [tier]`) controls how much an agent
-may do without human confirmation. **Review-check is mandatory at every tier**
-before a story reaches `review` or `done`.
+may do without human confirmation. **A2 is the default tier.** **Review-check is
+mandatory at every tier** before a story reaches `review` or `done`.
 
 ## Tier summary
 
 | Tier | Implements | Commits | Stops at | Human must |
 |------|------------|---------|----------|------------|
 | **A1** | Proposes or one story at a time | Every commit confirmed | After each story or step | Approve plan, commits, review |
-| **A2** | Full story implementation | Auto per story | **`review` column** | Move to `done`, resolve conflicts |
+| **A2 (default)** | Full story implementation | Auto per story (no per-commit confirm) | **`review` column** | Accept (`move done`) or `reject`, resolve conflicts |
 | **A3** | Full story to green + review-check | Auto per story | After **`review`** (+ optional sync) | Final `done` unless policy allows |
 
 Map these labels to your team's conventions if you use different names — the
@@ -49,7 +49,7 @@ Before **`move done`**:
 
 ## A1 — Propose and confirm
 
-Use when architecture or scope is still settling.
+Opt-in (no longer the default). Use when architecture or scope is still settling.
 
 - Agent **restates SAD constraints** and proposed diff before coding.
 - **One story** (or one commit) at a time unless the user widens scope.
@@ -59,14 +59,17 @@ Use when architecture or scope is still settling.
 
 ---
 
-## A2 — Implement, pause at review
+## A2 — Implement, pause at review (default)
 
-Default for most teams: autonomous implementation, human merge gate.
+The default: autonomous implementation, human merge gate.
 
 - Agent runs the full story loop through tests green + **review-check pass**.
+- Agent **commits per story without per-commit human confirmation.**
 - Agent **`move review`** automatically when the gate passes.
 - Agent **stops** — does not `move done`, does not sync to remote unless asked.
-- Human reviews diff and moves to `done` or sends back to `in-progress`.
+- Human reviews the diff and either accepts (`python tools/board.py move <id>
+  done`) or rejects (`python tools/board.py reject <id> --reason "…"`), which
+  auto-returns the story to `in-progress` so the loop re-picks it.
 
 ---
 
@@ -86,6 +89,7 @@ Use when CI and review-check gates are trusted and humans batch-review.
 | Situation | Action |
 |-----------|--------|
 | review-check fails | Fix scope/tests or `move blocked --reason "review-check: …"` |
+| Human rejects at review | `board.py reject <id> --reason "…"` — auto-returns to in-progress; loop re-picks it |
 | SAD conflict | STOP, flag for ADR; do not improvise architecture |
 | Max attempts (default 3) | `move blocked --reason "max attempts"` |
 | Illegal board transition | Use legal path (no forward skips); never `mv` files |
@@ -97,6 +101,7 @@ Use when CI and review-check gates are trusted and humans batch-review.
 ```bash
 python tools/board.py list --capability <id> --json
 python tools/board.py review-check STORY-NNN --base <commit>
+python tools/board.py reject STORY-NNN --reason "…"   # Gate-4 reject -> back to in-progress
 python tools/sync_board.py push --dry-run    # optional, after review in A3
 ```
 

@@ -10,6 +10,7 @@ estimate: ~
 attempts: 0                # bookkeeping, stamped by board.py on each start
 prev_column: ~             # set by board.py when blocked, so unblock returns home
 blocked_reason: ~
+reject_reason: ~           # set by board.py reject; the rework brief, read on re-entry
 ---
 
 ## User Story

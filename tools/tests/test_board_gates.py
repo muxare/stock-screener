@@ -189,6 +189,35 @@ def run():
         r = repo.board("check", "STORY-103", "--criterion", "nonexistent")
         check("check --criterion with no match errors", r.returncode != 0)
 
+        print("\n[#11] reject auto-demotes a reviewed story back into the loop")
+        repo.write_story("STORY-200", "todo")
+        repo.board("move", "STORY-200", "in-progress")
+        repo.board("check", "STORY-200", "--all")
+        os.makedirs(os.path.join(tmp, "src", "foo"), exist_ok=True)
+        with open(os.path.join(tmp, "src", "foo", "r.py"), "w") as f:
+            f.write("r = 1\n")
+        r = repo.board("move", "STORY-200", "review")
+        check("STORY-200 reached review", r.returncode == 0 and repo.column_of("STORY-200") == "review")
+        attempts_before = repo.fm("STORY-200", "attempts")
+        r = repo.board("reject", "STORY-200", "--reason", "fix the edge case")
+        check("reject succeeds", r.returncode == 0)
+        check("reject returns story to in-progress", repo.column_of("STORY-200") == "in-progress")
+        check("reject stamps reject_reason", repo.fm("STORY-200", "reject_reason") == "fix the edge case")
+        check("reject increments attempts",
+              repo.fm("STORY-200", "attempts") == str(int(attempts_before) + 1))
+
+        print("\n[#11] reject_reason is cleared when the story is re-submitted to review")
+        r = repo.board("move", "STORY-200", "review")
+        check("re-entry to review succeeds (gate re-runs, passes)", r.returncode == 0)
+        rr = repo.fm("STORY-200", "reject_reason")
+        check("reject_reason cleared on move to review", rr in (None, "~", ""))
+
+        print("\n[#11] reject is refused outside the review column")
+        repo.write_story("STORY-201", "todo")
+        r = repo.board("reject", "STORY-201", "--reason", "nope")
+        check("reject refused when not in review",
+              r.returncode != 0 and "not review" in (r.stdout + r.stderr))
+
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
