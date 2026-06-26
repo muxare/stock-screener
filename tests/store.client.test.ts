@@ -184,6 +184,49 @@ describe('STORY-028: universe facts come from a facts-only payload (no rows)', (
   });
 });
 
+// STORY-027 — recover after a service outage AT LOAD (SAD#5.9 store). If the
+// service is down at boot, the app must not stay empty until an unrelated rule
+// edit: an explicit Retry re-fetches the universe facts and re-runs the screen,
+// and the indicator-builder preview lazy-loads its sample when the builder opens.
+describe('STORY-027: the app recovers once the service becomes reachable', () => {
+  it('retry recovers after a load-time outage: re-populates screen + facts (finding 9)', async () => {
+    const { useScreener } = await import('../src/store.ts');
+    // Phase 1 — service down at "load": both bootstrap and the screen fail.
+    useScreener.setState({ universeSize: 0, sectorList: [], screen: null, screenError: null });
+    await withStubbedFetch(() => (() => Promise.reject(new Error('simulated outage'))) as typeof fetch, async () => {
+      await Promise.all([useScreener.getState().bootstrap(), useScreener.getState().runScreen()]);
+    });
+    let st = useScreener.getState();
+    expect(st.screenError).toBeTruthy();   // unavailable banner is shown
+    expect(st.universeSize).toBe(0);       // no facts yet
+    expect(st.screen).toBeNull();          // no rows yet
+
+    // Phase 2 — service reachable again: explicit Retry restores everything
+    // (real fetch is proxied to the in-process server by the harness).
+    await useScreener.getState().retry();
+    st = useScreener.getState();
+    expect(st.screenError).toBeNull();                       // banner cleared
+    expect(st.universeSize).toBe(44);                        // "of N" restored
+    expect(st.sectorList.length).toBeGreaterThan(0);         // sectors restored
+    expect(st.screen!.rows.length).toBe(st.screen!.total);   // rows restored
+  });
+
+  it('indicator-builder sample preview recovers after an initial failure (finding 10)', async () => {
+    const { useScreener } = await import('../src/store.ts');
+    useScreener.setState({ sampleStock: null });
+    // Boot fetch failed → ensureSampleStock cannot load a sample; preview stays "—".
+    await withStubbedFetch(() => (() => Promise.reject(new Error('simulated outage'))) as typeof fetch, async () => {
+      await useScreener.getState().ensureSampleStock();
+    });
+    expect(useScreener.getState().sampleStock).toBeNull();
+
+    // Service reachable: opening the builder lazily fetches the sample name.
+    useScreener.getState().openBuilder();
+    expect(await waitFor(() => useScreener.getState().sampleStock != null)).toBe(true);
+    expect(useScreener.getState().sampleStock!.full.c.length).toBeGreaterThan(0);
+  });
+});
+
 // STORY-025 — request sequencing in the client store (SAD#5.9). Moving screen &
 // backtest to async service calls removed the synchronous guarantees of the old
 // in-browser compute: responses race, streams overlap, and selection outlives the

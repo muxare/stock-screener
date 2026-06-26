@@ -321,6 +321,14 @@ export interface ScreenerState {
   // ---- lifecycle ----
   init: () => void;
   bootstrap: () => Promise<void>;
+  // Recover after a service outage at load (STORY-027): re-fetch universe facts
+  // AND re-run the active screen so a service that was down at boot doesn't leave
+  // the app permanently empty until an unrelated rule edit.
+  retry: () => Promise<void>;
+  // Lazy-load the indicator-builder sample name if the boot fetch failed
+  // (STORY-027): the preview retries when the builder opens instead of showing
+  // "—" for the rest of the session.
+  ensureSampleStock: () => Promise<void>;
 
   // ---- derived (read current state via get()) ----
   presets: () => Preset[];
@@ -584,6 +592,30 @@ export const useScreener = create<ScreenerState>((set, get) => {
       } catch { /* service unavailable — leave defaults; runScreen surfaces the error */ }
     },
 
+    // Recover from a load-time outage (STORY-027, findings 9/10). When the user
+    // hits Retry on the unavailable banner, re-fetch the universe facts (total,
+    // sectors) AND re-run the active screen: bootstrap repopulates "of N" + the
+    // sector list, runScreen clears `screenError` and fills the rows on success
+    // (or re-sets the banner if still down). Both re-fetch current service state
+    // only — no in-browser universe build (SAD#2.5).
+    retry: async () => {
+      await Promise.all([get().bootstrap(), get().runScreen()]);
+    },
+
+    // Lazy-fetch the indicator-builder sample name if the boot fetch failed
+    // (STORY-027, finding 10). Called when the builder opens: if we already have
+    // a sample we no-op; otherwise re-ask /facts for a name and pull its bars, so
+    // the preview recovers instead of showing "—" for the whole session.
+    ensureSampleStock: async () => {
+      if (get().sampleStock) return;
+      try {
+        const facts = await apiFacts();
+        if (get().sampleStock || !facts.sample) return; // raced, or empty universe
+        const bars = await apiInstrument(facts.sample);
+        if (bars) set({ sampleStock: M.buildStock(bars) });
+      } catch { /* still unavailable — preview stays "—"; retries on next open */ }
+    },
+
     // ---- derived ----
     presets: () => {
       const ps = get().presetStore;
@@ -666,11 +698,12 @@ export const useScreener = create<ScreenerState>((set, get) => {
     },
 
     // ---- indicator builder ----
-    openBuilder: () => set({ builderOpen: true, editingIndId: null, builder: freshBuilder('ema') }),
+    openBuilder: () => { set({ builderOpen: true, editingIndId: null, builder: freshBuilder('ema') }); void get().ensureSampleStock(); },
     editIndicator: (id) => {
       const ind = get().savedIndicators.find((i) => (i as { id: string }).id === id);
       if (!ind) return;
       set({ builderOpen: true, editingIndId: id, builder: builderFromInd(ind) });
+      void get().ensureSampleStock();
     },
     closeBuilder: () => set({ builderOpen: false, editingIndId: null }),
     setBuilderType: (type) => set({ builder: freshBuilder(type) }),

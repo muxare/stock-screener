@@ -36,6 +36,8 @@ export function Results() {
   // `screen` changes whenever a /screen call lands.
   const screen = useScreener((s) => s.screen);
   const screenError = useScreener((s) => s.screenError);
+  const screenLoading = useScreener((s) => s.screenLoading);
+  const retry = useScreener((s) => s.retry);
   const universeSize = useScreener((s) => s.universeSize);
   const sectorList = useScreener((s) => s.sectorList);
   const search = useScreener((s) => s.search);
@@ -138,11 +140,20 @@ export function Results() {
         </div>
       </div>
 
-      {/* service-unavailable banner */}
+      {/* service-unavailable banner — with a Retry that re-fetches universe facts
+          and re-runs the screen, so a load-time outage is recoverable without an
+          unrelated rule edit (STORY-027). */}
       {screenError && (
         <div style={{ margin: '0 20px 12px', border: '1px solid #f3d9b8', borderRadius: '11px', background: '#fff8ef', padding: '11px 14px', display: 'flex', alignItems: 'center', gap: '14px' }}>
           <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#b3641a', flex: 'none' }}>Offline</span>
           <div style={{ flex: 1, minWidth: 0, fontSize: '12.5px', color: '#8a6321' }}>{screenError}</div>
+          <button
+            onClick={() => void retry()}
+            disabled={screenLoading}
+            style={{ flex: 'none', padding: '6px 14px', border: '1px solid #d9a85a', borderRadius: '8px', background: screenLoading ? '#f1e3cd' : '#fff', color: '#8a6321', fontSize: '12px', fontWeight: 600, fontFamily: 'inherit', cursor: screenLoading ? 'default' : 'pointer' }}
+          >
+            {screenLoading ? 'Retrying…' : 'Retry'}
+          </button>
         </div>
       )}
 

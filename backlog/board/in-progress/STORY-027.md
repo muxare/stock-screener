@@ -6,9 +6,10 @@ capability: CAP-screen
 sad_refs: [SAD#5.9, SAD#4.1, SAD#4.2]
 target: ~
 estimate: ~
-attempts: 0
+attempts: 1
 prev_column: ~
 blocked_reason: ~
+base_commit: 471999a3a634bea87502d8ca09abbf68543c500c
 ---
 
 ## User Story
@@ -24,19 +25,19 @@ sample preview depends on a single boot fetch with no retry, so it stays blank
 for the whole session if that one fetch failed.
 
 ## Acceptance Criteria
-- [ ] There is a path to recover after a service outage at load: when the
+- [x] There is a path to recover after a service outage at load: when the
       service becomes reachable the app re-runs the screen and re-fetches the
       universe facts (sector list, total) — via an explicit retry affordance on
       the unavailable banner and/or automatic re-attempt. The app must not stay
       empty until an unrelated rule edit. (finding 9 — `src/store.ts`
       `runScreen`/`bootstrap`, banner surface)
-- [ ] The offline/unavailable state is communicated with a way to retry; a
+- [x] The offline/unavailable state is communicated with a way to retry; a
       successful retry clears the banner and populates rows, "of N", and sectors.
-- [ ] The indicator-builder sample preview recovers: if the boot `sampleStock`
+- [x] The indicator-builder sample preview recovers: if the boot `sampleStock`
       fetch failed, the preview retries (or lazy-fetches when the builder opens)
       rather than showing "—" for the rest of the session. (finding 10 —
       `src/store.ts` `bootstrap`, `src/components/modals/IndicatorBuilderModal.tsx`)
-- [ ] Tests cover: service unavailable at init then reachable → retry populates
+- [x] Tests cover: service unavailable at init then reachable → retry populates
       screen + facts; sample preview recovers after an initial failure.
 
 ## Architectural Constraints (from SAD)
