@@ -240,6 +240,18 @@ def run():
         check("other criterion left unticked", "- [ ] first criterion alpha" in body)
         r = repo.board("check", "STORY-103", "--criterion", "nonexistent")
         check("check --criterion with no match errors", r.returncode != 0)
+        # #4: a 0-match must be diagnostic, not silent — list the real criteria
+        out = r.stdout + r.stderr
+        check("0-match lists available criteria", "second criterion beta" in out)
+        check("0-match reports the matched count", "0 of 2 matched" in out)
+        # #4: punctuation/whitespace in the query must not break the match, and a
+        # criterion that wraps across physical lines must still be matchable.
+        repo.write_story("STORY-104", "todo",
+                         criteria=("runScreen() is sequenced\n      last-write-wins",))
+        r = repo.board("check", "STORY-104", "--criterion", "sequenced last-write-wins")
+        check("multi-line criterion with punctuation matches", r.returncode == 0)
+        body = repo.body("STORY-104")
+        check("wrapped criterion's box line is ticked", "- [x] runScreen() is sequenced" in body)
 
         print("\n[#11] reject auto-demotes a reviewed story back into the loop")
         repo.write_story("STORY-200", "todo")

@@ -42,7 +42,7 @@ Commands:
                     # rate, attempts spread, blocked time, demo-sweep (F7) flag
   logs [--tail N]   # show workflow audit log (.workflow/events.jsonl)
 """
-import argparse, glob, json, os, re, sys, shutil
+import argparse, difflib, glob, json, os, re, sys, shutil
 
 import workflow_log
 
@@ -1037,20 +1037,47 @@ def cmd_check(args):
         _fatal(f"{args.id} has no Acceptance Criteria section", event="check", story_id=args.id)
     want = not args.uncheck
     lines = m.group(2).split("\n")
-    matched, changed = 0, 0
+    # Normalize the query and criteria so punctuation like `()` and collapsed
+    # whitespace don't silently break the substring match (#4: brittle matcher).
+    def norm(s):
+        return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", s)).strip().lower()
+    needle = norm(args.criterion) if args.criterion else ""
+    # Group lines into criteria: a box line plus any wrapped continuation lines
+    # (criteria often span several physical lines, so matching must consider the
+    # whole text, not just the line that carries the checkbox). #4.
+    crit_idx = None  # index of the current criterion's box line
+    full = {}        # box-line index -> accumulated full text
     for i, line in enumerate(lines):
         bm = CRITERION_BOX.match(line)
-        if not bm:
-            continue
-        text = bm.group(3)
-        if args.all or (args.criterion and args.criterion.lower() in text.lower()):
+        if bm:
+            crit_idx = i
+            full[i] = bm.group(3)
+        elif crit_idx is not None:
+            full[crit_idx] += " " + line
+    available = [full[i].strip() for i in full]  # for diagnostics
+    matched, changed = 0, 0
+    for i in full:
+        bm = CRITERION_BOX.match(lines[i])
+        if args.all or (needle and needle in norm(full[i])):
             matched += 1
             is_checked = bm.group(2).lower() == "x"
             if is_checked != want:
-                lines[i] = f"{bm.group(1)}[{'x' if want else ' '}]{text}"
+                lines[i] = f"{bm.group(1)}[{'x' if want else ' '}]{bm.group(3)}"
                 changed += 1
     if args.criterion and matched == 0:
-        _fatal(f"no acceptance criterion matches '{args.criterion}'",
+        def tidy(t):
+            t = re.sub(r"\s+", " ", t).strip()
+            return t if len(t) <= 100 else t[:97] + "..."
+        listing = "\n".join(f"    - {tidy(t)}" for t in available) or "    (none declared)"
+        close = difflib.get_close_matches(
+            needle, [norm(t) for t in available], n=1, cutoff=0.4)
+        hint = ""
+        if close:
+            best = next(t for t in available if norm(t) == close[0])
+            hint = f"\n  closest: {tidy(best)!r}"
+        _fatal(f"no acceptance criterion matches '{args.criterion}' "
+               f"(0 of {len(available)} matched).{hint}\n"
+               f"  available criteria in {args.id} — pass a substring of one:\n{listing}",
                event="check", story_id=args.id)
     new_body = body[:m.start()] + m.group(1) + "\n".join(lines) + m.group(3) + body[m.end():]
     fm.pop("_path", None); fm.pop("_column", None)
