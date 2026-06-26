@@ -9,7 +9,6 @@ estimate: ~
 attempts: 1
 prev_column: ~
 blocked_reason: ~
-reject_reason: ~
 base_commit: 3028405992a66799e67f84f19f7c060fd0acc9e5
 ---
 
@@ -27,24 +26,24 @@ dev/test only, **bars assumed pre-adjusted** (no split/dividend math), and a
 **configurable column mapping** so Stooq/Yahoo/broker CSVs all load.
 
 ## Acceptance Criteria
-- [ ] A single command reads one or more CSV files of daily OHLCV rows and writes
+- [x] A single command reads one or more CSV files of daily OHLCV rows and writes
       a SQLite DB at a configurable output path.
-- [ ] The SQLite schema matches SAD#6.1: an `instrument` table (`ticker`, `name`,
+- [x] The SQLite schema matches SAD#6.1: an `instrument` table (`ticker`, `name`,
       `sector`) and a `bar` table (`ticker`, `date`, `o`, `h`, `l`, `c`, `v`)
       with a uniqueness constraint / primary key on (`ticker`, `date`).
-- [ ] Column mapping is configurable (which columns are date / open / high / low
+- [x] Column mapping is configurable (which columns are date / open / high / low
       / close / volume / ticker, plus date format and ticker normalization), so a
       new source is onboarded by editing config — **no code change**.
-- [ ] Both layouts load: multiple tickers in one file, and one file per ticker
+- [x] Both layouts load: multiple tickers in one file, and one file per ticker
       (ticker taken from a mapped column or, when absent, the filename).
-- [ ] Re-running the import on the same input is **idempotent**: upsert on
+- [x] Re-running the import on the same input is **idempotent**: upsert on
       (`ticker`, `date`) — no duplicate instruments or bars.
-- [ ] Malformed / blank rows are reported (count + a small sample) and skipped;
+- [x] Malformed / blank rows are reported (count + a small sample) and skipped;
       one bad row never aborts the whole run.
-- [ ] `sector` resolution is explicit: from a mapped CSV column if present, else
+- [x] `sector` resolution is explicit: from a mapped CSV column if present, else
       from an optional side metadata file, else stored as `'Unknown'` (never
       silently empty). `name` falls back to `ticker` when absent.
-- [ ] Importing a realistic multi-year, multi-hundred-ticker dataset completes in
+- [x] Importing a realistic multi-year, multi-hundred-ticker dataset completes in
       a dev-acceptable time (seconds) — verified on a representative fixture.
 
 ## Architectural Constraints (from SAD)
