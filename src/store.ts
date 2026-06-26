@@ -62,6 +62,22 @@ async function apiScreen(rules: Rule[], limit = 0, signal?: AbortSignal): Promis
   return res.json() as Promise<ScreenResp>;
 }
 
+// Universe facts only (STORY-028): count + sector facets with NO per-name row
+// payload. `bootstrap` used to pull a full `ALL_ROWS` screen just to read the
+// total and distinct sectors, downloading every row + its 40-point sparkline for
+// nothing; `/facts` returns just the scalars the load path needs.
+interface FactsResp {
+  total: number;
+  sectors: string[];
+  sample: string | null;
+}
+
+async function apiFacts(signal?: AbortSignal): Promise<FactsResp> {
+  const res = await fetch('/facts', { signal });
+  if (!res.ok) throw new Error('facts failed: ' + res.status);
+  return res.json() as Promise<FactsResp>;
+}
+
 async function apiInstrument(ticker: string): Promise<InstrumentBars | null> {
   const res = await fetch('/instrument/' + encodeURIComponent(ticker));
   if (res.status === 404) return null;
@@ -555,14 +571,14 @@ export const useScreener = create<ScreenerState>((set, get) => {
     },
 
     // Fetch the universe-wide facts (size, sectors) and a single sample name.
+    // Facts come from the count/facets-only `/facts` endpoint (STORY-028) — no
+    // full row payload is pulled just to derive the total and sector list.
     bootstrap: async () => {
       try {
-        const all = await apiScreen([], ALL_ROWS);
-        const sectorList = [...new Set(all.results.map((r) => r.sector))].sort();
-        set({ universeSize: all.total, sectorList });
-        const t = all.tickers[0];
-        if (t) {
-          const bars = await apiInstrument(t);
+        const facts = await apiFacts();
+        set({ universeSize: facts.total, sectorList: facts.sectors });
+        if (facts.sample) {
+          const bars = await apiInstrument(facts.sample);
           if (bars) set({ sampleStock: M.buildStock(bars) });
         }
       } catch { /* service unavailable — leave defaults; runScreen surfaces the error */ }

@@ -148,6 +148,42 @@ describe('service failures are not misreported as zero results', () => {
   });
 });
 
+// STORY-028 — bootstrap derives the universe facts (count + sectors) from a
+// count/facets-only endpoint, NOT from a full-universe `ALL_ROWS` screen whose
+// per-name rows (each with a 40-point sparkline) were all discarded. These hit
+// the in-process server over the same proxied fetch the store uses.
+describe('STORY-028: universe facts come from a facts-only payload (no rows)', () => {
+  it('GET /facts returns total + sectors + sample and serialises NO per-name rows', async () => {
+    const facts = await fetch('/facts').then((r) => r.json());
+    expect(facts.total).toBe(44);                       // same "of N" total as before
+    expect(Array.isArray(facts.sectors)).toBe(true);
+    expect(facts.sectors.length).toBeGreaterThan(0);    // sector facets present
+    expect(typeof facts.sample).toBe('string');         // a sample name for the preview
+    // The whole point of the story: this call carries no row/sparkline payload.
+    expect('results' in facts).toBe(false);
+    expect(JSON.stringify(facts)).not.toContain('sparkline');
+  });
+
+  it('bootstrap populates universeSize + sectorList from /facts, not an ALL_ROWS screen', async () => {
+    const { useScreener } = await import('../src/store.ts');
+    // Fail any full-row `/screen` (limit >= ALL_ROWS) during bootstrap; the facts
+    // path must not depend on it. The reactive screen still runs separately.
+    await withStubbedFetch((real) => ((input, init) => {
+      const body = init?.body ? JSON.parse(init.body as string) : {};
+      if (urlOf(input).includes('/screen') && body.limit >= 1_000_000) {
+        return Promise.reject(new Error('bootstrap must not pull full rows for facts'));
+      }
+      return real(input, init);
+    }) as typeof fetch, async () => {
+      useScreener.setState({ universeSize: 0, sectorList: [], sampleStock: null });
+      await useScreener.getState().bootstrap();
+      const st = useScreener.getState();
+      expect(st.universeSize).toBe(44);
+      expect(st.sectorList.length).toBeGreaterThan(0);
+    });
+  });
+});
+
 // STORY-025 — request sequencing in the client store (SAD#5.9). Moving screen &
 // backtest to async service calls removed the synchronous guarantees of the old
 // in-browser compute: responses race, streams overlap, and selection outlives the

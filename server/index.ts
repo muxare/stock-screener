@@ -6,6 +6,8 @@
 //
 // Endpoints:
 //   GET  /health            -> { ok, universe }  liveness + warm-universe size
+//   GET  /facts             -> FactsResponse      universe count + sector facets
+//                                                  (no per-name rows; STORY-028)
 //   GET  /instrument/:ticker -> InstrumentBars   one name's bars (404 unknown)
 //   POST /screen            -> ScreenResponse     body: ScreenRequest (handlers.ts)
 //   POST /backtest          -> NDJSON stream      body: BacktestRequest; progress
@@ -15,7 +17,7 @@ import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { productionUniverse } from './universe.ts';
 import type { UniverseStore } from './universe.ts';
-import { handleScreen, handleBacktest, RequestError } from './handlers.ts';
+import { handleScreen, handleBacktest, handleFacets, RequestError } from './handlers.ts';
 import type { ScreenRequest, BacktestRequest } from './handlers.ts';
 import type { Stock } from '../src/lib/market.ts';
 
@@ -92,6 +94,14 @@ export function createScreenServer(store: UniverseStore = productionUniverse) {
 
     if (req.method === 'GET' && url === '/health') {
       sendJson(res, 200, { ok: true, universe: store.get().length });
+      return;
+    }
+
+    // Universe count + sector facets only (STORY-028): bootstrap reads these to
+    // show the "of N" total and the sector filter list without pulling the full
+    // per-name row payload a `/screen` would serialise.
+    if (req.method === 'GET' && url === '/facts') {
+      sendJson(res, 200, handleFacets(store.get()));
       return;
     }
 

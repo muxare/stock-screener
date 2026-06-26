@@ -79,6 +79,27 @@ export function handleScreen(universe: Stock[], req: ScreenRequest): ScreenRespo
   };
 }
 
+// Universe facts (STORY-028): the count + sector facets the client shows at load
+// ("of N" total, sector filter list), derived WITHOUT serialising a per-name row
+// payload. `bootstrap()` used to pull a full `ScreenResponse` (every row + its
+// 40-point sparkline) just to read `total` and the distinct sectors; this is the
+// count/facets-only shape that replaces that. Still server-side (SAD#2.5) over
+// the same warm universe; it is a payload-shape change, not a move of compute.
+export interface FactsResponse {
+  total: number;          // full-universe count (the "of N" total)
+  sectors: string[];      // distinct sector facets, sorted
+  sample: string | null;  // one ticker for the indicator-builder preview (null if empty)
+}
+
+export function handleFacets(universe: Stock[]): FactsResponse {
+  const sectors = [...new Set(universe.map((s) => s.sector))].sort();
+  return {
+    total: universe.length,
+    sectors,
+    sample: universe.length ? universe[0].ticker : null,
+  };
+}
+
 export interface BacktestRequest {
   // Built-in preset id whose rules seed the backtest; optional.
   preset?: string;
