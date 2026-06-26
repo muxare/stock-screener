@@ -1,0 +1,5 @@
+{
+  "_comment": "Optional side metadata: ticker → name/sector, consulted when a CSV row carries no name/sector column. Used to fill the SAD#6.1 instrument table.",
+  "AAPL": { "name": "Apple Inc.", "sector": "Technology" },
+  "MSFT": { "name": "Microsoft Corp.", "sector": "Technology" }
+}

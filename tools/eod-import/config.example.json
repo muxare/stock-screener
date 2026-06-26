@@ -1,0 +1,20 @@
+{
+  "_comment": "Example mapping for Stooq daily CSVs (one file per ticker, e.g. aapl.us.txt renamed .csv). Onboard a new source by copying this file and editing the column names / dateFormat / ticker rules — no code change.",
+  "columns": {
+    "date": "Date",
+    "open": "Open",
+    "high": "High",
+    "low": "Low",
+    "close": "Close",
+    "volume": "Volume",
+    "ticker": "Ticker"
+  },
+  "dateFormat": "yyyymmdd",
+  "ticker": {
+    "case": "upper",
+    "stripSuffix": ".US"
+  },
+  "delimiter": ",",
+  "hasHeader": true,
+  "metadataFile": "metadata.example.json"
+}
