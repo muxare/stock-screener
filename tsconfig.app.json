@@ -21,5 +21,10 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  // The SQLite dev/test adapter (STORY-032) is Node-only (`node:sqlite`) and is
+  // wired server-side (server/universe.ts); it must not be type-checked under the
+  // browser app program, which carries no @types/node. It runs via node + vitest,
+  // consistent with how server/ and tools/ Node code is kept out of `tsc -b`.
+  "exclude": ["src/lib/data/sqlite.ts", "src/lib/data/sqlite.test.ts"]
 }

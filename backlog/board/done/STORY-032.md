@@ -6,10 +6,10 @@ capability: CAP-screen
 sad_refs: [SAD#5.10, SAD#4.3, SAD#6.1, SAD#2.6, SAD#8.7]
 target: ~
 estimate: ~
-attempts: 0
+attempts: 1
 prev_column: ~
 blocked_reason: ~
-reject_reason: ~
+base_commit: d82308064309eb220d9de1e7273f88e01eac5128
 ---
 
 ## User Story
@@ -26,21 +26,21 @@ swap is "a one-line change here"). It is **dev/test only** — NOT the licensed
 vendor adapter (STORY-015 / ADR-008).
 
 ## Acceptance Criteria
-- [ ] A `sqliteProvider(dbPath)` in `src/lib/data/` implements
+- [x] A `sqliteProvider(dbPath)` in `src/lib/data/` implements
       `MarketDataProvider` (`getUniverse()` and `getInstrument(ticker)`),
       reading a DB produced by STORY-031.
-- [ ] Reads are **synchronous** — the port is synchronous (`getUniverse():
+- [x] Reads are **synchronous** — the port is synchronous (`getUniverse():
       InstrumentBars[]`), so the adapter uses a synchronous SQLite access library.
-- [ ] Bars are returned in **chronological order** as `Bar[]` (`{o,h,l,c,v}`);
+- [x] Bars are returned in **chronological order** as `Bar[]` (`{o,h,l,c,v}`);
       the DB `date` column orders the bars but is not part of the engine `Bar`
       shape (SAD#6.1 / `src/lib/market.ts`).
-- [ ] `getInstrument(ticker)` returns one instrument's bars + metadata, or `null`
+- [x] `getInstrument(ticker)` returns one instrument's bars + metadata, or `null`
       for an unknown ticker; its bars are identical to that name in
       `getUniverse()`.
-- [ ] The provider is selectable at the service seam (`server/universe.ts`) —
+- [x] The provider is selectable at the service seam (`server/universe.ts`) —
       e.g. via an env var / config path — without editing handlers or the engine
       (mirrors the one-line swap documented there).
-- [ ] The adapter performs **no** corporate-action adjustment (trusts the
+- [x] The adapter performs **no** corporate-action adjustment (trusts the
       importer's pre-adjusted bars) and contains no vendor SDK.
 
 ## Architectural Constraints (from SAD)
@@ -69,3 +69,15 @@ vendor adapter (STORY-015 / ADR-008).
 - src/lib/data/**
 - server/universe.ts
 - package.json
+- tsconfig.app.json
+
+## Notes
+- **Approved scope expansion — `tsconfig.app.json`.** The node-only SQLite adapter
+  under `src/` cannot be type-checked by the browser app program (`tsconfig.app.json`
+  carries no `@types/node`), so it is added to that config's `exclude` list. The
+  sad-grounding skill flagged this as outside the original Touch scope; the user
+  approved it (option A) via AskUserQuestion before the edit, so it is recorded
+  here and added to Touch scope.
+- **Follow-ups fanned from the code review:** STORY-033 (production guard on
+  dev/test adapter selection, F5) and STORY-034 (`MarketDataProvider` lifecycle /
+  `close()` to release the SQLite handle, F7).
