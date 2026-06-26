@@ -1,0 +1,17 @@
+{
+  "_comment": "Yahoo/yfinance-style export: one file, many tickers in a 'Company' column, timestamped+timezoned dates (the 'iso' format tolerates the trailing time/offset), extra Dividends/Stock Splits columns ignored. Bars must already be adjusted — this tool does NO split/dividend math (SAD#2.2). Names/sectors come from metadata.synthetic.json since the CSV carries none.",
+  "columns": {
+    "date": "Date",
+    "open": "Open",
+    "high": "High",
+    "low": "Low",
+    "close": "Close",
+    "volume": "Volume",
+    "ticker": "Company"
+  },
+  "dateFormat": "iso",
+  "ticker": { "case": "upper" },
+  "delimiter": ",",
+  "hasHeader": true,
+  "metadataFile": "metadata.synthetic.json"
+}

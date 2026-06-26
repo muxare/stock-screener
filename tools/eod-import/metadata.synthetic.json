@@ -1,0 +1,179 @@
+{
+  "_comment": "Names/sectors for the synthetic dev universe (mirrors src/lib/data/synthetic.ts). Use with the Yahoo/yfinance config when your CSV has no name/sector columns.",
+  "AAPL": {
+    "name": "Apple Inc.",
+    "sector": "Technology"
+  },
+  "MSFT": {
+    "name": "Microsoft Corp.",
+    "sector": "Technology"
+  },
+  "NVDA": {
+    "name": "NVIDIA Corp.",
+    "sector": "Semiconductors"
+  },
+  "AMD": {
+    "name": "Advanced Micro Devices",
+    "sector": "Semiconductors"
+  },
+  "AVGO": {
+    "name": "Broadcom Inc.",
+    "sector": "Semiconductors"
+  },
+  "GOOGL": {
+    "name": "Alphabet Inc.",
+    "sector": "Communication"
+  },
+  "META": {
+    "name": "Meta Platforms",
+    "sector": "Communication"
+  },
+  "AMZN": {
+    "name": "Amazon.com Inc.",
+    "sector": "Consumer Disc."
+  },
+  "TSLA": {
+    "name": "Tesla Inc.",
+    "sector": "Consumer Disc."
+  },
+  "NFLX": {
+    "name": "Netflix Inc.",
+    "sector": "Communication"
+  },
+  "CRM": {
+    "name": "Salesforce Inc.",
+    "sector": "Technology"
+  },
+  "ORCL": {
+    "name": "Oracle Corp.",
+    "sector": "Technology"
+  },
+  "ADBE": {
+    "name": "Adobe Inc.",
+    "sector": "Technology"
+  },
+  "INTC": {
+    "name": "Intel Corp.",
+    "sector": "Semiconductors"
+  },
+  "QCOM": {
+    "name": "Qualcomm Inc.",
+    "sector": "Semiconductors"
+  },
+  "MU": {
+    "name": "Micron Technology",
+    "sector": "Semiconductors"
+  },
+  "PLTR": {
+    "name": "Palantir Technologies",
+    "sector": "Technology"
+  },
+  "SNOW": {
+    "name": "Snowflake Inc.",
+    "sector": "Technology"
+  },
+  "SHOP": {
+    "name": "Shopify Inc.",
+    "sector": "Technology"
+  },
+  "UBER": {
+    "name": "Uber Technologies",
+    "sector": "Industrials"
+  },
+  "ABNB": {
+    "name": "Airbnb Inc.",
+    "sector": "Consumer Disc."
+  },
+  "COIN": {
+    "name": "Coinbase Global",
+    "sector": "Financials"
+  },
+  "SQ": {
+    "name": "Block Inc.",
+    "sector": "Financials"
+  },
+  "PYPL": {
+    "name": "PayPal Holdings",
+    "sector": "Financials"
+  },
+  "JPM": {
+    "name": "JPMorgan Chase",
+    "sector": "Financials"
+  },
+  "BAC": {
+    "name": "Bank of America",
+    "sector": "Financials"
+  },
+  "GS": {
+    "name": "Goldman Sachs",
+    "sector": "Financials"
+  },
+  "V": {
+    "name": "Visa Inc.",
+    "sector": "Financials"
+  },
+  "MA": {
+    "name": "Mastercard Inc.",
+    "sector": "Financials"
+  },
+  "DIS": {
+    "name": "Walt Disney Co.",
+    "sector": "Communication"
+  },
+  "NKE": {
+    "name": "Nike Inc.",
+    "sector": "Consumer Disc."
+  },
+  "SBUX": {
+    "name": "Starbucks Corp.",
+    "sector": "Consumer Disc."
+  },
+  "MCD": {
+    "name": "McDonald's Corp.",
+    "sector": "Consumer Disc."
+  },
+  "COST": {
+    "name": "Costco Wholesale",
+    "sector": "Consumer Staples"
+  },
+  "WMT": {
+    "name": "Walmart Inc.",
+    "sector": "Consumer Staples"
+  },
+  "XOM": {
+    "name": "Exxon Mobil",
+    "sector": "Energy"
+  },
+  "CVX": {
+    "name": "Chevron Corp.",
+    "sector": "Energy"
+  },
+  "LLY": {
+    "name": "Eli Lilly & Co.",
+    "sector": "Healthcare"
+  },
+  "UNH": {
+    "name": "UnitedHealth Group",
+    "sector": "Healthcare"
+  },
+  "PFE": {
+    "name": "Pfizer Inc.",
+    "sector": "Healthcare"
+  },
+  "BA": {
+    "name": "Boeing Co.",
+    "sector": "Industrials"
+  },
+  "CAT": {
+    "name": "Caterpillar Inc.",
+    "sector": "Industrials"
+  },
+  "GE": {
+    "name": "GE Aerospace",
+    "sector": "Industrials"
+  },
+  "F": {
+    "name": "Ford Motor Co.",
+    "sector": "Consumer Disc."
+  }
+}

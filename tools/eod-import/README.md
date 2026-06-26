@@ -30,6 +30,23 @@ Inputs may be individual `.csv` files or directories (each directory contributes
 its immediate `.csv` files). Re-running on the same input is **idempotent** —
 bars upsert on `(ticker, date)`, instruments on `ticker`.
 
+### Example configs
+
+Two ready-to-use mappings ship alongside the tool — copy and adjust, or use as-is:
+
+| Config | Source shape |
+| --- | --- |
+| `config.example.json` | Stooq — one file per ticker, `yyyymmdd` dates, `.US` suffix to strip. |
+| `config.yahoo.json` | Yahoo/yfinance — one file, many tickers in a `Company` column, timestamped+timezoned dates (the `iso` format tolerates the trailing time/offset), extra `Dividends`/`Stock Splits` columns ignored. |
+
+`config.yahoo.json` points at `metadata.synthetic.json` (names/sectors for the 44
+dev-universe tickers, mirrored from `src/lib/data/synthetic.ts`) because a Yahoo
+export carries no name/sector columns. Example:
+
+```sh
+npm run eod:import -- --config tools/eod-import/config.yahoo.json --out dev.db yahoo-export.csv
+```
+
 ## Schema (SAD#6.1)
 
 ```sql
