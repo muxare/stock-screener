@@ -8,6 +8,8 @@
 //   GET  /health            -> { ok, universe }  liveness + warm-universe size
 //   GET  /facts             -> FactsResponse      universe count + sector facets
 //                                                  (no per-name rows; STORY-028)
+//   GET  /metrics           -> latency snapshot    per-path p50/p95/max vs the
+//                                                  SAD#2.3/2.4 budgets (STORY-021)
 //   GET  /instrument/:ticker -> InstrumentBars   one name's bars (404 unknown)
 //   POST /screen            -> ScreenResponse     body: ScreenRequest (handlers.ts)
 //   POST /backtest          -> NDJSON stream      body: BacktestRequest; progress
@@ -19,6 +21,7 @@ import { productionUniverse } from './universe.ts';
 import type { UniverseStore } from './universe.ts';
 import { handleScreen, handleBacktest, handleFacets, RequestError } from './handlers.ts';
 import type { ScreenRequest, BacktestRequest } from './handlers.ts';
+import { metrics } from './metrics.ts';
 import type { Stock } from '../src/lib/market.ts';
 
 const MAX_BODY_BYTES = 1 << 20; // 1 MiB — rule sets are small
@@ -74,6 +77,7 @@ function runBacktestStream(res: ServerResponse, universe: Stock[], req: Backtest
         writeLine({ type: 'progress', name, total, pct: Math.round((name / total) * 100) });
       }
     });
+    metrics.record('backtest', summary.elapsedMs); // SAD#2.4 budget (STORY-021)
     writeLine({ type: 'result', ...summary });
     res.end();
   } catch (err) {
@@ -105,6 +109,13 @@ export function createScreenServer(store: UniverseStore = productionUniverse) {
       return;
     }
 
+    // Latency snapshot (STORY-021): per-path p50/p95/max and over-budget counts
+    // measured against the SAD#2.3/2.4 budgets, for observability/assertions.
+    if (req.method === 'GET' && url === '/metrics') {
+      sendJson(res, 200, metrics.snapshot());
+      return;
+    }
+
     // One instrument's adjusted bars + metadata (SAD#4.3): the client builds the
     // Stock locally for the names it displays (SAD#4.1 / SAD#2.5). No
     // full-universe build is triggered to serve a single name.
@@ -120,6 +131,7 @@ export function createScreenServer(store: UniverseStore = productionUniverse) {
       readJsonBody(req)
         .then((body) => {
           const result = handleScreen(store.get(), body as ScreenRequest);
+          metrics.record('screen', result.elapsedMs); // SAD#2.3 budget (STORY-021)
           sendJson(res, 200, result);
         })
         .catch((err: unknown) => {

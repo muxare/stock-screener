@@ -344,3 +344,32 @@ describe('STORY-025: rapid re-runs never show stale or mismatched results', () =
     });
   });
 });
+
+// STORY-021 — the service screen/backtest paths are instrumented against the SAD
+// budgets (SAD#2.3 screen p95 ≤ 3s, SAD#2.4 backtest ≤ 30s). The in-process
+// server records each handler's server-side `elapsedMs`; `/metrics` exposes the
+// distribution so a budget regression is visible (here: asserted within budget).
+describe('STORY-021: service latency is measured against the SAD budgets', () => {
+  it('records screen latency and reports p95 within the SAD#2.3 3s budget', async () => {
+    const { useScreener } = await import('../src/store.ts');
+    // Drive a handful of full-universe screens so the recorder has samples.
+    for (let i = 0; i < 5; i++) await useScreener.getState().runScreen();
+    const m = await fetch('/metrics').then((r) => r.json());
+    expect(m.screen.count).toBeGreaterThan(0);             // the path is instrumented
+    expect(m.screen.budgetMs).toBe(3000);                  // SAD#2.3
+    expect(m.screen.p95).toBeLessThanOrEqual(3000);        // within budget
+    expect(m.screen.overBudget).toBe(0);                   // no regression
+  });
+
+  it('records backtest latency against the SAD#2.4 30s budget', async () => {
+    const { useScreener } = await import('../src/store.ts');
+    // Run a real backtest so the stream path's metrics.record('backtest', …) fires.
+    useScreener.getState().openBacktest();
+    expect(await waitFor(() => useScreener.getState().backtestResult != null, 15000)).toBe(true);
+    const m = await fetch('/metrics').then((r) => r.json());
+    expect(m.backtest.count).toBeGreaterThan(0);           // the path is instrumented
+    expect(m.backtest.budgetMs).toBe(30000);               // SAD#2.4
+    expect(m.backtest.p95).toBeLessThanOrEqual(30000);     // within budget
+    expect(m.backtest.overBudget).toBe(0);                 // no regression
+  });
+});
