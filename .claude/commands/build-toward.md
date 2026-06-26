@@ -103,6 +103,20 @@ Stories whose `capability`/`target` don't match the selector are invisible to
 this run. That's the feature: to build more, flip a story into the slice
 deliberately. The loop never widens its own scope.
 
+**Same defect class, next door.** When the same root cause appears in a sibling
+spot the AC didn't name (the identical race one function away, the same missing
+guard in a peer handler), apply one rule — no judgement wobble:
+
+> **Same root cause AND inside this story's Touch scope ⇒ fix it now** and note
+> the widening in the commit body (which sibling, why it's the same cause).
+> **Otherwise ⇒ fan a new story** (different root cause, or the fix lands outside
+> Touch scope). Don't quietly edit outside scope — the review-check gate refuses
+> it anyway.
+
+The test is mechanical: *same cause* and *in Touch scope* are both yes → fix and
+document; any no → fan out. This keeps "obviously the same bug" from forcing a
+second round-trip while still stopping silent scope expansion.
+
 ## Gate 4 — acceptance (human)
 A story that reaches `review` waits for the human. Two sanctioned outcomes:
 - **Accept:** `board.py move <id> done` (re-runs the gate; refused on problems).

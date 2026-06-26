@@ -28,6 +28,14 @@ weakening them.
   either the story is mis-scoped or you're drifting. Stop and flag.
 - Build only what the acceptance criteria require. If you feel the urge to add
   "just one more" convenience — that's scope creep. Don't.
+- **Same defect class, next door.** When you find the *same root cause* in a
+  sibling spot the AC didn't name (the identical race a function away, the same
+  missing guard in a peer handler), apply one rule: **same root cause AND inside
+  Touch scope ⇒ fix it now** and note the widening in the commit body; **else ⇒
+  fan a new story** (different cause, or the fix is outside Touch scope). This is
+  the one carve-out from "build only what the AC requires" — and only because the
+  fix stays inside the scope the gate already allows. A different cause, or a fix
+  outside Touch scope, is always a new story, never a silent edit.
 - If a requirement **conflicts with the SAD**, STOP. Do not resolve it by
   improvising a new architecture. Report the conflict with both sides quoted
   and let the human decide (it may mean the SAD needs an ADR).
