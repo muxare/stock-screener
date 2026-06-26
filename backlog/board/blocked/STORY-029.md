@@ -7,8 +7,8 @@ sad_refs: [SAD#4.2, SAD#4.3, SAD#5.10, SAD#5.9]
 target: ~
 estimate: ~
 attempts: 0
-prev_column: ~
-blocked_reason: ~
+prev_column: todo
+blocked_reason: product decision pending: reseed/new-session affordance — confirm with product owner it's still wanted before building (SAD open question, STORY-018 follow-up)
 ---
 
 ## User Story

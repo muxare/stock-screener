@@ -6,9 +6,10 @@ capability: CAP-screen
 sad_refs: [SAD#5.7, SAD#5.9, SAD#2.3]
 target: ~
 estimate: ~
-attempts: 0
+attempts: 1
 prev_column: ~
 blocked_reason: ~
+base_commit: 8d235273d42406c8454121c3c44cd93cf7cd3c13
 ---
 
 ## User Story
@@ -22,15 +23,15 @@ for the whole universe on every app load — each row carrying ~13 scalars plus 
 40-element sparkline — when only the total and the distinct sector set are used.
 
 ## Acceptance Criteria
-- [ ] `bootstrap()` no longer requests full row payloads to derive universe
+- [x] `bootstrap()` no longer requests full row payloads to derive universe
       facts: the total and sector list come from a count/facets-only response,
       not an `ALL_ROWS` screen. (`src/store.ts` `bootstrap`)
-- [ ] The service exposes the universe count + sector facets without serialising
+- [x] The service exposes the universe count + sector facets without serialising
       per-name rows (e.g. extend the SAD#5.7 `/screen` projection or a dedicated
       facets shape); the sparkline/scalar row payload is not sent for this call.
-- [ ] App load still shows the correct "of N" total and sector facets — covered
+- [x] App load still shows the correct "of N" total and sector facets — covered
       by the existing client integration test, which must stay green.
-- [ ] No behaviour change to the main `/screen` results path (still returns full
+- [x] No behaviour change to the main `/screen` results path (still returns full
       rows for the active rule set).
 
 ## Architectural Constraints (from SAD)
