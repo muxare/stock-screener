@@ -3,7 +3,10 @@
 _Status: STEP 1 (Sprint Planning) landed — 2026-06-27. STEP 2 (Retrospective)
 landed — 2026-06-27 (§5; ships with the minimal slice of #16 — the
 provenance-stamped idea inbox `board.py idea-new`/`idea-list` — that the
-`--accept` landing needs). STEP 3 (loops) optional, not built._
+`--accept` landing needs). STEP A leftovers landed — 2026-06-27 (`/capture-idea`
+command + the idea-inbox surface in `render`/`render-html`, A6/A8). STEP 3
+(loops) landed — 2026-06-27 (§8; observation loops + scheduled retro digest
+documented, the `/build-toward` action loop bounded by WIP)._
 _Builds on `docs/work-process-analysis.md` (§5 agile mapping, §7 five gates, §8
 PO/SM lenses). Designed by an expert panel (agile coach + way-of-work engineer +
 Claude Code expert), synthesised here._
@@ -121,9 +124,15 @@ _Built as specified below. `board.py sprint-retro` (scaffold + `--accept`/`--rej
 already-wired lens agents (§5.7). The sequencing dependency (§5.8) was resolved by
 **landing the minimal slice of #16** — the provenance-stamped idea inbox
 (`idea-new`/`idea-list`, enriched `IDEA.template.md`, the firewall validate rule) — so
-`--accept` calls the shared `_write_idea` allocator. The remainder of STEP A
-(stale-idea archival, `/capture-idea`, render-html inbox surface) is still open. STEP 3
-(loops) optional, not built._
+`--accept` calls the shared `_write_idea` allocator. **Stale-idea archival (A5)
+landed 2026-06-27** — `board.py idea-archive [--days N] [--dry-run]` moves inbox
+ideas past the `STALE_IDEA_DAYS` (90) horizon to `backlog/ideas/archive/`,
+`idea-list` flags them `STALE`, and `validate` nudges (non-blocking). **STEP A is
+now complete (2026-06-27)** — `/capture-idea` (the A6 thin command with the
+in-scope→STORY / out-of-scope→IDEA fork) plus the A8 idea-inbox surface in both
+`board.py render` (the `## Idea inbox` section in board.md) and `render-html` (the
+**Idea inbox** tab + banner chip) landed, with render tests in
+`test_board_sprint.py`. **STEP 3 (loops) landed (2026-06-27)** — documented in §8._
 
 Run at `sprint-close` by the **same roster** that planned. **Prep for process
 change**, never an orphan report. The retro is a *different lifecycle object* from
@@ -294,3 +303,72 @@ python3 tools/board.py sprint-retro --batch BATCH-NNN --accept P-1   # → spawn
 python3 tools/board.py sprint-retro --batch BATCH-NNN --reject P-2
 python3 tools/board.py idea-list                              # the firewalled inbox the retro fed
 ```
+
+---
+
+## 8. Cadence — the loops (STEP 3, optional)
+
+_Added 2026-06-27. STEP 3 = STEP C / #18 of `docs/work-process-analysis.md` §10.
+Timebox-free Kanban has no natural clock; `/loop` (in-session) and scheduled
+routines (across sessions) give it one **without standing up meetings**. The loops
+drive the already-built read-only surfaces and ceremonies — they add no new
+judgement, just a heartbeat. Partitioned by risk: observation loops are safe now;
+the one action loop is gated behind Phase 1 (which has landed)._
+
+### 8.1 Two risk classes
+
+| Class | What it does | Safe to run | Stop condition |
+|---|---|---|---|
+| **Observation** | reads board state, emits to a gate | **now** — cannot harm flow | a cadence (you read the digest and act, or not) |
+| **Action** (`/build-toward`) | mutates the board (starts/advances stories) | **only after Phase 1** (done) | the **WIP/batch bound**, never wall-clock |
+
+### 8.2 Observation loops (C1 — safe now)
+
+All read-only; each lands its output at a named gate. Drive them with `/loop`
+(self-paced or on an interval) while you're in a session:
+
+- **SM health sweep → Gate 5/retro.** Flow & process health off the event log:
+  ```
+  /loop python3 tools/board.py metrics ; python3 tools/board.py exceptions ; python3 tools/board.py validate
+  ```
+  Surfaces WIP breaches, aging stories, the exception queue, and validate nudges.
+  The Scrum-Master lens (via `/sprint-retro` at close) reads the same surfaces.
+- **PO batch-prep → Gate 3.** Convene the read-only planning team to propose the
+  next batch (it never commits — that's your Gate-3 call):
+  ```
+  /loop /sprint-plan <capability-hint>
+  ```
+- **Idea-inbox triage nudge → Gate 1.** Surface fresh + stale captures so the
+  inbox stays signal and nothing rots unpromoted:
+  ```
+  /loop python3 tools/board.py idea-list
+  ```
+  (Pair with `idea-archive` when the stale count climbs — A5.)
+
+These never mutate the board, so they can light up immediately and start buying
+back attention.
+
+### 8.3 Scheduled routine — nightly SM retro digest (C2)
+
+The in-session `/loop` dies with the session. For a heartbeat that **survives
+across sessions**, schedule the SM health sweep as an overnight cron-style routine
+(via `/schedule`): a nightly digest of `metrics` + `exceptions` + `validate` so
+the morning starts with the board's state already summarised at Gate 5, no
+watching the stream. This is the "the machine's standup" the event log always made
+possible — the routine just delivers it on a clock.
+
+### 8.4 Action loop — `/loop /build-toward <batch>` (C3)
+
+Now eligible (Phase 1's hard review-check gate makes unattended runs safe). It
+**must carry the WIP/batch bound as its stop condition or it churns** — the full
+spec lives in `.claude/commands/build-toward.md` (“Driving with /loop”). A
+practical split: in-session `/loop /build-toward` for "work this batch while I'm
+here"; the observation routine (§8.3) for the cross-session heartbeat.
+
+### 8.5 The honest-loop rule
+
+The standing risk of any loop is noise nobody reads. The guardrail is the same one
+that governs the lenses: **every loop's output must land at a named gate** (SM →
+Gate 5/retro; PO → Gate 3; triage → Gate 1; the action loop → Gate 4 acceptance).
+A loop that emits to no gate is dropped, not scheduled.
+

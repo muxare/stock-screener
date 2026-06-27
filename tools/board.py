@@ -43,6 +43,9 @@ Commands:
       Capture an out-of-scope discovery into the firewalled inbox (#16). The
       same writer backs sprint-retro --accept.
   idea-list [--json]            # the firewalled idea inbox (id, born_from, age)
+  idea-archive [--days N] [--dry-run]
+      Archive inbox ideas older than N days (default STALE_IDEA_DAYS) to
+      backlog/ideas/archive/, keeping the live inbox high-signal (A5).
   exceptions [--json]           # Gate 2/5 queue: blocked work split decision vs process
   show <id>
   render            # write a human-readable board.md (pure read, not state)
@@ -76,6 +79,9 @@ SAD_DIR = os.path.join(ROOT, "backlog", "sad")
 BATCHES = os.path.join(ROOT, "backlog", "batches")
 BATCH_TEMPLATE = os.path.join(BATCHES, "BATCH.template.md")
 IDEA_TEMPLATE = os.path.join(IDEAS, "IDEA.template.md")
+# Ideas not promoted off the inbox land here (A5 stale-idea archival), keeping the
+# live inbox high-signal without losing the provenance trail.
+IDEA_ARCHIVE = os.path.join(IDEAS, "archive")
 # Retrospectives (sprint STEP 2): a retro is a distinct lifecycle object from the
 # batch — authored at close, it freezes a metrics snapshot and its proposal
 # statuses keep mutating after the sprint closes, so it gets its own file.
@@ -114,6 +120,10 @@ ITEM_KINDS = {
 # overrides it. The cap turns "fan debt out into the backlog" (F3) into a visible
 # signal — at the limit you must finish or explicitly defer, not silently widen WIP.
 DEFAULT_WIP_LIMIT = 3
+# A5: an inbox idea not promoted within this many days (measured from its
+# `captured` stamp) is stale — `idea-archive` moves it to backlog/ideas/archive/
+# and `validate` nudges. Keeps the inbox a signal, not a graveyard.
+STALE_IDEA_DAYS = 90
 # Exception queue (#8): a blocked_reason mentioning any of these reads as a
 # decision only a human can make (architecture / vendor / legal) → Gate 2/5,
 # versus an ordinary process block an agent can clear itself.
@@ -250,6 +260,29 @@ def find_batch(bid):
     if os.path.exists(path):
         return read_backlog_file(path)
     return None, None
+
+
+def all_ideas():
+    """Return fm for every live inbox IDEA-NNN.md (excludes the template and the
+    archive/ subdir — glob is non-recursive, so archived ideas never match)."""
+    out = []
+    for p in sorted(glob.glob(os.path.join(IDEAS, "IDEA-*.md"))):
+        if p.endswith(".template.md"):
+            continue
+        fm, _ = read_backlog_file(p)
+        out.append(fm)
+    return out
+
+
+def idea_age_days(fm, today):
+    """Days since an idea was captured, or None if the `captured` stamp is absent
+    or unparseable."""
+    from datetime import datetime
+    captured = (fm.get("captured") or "").strip()
+    try:
+        return (today - datetime.fromisoformat(captured).date()).days
+    except (ValueError, TypeError):
+        return None
 
 
 def all_retros():
@@ -1269,12 +1302,7 @@ def cmd_idea_list(args):
     """Show the idea inbox (id, born_from, age, status) — the surface the PO lens
     and the triage loop read. Read-only."""
     from datetime import datetime, timezone
-    ideas = []
-    for p in sorted(glob.glob(os.path.join(IDEAS, "IDEA-*.md"))):
-        if p.endswith(".template.md"):
-            continue
-        fm, _ = read_backlog_file(p)
-        ideas.append(fm)
+    ideas = all_ideas()
     if args.json:
         print(json.dumps([{k: v for k, v in fm.items() if not k.startswith("_")}
                           for fm in ideas], indent=2))
@@ -1285,15 +1313,56 @@ def cmd_idea_list(args):
     today = datetime.now(timezone.utc).date()
     print(f"IDEA INBOX — {len(ideas)} (firewalled from the build loop; Gate 1 promotes)\n")
     for fm in ideas:
-        captured = (fm.get("captured") or "").strip()
-        try:
-            age = f"{(today - datetime.fromisoformat(captured).date()).days}d"
-        except (ValueError, TypeError):
-            age = "?"
+        days = idea_age_days(fm, today)
+        age = f"{days}d" if days is not None else "?"
+        stale = " STALE" if (days is not None and days >= STALE_IDEA_DAYS
+                             and (fm.get("status") or "").strip() == "inbox") else ""
         born = (fm.get("born_from") or "~").strip()
         print(f"  {fm.get('id','?'):<10} [{(fm.get('status') or '?').strip()}] "
-              f"age {age:<5} born_from={born}")
+              f"age {age:<5} born_from={born}{stale}")
     _log("idea-list", count=len(ideas))
+
+
+def cmd_idea_archive(args):
+    """A5 stale-idea archival: move inbox ideas older than --days (default
+    STALE_IDEA_DAYS) into backlog/ideas/archive/, flipping status to `archived`
+    and stamping the date. Keeps the live inbox high-signal; --dry-run previews.
+
+    Only `status: inbox` ideas are touched — a promoted idea is never archived out
+    from under its return-edge, and the move preserves the full provenance trail."""
+    from datetime import datetime, timezone
+    days = args.days if args.days is not None else STALE_IDEA_DAYS
+    today = datetime.now(timezone.utc).date()
+    stale = []
+    for fm in all_ideas():
+        if (fm.get("status") or "").strip() != "inbox":
+            continue
+        age = idea_age_days(fm, today)
+        if age is not None and age >= days:
+            stale.append((fm, age))
+    if not stale:
+        print(f"no inbox ideas older than {days}d — inbox is high-signal")
+        return
+    verb = "would archive" if args.dry_run else "archived"
+    for fm, age in stale:
+        iid = fm.get("id", "?")
+        if args.dry_run:
+            print(f"  {verb} {iid} (age {age}d)")
+            continue
+        os.makedirs(IDEA_ARCHIVE, exist_ok=True)
+        src = fm["_path"]
+        _, body = read_backlog_file(src)
+        new_fm = {k: v for k, v in fm.items() if not k.startswith("_")}
+        new_fm["status"] = "archived"
+        new_fm["archived"] = today.isoformat()
+        dst = os.path.join(IDEA_ARCHIVE, f"{iid}.md")
+        with open(dst, "w", encoding="utf-8") as f:
+            f.write(dump_fm(new_fm, body))
+        os.remove(src)
+        print(f"  {verb} {iid} (age {age}d) → backlog/ideas/archive/")
+    if not args.dry_run:
+        _log("idea-archive", count=len(stale), message=f">{days}d")
+    print(f"\n{len(stale)} stale idea(s) {verb} (horizon {days}d)")
 
 
 CRITERION_BOX = re.compile(r"^(\s*-\s*)\[( |x|X)\](\s.*)$")
@@ -1460,6 +1529,26 @@ def cmd_render(args):
             if col == "blocked":
                 line += f" · ⚠ {fm.get('blocked_reason','?')} (from {fm.get('prev_column','?')})"
             out.append(line)
+
+    # Idea inbox (#16 return-edge): the firewalled funnel, rendered apart from the
+    # board columns precisely because it is NOT buildable work — Gate 1 promotes an
+    # idea before it can become a story. Surfaces provenance + staleness so the PO
+    # lens / triage loop can read board.md alone (A8).
+    from datetime import datetime, timezone
+    ideas = all_ideas()
+    today = datetime.now(timezone.utc).date()
+    out.append(f"\n## Idea inbox ({len(ideas)})\n")
+    out.append("_Firewalled from the build loop — capture≠commit; Gate 1 promotes._\n")
+    if not ideas:
+        out.append("- (empty)")
+    for fm in ideas:
+        days = idea_age_days(fm, today)
+        age = f"{days}d" if days is not None else "?"
+        stale = " · ⚠ STALE" if (days is not None and days >= STALE_IDEA_DAYS
+                                  and (fm.get("status") or "").strip() == "inbox") else ""
+        born = (fm.get("born_from") or "~").strip()
+        out.append(f"- **{fm.get('id','?')}** · age {age} · born_from `{born}`{stale}")
+
     p = os.path.join(ROOT, "board.md")
     with open(p, "w", encoding="utf-8") as f:
         f.write("\n".join(out) + "\n")
@@ -1663,6 +1752,26 @@ def build_board_model():
                             if len(c) > 3 and c[3] == "proposed"),
             }
 
+    # Idea inbox (#16): the firewalled return-edge, surfaced as its own tab so the
+    # PO lens / triage loop can read provenance + staleness from the static site.
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).date()
+    ideas = []
+    for fm in all_ideas():
+        days = idea_age_days(fm, today)
+        status = (fm.get("status") or "inbox").strip()
+        ideas.append({
+            "id": fm.get("id", "?"),
+            "title": _item_title(fm, read_backlog_file(fm["_path"])[1]),
+            "status": status,
+            "age_days": days,
+            "stale": days is not None and days >= STALE_IDEA_DAYS and status == "inbox",
+            "born_from": _sentinel(fm.get("born_from")),
+            "found_by": _sentinel(fm.get("found_by")),
+            "discovery_type": _sentinel(fm.get("discovery_type")),
+            "why": _sentinel(fm.get("why")),
+        })
+
     return {
         "columns": COLUMNS,
         "stories": stories,
@@ -1672,6 +1781,7 @@ def build_board_model():
         "batch": batch,
         "retro": retro,
         "blocked": blocked,
+        "ideas": ideas,
         "sad_coverage": build_sad_coverage(stories, features, epics),
     }
 
@@ -1781,12 +1891,14 @@ main{padding:18px 24px 60px}
     <button class="tab active" data-tab="board">Kanban board</button>
     <button class="tab" data-tab="trace">Traceability</button>
     <button class="tab" data-tab="cover">SAD coverage</button>
+    <button class="tab" data-tab="inbox">Idea inbox</button>
   </div>
 </header>
 <main>
   <section id="board"></section>
   <section id="trace" style="display:none"></section>
   <section id="cover" style="display:none"></section>
+  <section id="inbox" style="display:none"></section>
 </main>
 <div class="ov" id="ov"><div class="modal" id="modal"></div></div>
 <script>
@@ -1826,6 +1938,10 @@ function renderBoard(){
   } else banner+='<div class="chip"><b>Batch</b> none (Gate 3 open)</div>';
   if(DATA.retro){
     banner+=`<div class="chip"><b>Retro</b> ${esc(DATA.retro.id)} (${esc(DATA.retro.batch)}) · ${DATA.retro.open} open</div>`;
+  }
+  if(DATA.ideas&&DATA.ideas.length){
+    const staleN=DATA.ideas.filter(i=>i.stale).length;
+    banner+=`<div class="chip ${staleN?'warn':''}"><b>Inbox</b> ${DATA.ideas.length} idea(s)${staleN?' · '+staleN+' stale':''} <span class="muted">(firewalled)</span></div>`;
   }
   DATA.blocked.forEach(b=>banner+=`<div class="chip warn"><b>${esc(b.id)}</b> ${b.kind==='decision'?'🔶':''} ${esc(b.reason)}</div>`);
   banner+='</div>';
@@ -1944,6 +2060,36 @@ function renderCover(){
   html+='</div>';
   document.getElementById('cover').innerHTML=html;
 }
+function renderInbox(){
+  const ideas=DATA.ideas||[];
+  let html=`<div class="banner">
+    <div class="chip"><b>Inbox</b> ${ideas.length} idea(s)</div>
+    <div class="chip ${ideas.filter(i=>i.stale).length?'warn':''}"><b>Stale</b> ${ideas.filter(i=>i.stale).length}</div>
+    <div class="chip"><span class="muted">capture≠commit · firewalled from the build loop · Gate 1 promotes</span></div>
+  </div>`;
+  if(!ideas.length){
+    html+='<div class="empty">Idea inbox is empty. Capture an out-of-scope discovery with <code>board.py idea-new</code> or <code>/capture-idea</code>.</div>';
+    document.getElementById('inbox').innerHTML=html;
+    return;
+  }
+  html+='<div class="tree">';
+  ideas.forEach(i=>{
+    const age=i.age_days==null?'?':i.age_days+'d';
+    html+=`<div class="epic"><div class="epic-h">
+      <span class="eid">${esc(i.id)}</span><span class="et">${esc(i.title)}</span>
+      <span class="tag">${esc(i.status)}</span>
+      <span class="tag">age ${esc(age)}</span>
+      ${i.stale?'<span class="badge no">stale</span>':''}
+      ${i.discovery_type?`<span class="tag">${esc(i.discovery_type)}</span>`:''}</div>
+      <div class="feat">
+        ${i.born_from?`<div class="prog-t">born_from: <span class="sref">${esc(i.born_from)}</span></div>`:''}
+        ${i.found_by?`<div class="prog-t">found_by: ${esc(i.found_by)}</div>`:''}
+        ${i.why?`<div class="prog-t" style="margin-top:4px">why: ${esc(i.why)}</div>`:''}
+      </div></div>`;
+  });
+  html+='</div>';
+  document.getElementById('inbox').innerHTML=html;
+}
 function open_(id){
   const s=byId[id]; if(!s) return;
   let h=`<button class="x" onclick="close_()">×</button>
@@ -1968,8 +2114,9 @@ document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
   document.getElementById('board').style.display=tab==='board'?'':'none';
   document.getElementById('trace').style.display=tab==='trace'?'':'none';
   document.getElementById('cover').style.display=tab==='cover'?'':'none';
+  document.getElementById('inbox').style.display=tab==='inbox'?'':'none';
 });
-renderBoard(); renderTrace(); renderCover();
+renderBoard(); renderTrace(); renderCover(); renderInbox();
 </script>
 </body>
 </html>
@@ -2107,6 +2254,18 @@ def cmd_validate(args):
                 elif not os.path.exists(os.path.join(IDEAS, f"{pid}.md")):
                     warnings.append(f"{abid}: prep idea {pid} has no file in "
                                     f"backlog/ideas/ (inbox not populated yet)")
+
+    # Stale-idea nudge (A5): inbox ideas past the archival horizon are noise.
+    # Non-blocking — a warning that points at `idea-archive`, never a gate.
+    from datetime import datetime, timezone
+    _today = datetime.now(timezone.utc).date()
+    for fm in all_ideas():
+        if (fm.get("status") or "").strip() != "inbox":
+            continue
+        age = idea_age_days(fm, _today)
+        if age is not None and age >= STALE_IDEA_DAYS:
+            warnings.append(f"{fm.get('id','?')}: inbox idea is {age}d old "
+                            f"(>{STALE_IDEA_DAYS}d) — run `board.py idea-archive`")
 
     epic_ids = {}
     for fm in all_epics():
@@ -2896,6 +3055,15 @@ def main():
     il = sub.add_parser("idea-list", help="show the firewalled idea inbox")
     il.add_argument("--json", action="store_true")
     il.set_defaults(fn=cmd_idea_list)
+
+    ia = sub.add_parser("idea-archive",
+                        help=f"archive inbox ideas older than N days (default "
+                             f"{STALE_IDEA_DAYS}) to keep the inbox high-signal")
+    ia.add_argument("--days", type=int,
+                    help=f"staleness horizon in days (default {STALE_IDEA_DAYS})")
+    ia.add_argument("--dry-run", dest="dry_run", action="store_true",
+                    help="list what would be archived without moving anything")
+    ia.set_defaults(fn=cmd_idea_archive)
 
     s = sub.add_parser("show"); s.add_argument("id"); s.set_defaults(fn=cmd_show)
     sub.add_parser("render").set_defaults(fn=cmd_render)

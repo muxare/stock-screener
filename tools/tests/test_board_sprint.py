@@ -218,12 +218,95 @@ def run():
         r = repo.board("idea-list")
         check("idea-list shows the inbox", r.returncode == 0 and "IDEA-" in r.stdout)
 
+        print("\n[idea-archive] stale inbox ideas (A5) move to archive/, fresh stay")
+        from datetime import datetime, timedelta, timezone  # noqa: E402
+
+        def write_idea(iid, captured, status="inbox"):
+            with open(os.path.join(idir, f"{iid}.md"), "w", encoding="utf-8") as f:
+                f.write(f"---\nid: {iid}\ntype: idea\nstatus: {status}\n"
+                        f"captured: {captured}\nborn_from: STORY-200\n---\n\n"
+                        f"# {iid} — sample\n\nbody\n")
+
+        today = datetime.now(timezone.utc).date()
+        old = (today - timedelta(days=200)).isoformat()
+        fresh = (today - timedelta(days=5)).isoformat()
+        write_idea("IDEA-900", old)         # stale inbox idea
+        write_idea("IDEA-901", fresh)       # fresh inbox idea
+        write_idea("IDEA-902", old, status="promoted")  # old but promoted — keep
+
+        r = repo.board("idea-list")
+        check("idea-list flags the stale idea", "IDEA-900" in r.stdout
+              and "STALE" in r.stdout)
+
+        r = repo.board("idea-archive", "--dry-run")
+        archive_dir = os.path.join(idir, "archive")
+        check("dry-run names the stale idea", "IDEA-900" in r.stdout)
+        check("dry-run moves nothing", not os.path.exists(archive_dir)
+              and os.path.exists(os.path.join(idir, "IDEA-900.md")))
+
+        r = repo.board("idea-archive")
+        check("idea-archive succeeds", r.returncode == 0)
+        check("stale idea left the inbox",
+              not os.path.exists(os.path.join(idir, "IDEA-900.md")))
+        archived = os.path.join(archive_dir, "IDEA-900.md")
+        check("stale idea landed in archive/", os.path.exists(archived))
+        atext = open(archived, encoding="utf-8").read() if os.path.exists(archived) else ""
+        check("archived idea flips status + stamps date",
+              "status: archived" in atext and "archived:" in atext)
+        check("fresh inbox idea is untouched",
+              os.path.exists(os.path.join(idir, "IDEA-901.md")))
+        check("promoted idea is never archived",
+              os.path.exists(os.path.join(idir, "IDEA-902.md")))
+
+        r = repo.board("idea-list")
+        check("idea-list no longer shows the archived idea", "IDEA-900" not in r.stdout)
+
+        r = repo.board("validate")
+        check("validate is clean once stale ideas are archived",
+              "idea-archive" not in out(r))
+        # Re-introduce a stale idea: validate should nudge (non-blocking warning).
+        write_idea("IDEA-903", old)
+        r = repo.board("validate")
+        check("validate WARNS on a stale inbox idea",
+              "IDEA-903" in out(r) and "idea-archive" in out(r))
+        r = repo.board("idea-archive", "--days", "365")
+        check("custom --days horizon spares a 200d idea",
+              os.path.exists(os.path.join(idir, "IDEA-903.md")))
+        repo.board("idea-archive")  # clean up so later checks see a tidy inbox
+        for leftover in ("IDEA-901.md", "IDEA-902.md"):
+            p = os.path.join(idir, leftover)
+            if os.path.exists(p):
+                os.remove(p)
+
         print("\n[validate] idea firewall — a story parented on an IDEA fails")
         repo.write_story("STORY-250", "todo", parent="IDEA-009")
         r = repo.board("validate")
         check("validate BLOCKS a story parented directly on an IDEA",
               r.returncode != 0 and "firewalled" in out(r))
         os.remove(repo.story_path("STORY-250"))
+
+        print("\n[render] board.md + index.html surface the firewalled idea inbox (A8)")
+        # one fresh inbox idea + one past the stale horizon, to exercise both the
+        # count and the STALE flag on each render surface.
+        write_idea("IDEA-700", fresh)   # fresh inbox idea (reuses §A5 dates/helper)
+        write_idea("IDEA-701", old)     # stale inbox idea (>STALE_IDEA_DAYS)
+        r = repo.board("render")
+        check("render writes board.md", r.returncode == 0)
+        with open(os.path.join(tmp, "board.md"), encoding="utf-8") as f:
+            bmd = f.read()
+        check("board.md has an Idea inbox section", "## Idea inbox" in bmd)
+        check("board.md lists a fresh inbox idea", "IDEA-700" in bmd)
+        check("board.md flags the stale idea", "IDEA-701" in bmd and "STALE" in bmd)
+        check("board.md notes the firewall", "firewall" in bmd.lower())
+        r = repo.board("render-html")
+        check("render-html writes index.html", r.returncode == 0)
+        with open(os.path.join(tmp, "backlog", "index.html"), encoding="utf-8") as f:
+            html = f.read()
+        check("index.html has an Idea inbox tab", 'data-tab="inbox"' in html)
+        check("index.html embeds the inbox ideas", "IDEA-700" in html and "IDEA-701" in html)
+        check("index.html marks the stale idea", '"stale":true' in html)
+        for leftover in ("IDEA-700.md", "IDEA-701.md"):
+            os.remove(os.path.join(idir, leftover))
 
         print("\n[validate] a dangling accepted proposal (no IDEA) is a problem")
         with open(rpath, "a", encoding="utf-8") as f:

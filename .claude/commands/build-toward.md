@@ -98,6 +98,31 @@ inspection**, not the enforced gate. The check verifies acceptance criteria,
 Touch scope, and test integrity (deleted tests, count regression, weakened
 assertions). Follow the **Review gate checklist** in `sad-grounding`.
 
+## Driving with /loop (the action loop — STEP C / #18)
+This command is now an eligible `/loop` target (Phase 1 is complete — the hard
+review-check gate makes unattended runs safe). Use it to work a committed batch
+to exhaustion while you're away:
+
+```
+/loop /build-toward <capability-in-the-active-batch>
+```
+
+**The WIP/batch bound is the stop condition — not a wall-clock interval.** An
+action loop with no bound churns: it keeps starting stories past the WIP limit
+and drifts outside the committed batch. So each iteration must:
+- pick only `{todo, in-progress}` stories whose `capability`/`target` is **inside
+  the active batch's `capabilities`** (never widen scope to keep the loop fed);
+- respect the batch `wip_limit` — when `in-progress` is at the cap, finish or
+  defer, don't start another;
+- **terminate** when no in-batch `{todo, in-progress}` story remains, or when the
+  remaining work is all `blocked`/`review` (human-gated). Report and stop; do not
+  invent work or reach outside the batch to keep going.
+
+This is an **action loop** (it mutates the board), distinct from the read-only
+**observation loops** (SM health sweep, PO batch-prep, idea-inbox triage nudge)
+documented in `docs/sprint-ceremonies.md §8`. Observation loops are always safe;
+this one is safe only because Phase 1 landed and the batch bound caps it.
+
 ## Scope firewall
 Stories whose `capability`/`target` don't match the selector are invisible to
 this run. That's the feature: to build more, flip a story into the slice

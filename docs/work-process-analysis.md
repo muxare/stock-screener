@@ -670,18 +670,26 @@ a sanctioned home instead of being smuggled into the current story (F3) or dropp
    story→feature→epic→SAD→plan→idea). Ideas are already physically firewalled (the build
    loop only picks `board/todo`); this makes smuggling a *validation failure*, not a
    convention. Closes the F3 back-door.
-5. **A5 — Stale-idea archival.** Using the `captured` stamp, add archival (a
-   `board.py idea-archive` subcommand and/or a `validate` warning) that moves ideas not
-   promoted within N cycles to `backlog/ideas/archive/`, keeping the inbox high-signal.
-   N is a constant alongside `DEFAULT_WIP_LIMIT`.
-6. **A6 — `/capture-idea` thin command.** A wrapper any agent or human fires from
+5. **A5 — Stale-idea archival.** ✅ LANDED (2026-06-27). `board.py idea-archive
+   [--days N] [--dry-run]` uses the `captured` stamp to move `status: inbox` ideas
+   older than `STALE_IDEA_DAYS` (90, a constant alongside `DEFAULT_WIP_LIMIT`) to
+   `backlog/ideas/archive/`, flipping status→`archived` + stamping the date; promoted
+   ideas are spared. `idea-list` flags stale ideas, `validate` nudges (non-blocking).
+   Tests in `tools/tests/test_board_sprint.py`.
+6. **A6 — `/capture-idea` thin command.** ✅ LANDED (2026-06-27).
+   `.claude/commands/capture-idea.md` — a wrapper any agent or human fires from
    anywhere mid-flow. Its prose makes the discovery-type fork explicit: **in-scope**
    (anchored to an existing `SAD#3` capability) → a new **STORY** via the existing path;
-   **out-of-scope** (needs architecture the SAD lacks) → `idea-new`.
+   **out-of-scope** (needs architecture the SAD lacks) → `idea-new`. The unsure default
+   is "capture as an idea" (the firewall is recoverable; smuggled scope is not).
 7. **A7 — Tests** in `tools/tests/test_board_gates.py`: `idea-new` numbering + provenance,
    the firewall `validate` rule (a story parented on an IDEA fails), and stale-archive.
-8. **A8 — `board.py render`** should list the idea inbox (and batches) in `board.md` —
-   neither appears today.
+8. **A8 — `board.py render`** lists the idea inbox in `board.md` and `render-html`.
+   ✅ LANDED (2026-06-27). `render` writes a trailing `## Idea inbox` section
+   (id · age · `born_from` · STALE flag, with the capture≠commit firewall note);
+   `render-html` adds an **Idea inbox** tab (provenance + staleness per idea) plus a
+   board banner chip. (Batches already surfaced via the §4 "Active sprint" header.)
+   Render tests in `tools/tests/test_board_sprint.py`.
 
 _Review gate: stop here. Confirm the inbox shape and firewall before building the lenses._
 
@@ -714,15 +722,18 @@ thin `/`-commands** (no `.claude/agents/` dir exists yet — create it).
 
 ### STEP C — #18 Loops / routines as the clock
 
-**Goal:** give timebox-free Kanban a heartbeat, partitioned by risk.
+**Goal:** give timebox-free Kanban a heartbeat, partitioned by risk. ✅ LANDED
+(2026-06-27) — documented in `docs/sprint-ceremonies.md §8` (the cadence section).
 
-12. **C1 — Observation loops (safe now).** Document/enable `/loop` for the SM health sweep
-    and PO batch-prep, plus an idea-inbox triage nudge. Read-only; cannot harm flow.
-13. **C2 — Scheduled routine for the nightly SM retro digest** (cron-style) so the
-    heartbeat survives across sessions, complementing the in-session `/loop`.
+12. **C1 — Observation loops (safe now).** ✅ Documented in §8.2 — `/loop` for the SM
+    health sweep (`metrics` + `exceptions` + `validate`), PO batch-prep (`/sprint-plan`),
+    and the idea-inbox triage nudge (`idea-list`). Read-only; cannot harm flow.
+13. **C2 — Scheduled routine for the nightly SM retro digest** (cron-style). ✅ Documented
+    in §8.3 — schedule the SM health sweep via `/schedule` so the heartbeat survives
+    across sessions, complementing the in-session `/loop`.
 14. **C3 — Action loop `/loop /build-toward <batch>` — now eligible** (Phase 1 is
-    complete). It must carry the **WIP/batch bound as its stop condition** or it churns.
-    Spell this out in `.claude/commands/build-toward.md`.
+    complete). ✅ Spelled out in `.claude/commands/build-toward.md` ("Driving with /loop")
+    and §8.4 — it carries the **WIP/batch bound as its stop condition**, never wall-clock.
 
 ---
 
@@ -730,7 +741,13 @@ thin `/`-commands** (no `.claude/agents/` dir exists yet — create it).
 
 15. **Mark #16–#18 landed in this document** (mirroring how Phases 1–4 were closed) and
     cross off the matching friction items (F3 idea back-edge; the four-hats retirement in
-    §5) once Steps A–C are verified.
+    §5) once Steps A–C are verified. ✅ DONE (2026-06-27) — **all of Steps A–C have
+    landed**: #16 (idea capture: `idea-new`/`idea-list`/`idea-archive` + `/capture-idea` +
+    the firewall validate rule + the `render`/`render-html` inbox surface), #17 (the SM +
+    PO lenses, built as the four advisory agents convened by `/sprint-plan` and
+    `/sprint-retro`), and #18 (loops/cadence, documented in `docs/sprint-ceremonies.md
+    §8`). **F3** (the idea back-edge) is closed; the four-hats retirement (§5) is realised
+    through the advisory lenses. The meta-layer is complete.
 
 ---
 
