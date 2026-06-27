@@ -293,7 +293,7 @@ def run():
 
         print("\n[#7] only one active batch at a time")
         r = repo.board("batch-new", "--capabilities", "CAP-z")
-        check("second active batch refused", r.returncode != 0 and "active batch already exists" in (r.stdout + r.stderr))
+        check("second active batch refused", r.returncode != 0 and "already exists" in (r.stdout + r.stderr))
         r = repo.board("batch-close", "BATCH-001")
         check("batch-close succeeds", r.returncode == 0)
         r = repo.board("batch-new", "--capabilities", "CAP-z")
@@ -369,7 +369,7 @@ def run():
         r = repo.board("render")
         check("render succeeds", r.returncode == 0)
         board_md = open(os.path.join(tmp, "board.md"), encoding="utf-8").read()
-        check("board.md shows the active batch", "Active batch:" in board_md)
+        check("board.md shows the active sprint", "Active sprint:" in board_md)
         check("board.md shows WIP usage", "WIP " in board_md)
         check("board.md surfaces the exception queue", "Exception queue:" in board_md and "STORY-400" in board_md)
 

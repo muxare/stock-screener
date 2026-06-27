@@ -34,6 +34,15 @@ Commands:
       batch at a time. The active batch's wip_limit caps in-progress.
   batch-close <id>              # close a batch once its commitment is complete
   batch-list [--json]           # batches + live WIP usage
+  sprint-retro [--batch BATCH-NNN] [--accept P-N] [--reject P-N]
+      Sprint STEP 2: retro a CLOSED sprint. No flags scaffold RETRO-NNN
+      (committed-vs-shipped + a frozen windowed metrics snapshot + an empty
+      proposal table). --accept flips a proposal to accepted AND spawns an IDEA
+      (Gate-1 landing, capture≠commit); --reject flips it to rejected.
+  idea-new [--title --born-from --found-by --why --discovery-type --id]
+      Capture an out-of-scope discovery into the firewalled inbox (#16). The
+      same writer backs sprint-retro --accept.
+  idea-list [--json]            # the firewalled idea inbox (id, born_from, age)
   exceptions [--json]           # Gate 2/5 queue: blocked work split decision vs process
   show <id>
   render            # write a human-readable board.md (pure read, not state)
@@ -43,8 +52,10 @@ Commands:
                     # coverage (leaf anchors no story reaches + dangling refs).
                     # `validate` nudges (non-blocking) when this view is stale.
   validate          # check invariants across the whole board (incl. WIP + batch)
-  metrics [--json]  # retrospective off events.jsonl: cycle time, refusal/bounce
-                    # rate, attempts spread, blocked time, demo-sweep (F7) flag
+  metrics [--json] [--sprint BATCH-NNN | --since D --until D]
+                    # retrospective off events.jsonl: cycle time, refusal/bounce
+                    # rate, attempts spread, blocked time, demo-sweep (F7) flag.
+                    # --sprint scopes every aggregate to that sprint's window.
   logs [--tail N]   # show workflow audit log (.workflow/events.jsonl)
 """
 import argparse, difflib, glob, json, os, re, sys, shutil
@@ -64,6 +75,11 @@ PLANS = os.path.join(ROOT, "backlog", "plans")
 SAD_DIR = os.path.join(ROOT, "backlog", "sad")
 BATCHES = os.path.join(ROOT, "backlog", "batches")
 BATCH_TEMPLATE = os.path.join(BATCHES, "BATCH.template.md")
+IDEA_TEMPLATE = os.path.join(IDEAS, "IDEA.template.md")
+# Retrospectives (sprint STEP 2): a retro is a distinct lifecycle object from the
+# batch — authored at close, it freezes a metrics snapshot and its proposal
+# statuses keep mutating after the sprint closes, so it gets its own file.
+RETROS = os.path.join(ROOT, "backlog", "retros")
 # Optional ledger of SAD#3 capabilities consciously NOT scheduled yet, so the
 # coverage invariant (#10) can tell "deferred on purpose" from "silently dropped".
 DEFERRED_CAPS = os.path.join(ROOT, "backlog", "deferred-capabilities.md")
@@ -81,6 +97,7 @@ EPIC_ID = re.compile(r"^EPIC-\d{3}$")
 FEAT_ID = re.compile(r"^FEAT-\d{3}$")
 STORY_ID = re.compile(r"^STORY-\d{3}$")
 BATCH_ID = re.compile(r"^BATCH-\d{3}$")
+RETRO_ID = re.compile(r"^RETRO-\d{3}$")
 SENTINELS = ("", "[]", "~", "None")
 
 # Auto-numbered authoring artifacts (#14, closes F10). Each entry:
@@ -220,6 +237,79 @@ def active_batch():
 
 def batch_capabilities(fm):
     return parse_list(fm.get("capabilities"))
+
+
+def committed_stories(fm):
+    """The STORY ids a sprint (batch) committed to, from the `stories:` field."""
+    return parse_list(fm.get("stories"))
+
+
+def find_batch(bid):
+    """Return (fm, body) for a batch id, or (None, None) if absent."""
+    path = os.path.join(BATCHES, f"{bid}.md")
+    if os.path.exists(path):
+        return read_backlog_file(path)
+    return None, None
+
+
+def all_retros():
+    """Return (fm, body) for every RETRO-NNN.md, newest id last."""
+    out = []
+    for p in sorted(glob.glob(os.path.join(RETROS, "RETRO-*.md"))):
+        if p.endswith(".template.md"):
+            continue
+        out.append(read_backlog_file(p))
+    return out
+
+
+def latest_closed_batch():
+    """(fm, body) of the highest-id closed batch, or (None, None)."""
+    closed = [(fm, b) for fm, b in all_batches()
+              if (fm.get("status") or "").strip() == "closed"]
+    return closed[-1] if closed else (None, None)
+
+
+# ---------- retro proposal-table parsing ----------
+# Proposals live as a markdown table in the RETRO body; each row is
+#   | P-N | target | type | status | result |
+# Parsed by id so `sprint-retro --accept/--reject` can flip one row in place.
+PROPOSAL_ROW = re.compile(r"^\s*\|\s*(P-\d+)\s*\|")
+
+
+def parse_proposal_row(line):
+    """Cells of a `| P-N | … |` row (id, target, type, status, result), or None."""
+    if not PROPOSAL_ROW.match(line):
+        return None
+    return [c.strip() for c in line.strip().strip("|").split("|")]
+
+
+def proposal_rows(body):
+    """All parsed proposal rows in a retro body."""
+    return [c for c in (parse_proposal_row(l) for l in (body or "").splitlines()) if c]
+
+
+PREP_LINE = re.compile(r"^\s*-\s*(story|idea|note)\s*:\s*(\S+)\s*(?:[—\-–]\s*(.*))?$",
+                       re.I)
+
+
+def parse_prep(body):
+    """Parse the `## Preparation / enablers` block into (kind, id, why) tuples.
+
+    Three kinds keep "preparation work that makes future sprints easier" honest:
+      - story: an enabler that is real, anchored, and committed THIS sprint
+      - idea:  forward groundwork, firewalled from the build loop (capture≠commit)
+      - note:  a bare planning thought with no id — inert by construction
+    """
+    m = re.search(r"##\s*Preparation\s*/\s*enablers\s*\n(.*?)(\n##|\Z)", body, re.DOTALL)
+    if not m:
+        return []
+    out = []
+    for line in m.group(1).splitlines():
+        pm = PREP_LINE.match(line)
+        if pm:
+            out.append((pm.group(1).lower(), pm.group(2).strip(),
+                        (pm.group(3) or "").strip()))
+    return out
 
 
 def batch_wip_limit():
@@ -800,19 +890,24 @@ def cmd_reject(args):
 
 
 def cmd_batch_new(args):
-    """Gate 3: record a batch — the capabilities you commit /build-toward to.
+    """Gate 3: record a sprint plan — the capabilities + stories you commit to.
 
-    A batch is the prioritisation checkpoint, not a timebox: a named, dated set
-    of capabilities plus the WIP limit for this run. Only one batch is active at
-    a time, so this is the single standing answer to "what are we building now".
+    A batch IS the sprint container: a scope-boxed commitment (not a timebox).
+    Beyond the capabilities and WIP limit, a sprint plan also names the specific
+    stories pulled in, an execution strategy (how Claude Code agent teams run the
+    work — what parallelises across worktrees vs sequences), and any
+    preparation/enabler work that makes FUTURE sprints cheaper. Only one batch is
+    active at a time, so this is the single standing answer to "what are we
+    building now". `sprint-plan-new` is the sprint-vocabulary alias; running this
+    command IS the human Gate-3 commitment (the planning team only prepared it).
     """
     caps = [c.strip() for c in (args.capabilities or "").split(",") if c.strip()]
     if not caps:
         _fatal("batch-new needs --capabilities CAP-a,CAP-b", event="batch-new")
     if active_batches():
         ids = ", ".join(fm.get("id", "?") for fm, _ in active_batches())
-        _fatal(f"an active batch already exists ({ids}); close it first "
-               f"(board.py batch-close <id>) — Gate 3 is one commitment at a time",
+        _fatal(f"an active sprint already exists ({ids}); close it first "
+               f"(board.py sprint-close <id>) — Gate 3 is one commitment at a time",
                event="batch-new")
     existing = [int(re.search(r"BATCH-(\d+)", os.path.basename(p)).group(1))
                 for p in glob.glob(os.path.join(BATCHES, "BATCH-*.md"))
@@ -823,6 +918,10 @@ def cmd_batch_new(args):
     from datetime import datetime, timezone
     created = datetime.now(timezone.utc).date().isoformat()
     wip = str(args.wip if args.wip is not None else DEFAULT_WIP_LIMIT)
+    stories = [s.strip() for s in (getattr(args, "stories", None) or "").split(",")
+               if s.strip()]
+    prep_items = [p.strip() for p in (getattr(args, "prep", None) or "").split(",")
+                  if p.strip()]
     fm = {
         "id": bid,
         "type": "batch",
@@ -831,15 +930,35 @@ def cmd_batch_new(args):
         "wip_limit": wip,
         "capabilities": "[" + ", ".join(caps) + "]",
     }
+    if stories:
+        fm["stories"] = "[" + ", ".join(stories) + "]"
     cap_lines = "\n".join(f"- {c}" for c in caps)
-    body = (f"\n## Goal\n{args.goal or '<batch goal — the Gate-3 commitment>'}\n\n"
-            f"## Capabilities committed\n{cap_lines}\n\n## Notes\n")
+    body = (f"\n## Goal\n"
+            f"{args.goal or '<sprint goal — one falsifiable outcome, not a task list>'}\n\n"
+            f"## Capabilities committed\n{cap_lines}\n\n")
+    if stories:
+        body += ("## Stories committed\n"
+                 + "\n".join(f"- {s} — <why it's in this sprint>" for s in stories)
+                 + "\n\n")
+    body += ("## Execution strategy\n"
+             + (getattr(args, "exec_strategy", None)
+                or "<how Claude Code agent teams run this — what parallelises across "
+                   "worktrees vs sequences, where a fan-out of reviewers helps>")
+             + "\n\n")
+    body += ("## Preparation / enablers\n"
+             + ("\n".join(f"- {p}" for p in prep_items) if prep_items else
+                "<enabler/spike/techdebt/tooling that makes FUTURE sprints easier; "
+                "one per line as story:ID (committed) · idea:ID (firewalled "
+                "groundwork) · note:text>")
+             + "\n\n## Notes\n")
     os.makedirs(BATCHES, exist_ok=True)
     out = os.path.join(BATCHES, f"{bid}.md")
     with open(out, "w", encoding="utf-8") as f:
         f.write(dump_fm(fm, body))
-    print(f"created {bid} (active): caps={caps} wip_limit={wip}")
-    _log("batch-new", message=f"caps={','.join(caps)} wip={wip}",
+    print(f"created {bid} (active): caps={caps}"
+          + (f" stories={stories}" if stories else "") + f" wip_limit={wip}")
+    _log("batch-new",
+         message=f"caps={','.join(caps)} stories={','.join(stories)} wip={wip}",
          batch_id=bid, count=len(caps))
 
 
@@ -880,6 +999,76 @@ def cmd_batch_list(args):
         if status == "active":
             line += f"  (in-progress now: {ip})"
         print(line)
+
+
+def _sprint_goal(body):
+    """The one-line `## Goal` of a sprint, or '' if unset/placeholder."""
+    m = re.search(r"##\s*Goal\s*\n(.+)", body or "")
+    g = m.group(1).strip() if m else ""
+    return "" if g.startswith("<") else g
+
+
+def cmd_sprint_show(args):
+    """Detailed single-sprint view (active by default): goal, committed stories
+    with their LIVE board column, prep/enablers, and WIP usage — the at-a-glance
+    "are we on track for the sprint goal" surface that `batch-list` is too terse
+    to give. Read-only; touches nothing.
+    """
+    if getattr(args, "id", None):
+        path = os.path.join(BATCHES, f"{args.id}.md")
+        if not os.path.exists(path):
+            _fatal(f"{args.id} not found in backlog/batches/", event="sprint-show")
+        fm, body = read_backlog_file(path)
+    else:
+        fm, body = active_batch()
+        if not fm:
+            print("no active sprint (Gate 3 open) — "
+                  "board.py sprint-plan-new … to open one")
+            return
+    cols = {s.get("id"): s["_column"] for s in all_stories()}
+    caps = batch_capabilities(fm)
+    committed = committed_stories(fm)
+    is_active = (fm.get("status") or "").strip() == "active"
+    ip = column_count("in-progress")
+    limit = batch_wip_limit() if is_active else fm.get("wip_limit", "?")
+    prep = parse_prep(body)
+    rows = []
+    for sid in committed:
+        col = cols.get(sid)
+        scap = None
+        sp = find_story(sid)
+        if sp:
+            sfm, _ = read_story(sp)
+            scap = (sfm.get("capability") or "").strip() or None
+        rows.append({"id": sid, "column": col or "(not on board)",
+                     "capability": scap,
+                     "drift": bool(scap and caps and scap not in caps)})
+    if getattr(args, "json", False):
+        print(json.dumps({
+            "id": fm.get("id", "?"), "status": fm.get("status", "?"),
+            "created": fm.get("created", "?"), "goal": _sprint_goal(body),
+            "capabilities": caps, "wip": {"in_progress": ip, "limit": limit},
+            "stories": rows,
+            "prep": [{"kind": k, "id": i, "why": w} for k, i, w in prep],
+        }, indent=2))
+        return
+    print(f"{fm.get('id','?')} [{fm.get('status','?')}] · created {fm.get('created','?')}")
+    print(f"  Goal: {_sprint_goal(body) or '(unset)'}")
+    print(f"  Capabilities: {', '.join(caps) or '(none)'}")
+    print(f"  WIP: {ip}/{limit}")
+    if rows:
+        done = sum(1 for r in rows if r["column"] == "done")
+        print(f"  Committed stories ({done}/{len(rows)} done):")
+        for r in rows:
+            drift = f"  ⚠ cap {r['capability']} outside sprint" if r["drift"] else ""
+            print(f"    {r['id']:<12} ▸ {r['column']}{drift}")
+    if prep:
+        print("  Preparation / enablers:")
+        tag = {"story": "committed", "idea": "firewalled", "note": "inert"}
+        for kind, pid, why in prep:
+            print(f"    [{kind}] {pid} ({tag.get(kind, kind)})"
+                  + (f" — {why}" if why else ""))
+    _log("sprint-show", batch_id=fm.get("id", "?"))
 
 
 def cmd_exceptions(args):
@@ -1027,6 +1216,86 @@ def cmd_new_item(args):
     _log("new-" + kind, message=new_id, **({"parent": parent} if parent else {}))
 
 
+def _write_idea(title=None, born_from=None, why=None, found_by=None,
+                discovery_type="out-of-scope", idea_id=None):
+    """Allocate + write a provenance-stamped IDEA to the inbox — the #16
+    return-edge (capture≠commit).
+
+    Shared by `idea-new` and `sprint-retro --accept`, so a retro's accepted
+    workflow-change proposal lands exactly like an in-flow discovery: in the
+    inbox, firewalled from the build loop until a human promotes it at Gate 1.
+    Returns the new IDEA id.
+    """
+    from datetime import datetime, timezone
+    os.makedirs(IDEAS, exist_ok=True)
+    new_id = idea_id or _next_item_id(IDEAS, "IDEA")
+    if not IDEA_ID.match(new_id):
+        _fatal(f"{new_id}: invalid idea id (use IDEA-NNN)", event="idea-new")
+    if os.path.exists(os.path.join(IDEAS, f"{new_id}.md")):
+        _fatal(f"{new_id} already exists", event="idea-new")
+    captured = datetime.now(timezone.utc).date().isoformat()
+    fm = {
+        "id": new_id,
+        "type": "idea",
+        "status": "inbox",
+        "captured": captured,
+        "discovery_type": (discovery_type or "out-of-scope"),
+        "born_from": born_from or "~",
+        "found_by": found_by or "~",
+        "why": why or "~",
+    }
+    body = (f"\n# {new_id} — {title or '<short title>'}\n\n"
+            f"{why or 'Free-form concept: problem sketch, who it is for, rough scope.'}\n\n"
+            f"_Capture≠commit: firewalled from the build loop until a human "
+            f"promotes it through Gate 1 (refine → plan → SAD amendment/ADR)._\n")
+    out = os.path.join(IDEAS, f"{new_id}.md")
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(dump_fm(fm, body))
+    return new_id
+
+
+def cmd_idea_new(args):
+    """Gate-free capture of an out-of-scope discovery into the firewalled inbox."""
+    new_id = _write_idea(title=args.title, born_from=args.born_from, why=args.why,
+                         found_by=args.found_by,
+                         discovery_type=args.discovery_type, idea_id=args.id)
+    print(f"created {new_id} in backlog/ideas/ (inbox — firewalled from the build loop)")
+    fields = {k: v for k, v in (("born_from", args.born_from),
+                                ("found_by", args.found_by)) if v}
+    _log("idea-new", message=new_id, **fields)
+
+
+def cmd_idea_list(args):
+    """Show the idea inbox (id, born_from, age, status) — the surface the PO lens
+    and the triage loop read. Read-only."""
+    from datetime import datetime, timezone
+    ideas = []
+    for p in sorted(glob.glob(os.path.join(IDEAS, "IDEA-*.md"))):
+        if p.endswith(".template.md"):
+            continue
+        fm, _ = read_backlog_file(p)
+        ideas.append(fm)
+    if args.json:
+        print(json.dumps([{k: v for k, v in fm.items() if not k.startswith("_")}
+                          for fm in ideas], indent=2))
+        return
+    if not ideas:
+        print("(idea inbox empty)")
+        return
+    today = datetime.now(timezone.utc).date()
+    print(f"IDEA INBOX — {len(ideas)} (firewalled from the build loop; Gate 1 promotes)\n")
+    for fm in ideas:
+        captured = (fm.get("captured") or "").strip()
+        try:
+            age = f"{(today - datetime.fromisoformat(captured).date()).days}d"
+        except (ValueError, TypeError):
+            age = "?"
+        born = (fm.get("born_from") or "~").strip()
+        print(f"  {fm.get('id','?'):<10} [{(fm.get('status') or '?').strip()}] "
+              f"age {age:<5} born_from={born}")
+    _log("idea-list", count=len(ideas))
+
+
 CRITERION_BOX = re.compile(r"^(\s*-\s*)\[( |x|X)\](\s.*)$")
 SETTABLE_FIELDS = {"sad_refs", "capability", "target", "estimate", "parent"}
 
@@ -1135,17 +1404,43 @@ def cmd_show(args):
 def cmd_render(args):
     out = ["# Kanban Board", "_generated view — the folder structure is the source of truth_\n"]
 
-    # Gate 3 header: the active batch commitment + live WIP usage (#6, #7).
-    fm_b, _ = active_batch()
+    # Gate 3 header: the active sprint commitment + live WIP usage (#6, #7).
+    fm_b, bbody = active_batch()
     ip = column_count("in-progress")
     limit = batch_wip_limit()
     wip_flag = " ⚠ over limit" if ip > limit else ""
     if fm_b:
-        out.append(f"**Active batch:** {fm_b.get('id','?')} · "
+        out.append(f"**Active sprint:** {fm_b.get('id','?')} · "
                    f"caps `{fm_b.get('capabilities','[]')}` · "
-                   f"WIP {ip}/{limit}{wip_flag}\n")
+                   f"WIP {ip}/{limit}{wip_flag}")
+        goal = _sprint_goal(bbody)
+        if goal:
+            out.append(f"> Goal: {goal}")
+        committed = committed_stories(fm_b)
+        if committed:
+            cols = {s.get("id"): s["_column"] for s in all_stories()}
+            done = sum(1 for s in committed if cols.get(s) == "done")
+            chips = " · ".join(f"{s} ▸ {cols.get(s,'—')}" for s in committed)
+            out.append(f"> Committed ({done}/{len(committed)} done): {chips}")
+        prep = [(k, i) for k, i, _ in parse_prep(bbody) if not i.startswith("<")]
+        if prep:
+            out.append("> Prep: " + " · ".join(f"{i} ({k})" for k, i in prep))
+        out.append("")
     else:
-        out.append(f"**Active batch:** none (Gate 3 open) · WIP {ip}/{limit}{wip_flag}\n")
+        out.append(f"**Active sprint:** none (Gate 3 open) · WIP {ip}/{limit}{wip_flag}\n")
+
+    # Retro banner (STEP 2): if the most-recently-closed sprint has a retro, show
+    # it with the count of still-open proposals (the retro→Gate-1 handoff surface).
+    lc_fm, _ = latest_closed_batch()
+    if lc_fm:
+        rs = [(rf, rb) for rf, rb in all_retros()
+              if (rf.get("batch") or "").strip() == lc_fm.get("id")]
+        if rs:
+            rfm, rbody = rs[-1]
+            open_n = sum(1 for c in proposal_rows(rbody)
+                         if len(c) > 3 and c[3] == "proposed")
+            out.append(f"**Retro {rfm.get('id','?')}** ({lc_fm.get('id','?')}) · "
+                       f"{open_n} proposal(s) open\n")
 
     # Exception queue (#8): blocked items needing a human, pulled to the top.
     blocked = [fm for fm in all_stories() if fm["_column"] == "blocked"]
@@ -1352,6 +1647,22 @@ def build_board_model():
                 "prev_column": s["prev_column"],
             })
 
+    # Retro chip (STEP 2): the retro of the most-recently-closed sprint, with its
+    # count of still-open proposals — the retro→Gate-1 handoff surface.
+    retro = None
+    lc_fm, _ = latest_closed_batch()
+    if lc_fm:
+        rs = [(rf, rb) for rf, rb in all_retros()
+              if (rf.get("batch") or "").strip() == lc_fm.get("id")]
+        if rs:
+            rfm, rbody = rs[-1]
+            retro = {
+                "id": rfm.get("id", "?"),
+                "batch": lc_fm.get("id", "?"),
+                "open": sum(1 for c in proposal_rows(rbody)
+                            if len(c) > 3 and c[3] == "proposed"),
+            }
+
     return {
         "columns": COLUMNS,
         "stories": stories,
@@ -1359,6 +1670,7 @@ def build_board_model():
         "features": features,
         "wip": {"in_progress": ip, "limit": limit, "over": ip > limit},
         "batch": batch,
+        "retro": retro,
         "blocked": blocked,
         "sad_coverage": build_sad_coverage(stories, features, epics),
     }
@@ -1512,6 +1824,9 @@ function renderBoard(){
     DATA.batch.capabilities.forEach(c=>banner+=` <span class="chip cap">${esc(c)}</span>`);
     banner+='</div>';
   } else banner+='<div class="chip"><b>Batch</b> none (Gate 3 open)</div>';
+  if(DATA.retro){
+    banner+=`<div class="chip"><b>Retro</b> ${esc(DATA.retro.id)} (${esc(DATA.retro.batch)}) · ${DATA.retro.open} open</div>`;
+  }
   DATA.blocked.forEach(b=>banner+=`<div class="chip warn"><b>${esc(b.id)}</b> ${b.kind==='decision'?'🔶':''} ${esc(b.reason)}</div>`);
   banner+='</div>';
   parts.push(banner);
@@ -1728,6 +2043,71 @@ def cmd_validate(args):
             f"defer one, or raise the active batch's wip_limit (Gate 3)"
         )
 
+    # Retrospectives (STEP 2): each retro must point at a real batch, carry valid
+    # proposal statuses, and never leave an accepted proposal dangling (no IDEA).
+    batch_ids = {fm.get("id") for fm, _ in batches}
+    retros_per_batch = {}
+    for rfm, rbody in all_retros():
+        rid = rfm.get("id", "?")
+        if not RETRO_ID.match(rid):
+            problems.append(f"{rid}: invalid retro id format (use RETRO-NNN)")
+        if not id_matches_filename(rid, rfm["_path"]):
+            problems.append(f"{rid}: frontmatter id does not match filename")
+        rbatch = (rfm.get("batch") or "").strip()
+        if rbatch not in batch_ids:
+            problems.append(f"{rid}: batch {rbatch or '(unset)'} does not resolve "
+                            f"to a real batch")
+        retros_per_batch.setdefault(rbatch, []).append(rid)
+        for cells in proposal_rows(rbody):
+            pid = cells[0]
+            status = cells[3] if len(cells) > 3 else ""
+            result = cells[4] if len(cells) > 4 else ""
+            if status not in ("proposed", "accepted", "rejected"):
+                problems.append(f"{rid} {pid}: status '{status}' not in "
+                                f"proposed/accepted/rejected")
+            if status == "accepted" and (not result or result in SENTINELS
+                                         or result in ("—", "-")):
+                problems.append(f"{rid} {pid}: accepted but result is empty "
+                                f"(dangling — no resulting IDEA/STORY)")
+    for rbatch, rids in retros_per_batch.items():
+        if len(rids) > 1:
+            warnings.append(f"batch {rbatch} has {len(rids)} retros "
+                            f"({', '.join(rids)}) — expected one")
+
+    # Sprint commitment (Gate 3): the active sprint's committed stories must be
+    # real & traceable, and its preparation work must respect capture≠commit —
+    # forward-groundwork ideas may NOT already sit on the board, or they have
+    # smuggled into the build loop the firewall exists to keep them out of.
+    afm, abody = active_batch()
+    if afm:
+        abid = afm.get("id", "?")
+        acaps = batch_capabilities(afm)
+        committed = committed_stories(afm)
+        for sid in committed:
+            sp = find_story(sid)
+            if not sp:
+                problems.append(f"{abid}: committed story {sid} not found on the board")
+                continue
+            sfm, _ = read_story(sp)
+            scap = (sfm.get("capability") or "").strip()
+            if scap and scap not in SENTINELS and acaps and scap not in acaps:
+                warnings.append(f"{abid}: committed {sid} has capability {scap} "
+                                f"outside the sprint's committed {acaps}")
+        for kind, pid, _why in parse_prep(abody):
+            if pid.startswith("<"):
+                continue  # unfilled template placeholder
+            if kind == "story":
+                if pid not in committed:
+                    problems.append(f"{abid}: prep story {pid} is not in the committed "
+                                    f"stories list — commit it or make it an idea")
+            elif kind == "idea":
+                if find_story(pid) is not None:
+                    problems.append(f"{abid}: prep idea {pid} has a board file — "
+                                    f"groundwork must stay firewalled (capture≠commit)")
+                elif not os.path.exists(os.path.join(IDEAS, f"{pid}.md")):
+                    warnings.append(f"{abid}: prep idea {pid} has no file in "
+                                    f"backlog/ideas/ (inbox not populated yet)")
+
     epic_ids = {}
     for fm in all_epics():
         eid = fm.get("id", "?")
@@ -1775,7 +2155,14 @@ def cmd_validate(args):
             story_caps.add(cap)
 
         parent = (fm.get("parent") or "").strip()
-        if parent and parent not in SENTINELS and parent != "FEAT-000":
+        # Idea firewall (#16/A4): the legal chain is story→feature→epic→SAD; a
+        # story may never parent directly on an IDEA — that would smuggle inbox
+        # groundwork into the build loop (capture≠commit). Make it a failure,
+        # not a convention.
+        if IDEA_ID.match(parent):
+            problems.append(f"{sid}: parent {parent} is an IDEA — ideas are "
+                            f"firewalled from the build loop (Gate 1 promotes them)")
+        elif parent and parent not in SENTINELS and parent != "FEAT-000":
             if FEAT_ID.match(parent) and not feature_exists(parent):
                 problems.append(f"{sid}: orphan story — parent {parent} not found")
 
@@ -2021,14 +2408,66 @@ def _fmt_dur(seconds):
     return f"{hours / 24:.1f}d"
 
 
-def compute_metrics():
+def _in_window(ts_value, window):
+    """True if an event ts (ISO string) falls within an optional (start, end)."""
+    if not window:
+        return True
+    start, end = window
+    t = _parse_ts(ts_value)
+    if t is None:
+        return False
+    if start and t < start:
+        return False
+    if end and t > end:
+        return False
+    return True
+
+
+def sprint_window(batch_fm):
+    """(start, end) datetimes bounding a sprint: batch `created` 00:00 UTC →
+    its `batch-close` event ts, or None (open-ended) if still active."""
+    from datetime import datetime, timezone
+    created = (batch_fm.get("created") or "").strip()
+    start = None
+    if created and created not in SENTINELS:
+        try:
+            d = datetime.fromisoformat(created)
+            start = d.replace(tzinfo=timezone.utc) if d.tzinfo is None else d
+        except ValueError:
+            start = None
+    bid = (batch_fm.get("id") or "").strip()
+    end = None
+    for e in workflow_log.read_events(tail=0, tool="board", event="batch-close"):
+        if e.get("batch_id") == bid:
+            t = _parse_ts(e.get("ts"))
+            if t and (end is None or t > end):
+                end = t
+    return start, end
+
+
+def _stories_done_in_window(window):
+    """Story ids that reached `done` (an ok move→done) within the window."""
+    done = set()
+    for e in workflow_log.read_events(tail=0, tool="board", event="move"):
+        if e.get("to") == "done" and e.get("outcome") == "ok" \
+                and _in_window(e.get("ts"), window):
+            sid = e.get("story_id")
+            if sid:
+                done.add(sid)
+    return done
+
+
+def compute_metrics(window=None):
     """Retrospective aggregates off the event log (#9) — the agile feedback loop.
 
     Cycle time, review-check refusal rate, bounce rate, attempts spread, blocked
     duration, and the demo-sweep (F7) flag for done stories that never really ran
-    the loop. Returns a plain dict (also drives the --json output)."""
+    the loop. `window=(start, end)` scopes every event to a sprint (events outside
+    [created, close] are excluded). Returns a plain dict (also drives --json)."""
     import collections
     events = workflow_log.read_events(tail=0)
+    if window:
+        events = [e for e in events if _in_window(e.get("ts"), window)]
     moves = [e for e in events if e.get("tool") == "board"
              and e.get("event") == "move" and e.get("outcome") == "ok"]
     by_story = collections.defaultdict(list)
@@ -2109,14 +2548,38 @@ def compute_metrics():
     }
 
 
+def _resolve_window(args):
+    """Resolve a metrics window from --sprint / --since / --until, or None."""
+    from datetime import datetime, timezone
+    sprint = getattr(args, "sprint", None)
+    if sprint:
+        fm, _ = find_batch(sprint)
+        if not fm:
+            _fatal(f"{sprint} not found in backlog/batches/", event="metrics")
+        return sprint_window(fm)
+    since, until = getattr(args, "since", None), getattr(args, "until", None)
+    if since or until:
+        def parse(d):
+            if not d:
+                return None
+            dt = datetime.fromisoformat(d)
+            return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+        return (parse(since), parse(until))
+    return None
+
+
 def cmd_metrics(args):
-    m = compute_metrics()
+    window = _resolve_window(args)
+    m = compute_metrics(window)
     if args.json:
         print(json.dumps(m, indent=2))
         _log("metrics", count=m["done_count"])
         return
     c, rcheck, b, bl = m["cycle"], m["review_check"], m["bounce"], m["blocked"]
-    print(f"RETROSPECTIVE — {m['events_total']} logged events, {m['done_count']} done\n")
+    scope = f" · scope {args.sprint}" if getattr(args, "sprint", None) else (
+        " · windowed" if window else "")
+    print(f"RETROSPECTIVE — {m['events_total']} logged events{scope}, "
+          f"{m['done_count']} done\n")
     print(f"Cycle time (n={c['n']}, demo-sweep excluded):")
     print(f"  median {_fmt_dur(c['median_s'])} · p90 {_fmt_dur(c['p90_s'])} · "
           f"max {_fmt_dur(c['max_s'])}" + (f" ({c['max_story']})" if c['max_story'] else ""))
@@ -2139,6 +2602,169 @@ def cmd_metrics(args):
               f"in <{INSTANT_SECONDS}s, no real loop:")
         print("    " + ", ".join(m["demo_sweep"]))
     _log("metrics", count=m["done_count"])
+
+
+def _retro_snapshot(m):
+    """A frozen, human-readable copy of the windowed metrics for the retro body."""
+    c, rc, b, bl = m["cycle"], m["review_check"], m["bounce"], m["blocked"]
+    rate = rc["refusal_rate"]
+    return [
+        f"- cycle: median {_fmt_dur(c['median_s'])} · p90 {_fmt_dur(c['p90_s'])} "
+        f"(n={c['n']})",
+        f"- review-check: {rc['refused']}/{rc['runs']} refused"
+        + (f" ({rate*100:.0f}%)" if rate is not None else "")
+        + f" · {rc['hard_gate_blocks']} hard-gate block(s)",
+        f"- bounce: {b['bounces']} / {b['reached_review']} reached-review"
+        + (f" ({b['rate']*100:.0f}%)" if b["rate"] is not None else ""),
+        f"- blocked: " + (f"{bl['longest_story']} {_fmt_dur(bl['longest_s'])} (longest)"
+                          if bl["longest_story"] else "none"),
+    ]
+
+
+def _retro_body(committed, shipped, carried, unplanned, m):
+    def fmt(ids):
+        return ", ".join(ids) if ids else "—"
+    lines = [
+        "",
+        "## Committed vs shipped",
+        f"- committed: {fmt(committed)}  ({len(committed)})",
+        f"- shipped:   {fmt(shipped)}  ({len(shipped)})",
+        f"- carried:   {fmt(carried)}  (still open at close)",
+        f"- unplanned: {fmt(unplanned)}  (shipped, not committed)",
+        "",
+        "## Metrics snapshot",
+        *_retro_snapshot(m),
+        "",
+        "## Observations",
+        "- <evidence-anchored friction, one bullet each — fill from the ceremony>",
+        "",
+        "## Workflow-change proposals",
+        "<!-- Top 1–3 frictions as concrete changes to a NAMED artifact (gate/file/",
+        "     tool). `board.py sprint-retro --accept P-N` flips status to accepted",
+        "     AND spawns an IDEA (capture≠commit); `--reject P-N` flips to rejected. -->",
+        "",
+        "| id  | target (gate/file/tool) | type | status | result |",
+        "|-----|-------------------------|------|--------|--------|",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _retro_decide(args, accept, reject):
+    """Flip one proposal's status in place; on accept, spawn the IDEA (Gate-1)."""
+    retros = all_retros()
+    if not retros:
+        _fatal("no retro to update (run `sprint-retro` to scaffold one first)",
+               event="sprint-retro")
+    bid = getattr(args, "batch", None)
+    if bid:
+        match = [(fm, b) for fm, b in retros if (fm.get("batch") or "").strip() == bid]
+        if not match:
+            _fatal(f"no retro found for {bid}", event="sprint-retro")
+        rfm, rbody = match[-1]
+    else:
+        rfm, rbody = retros[-1]
+    rid = rfm.get("id", "?")
+    pid = accept or reject
+    lines = rbody.split("\n")
+    spawned = None
+    for i, line in enumerate(lines):
+        cells = parse_proposal_row(line)
+        if not cells or cells[0] != pid:
+            continue
+        while len(cells) < 5:
+            cells.append("—")
+        if accept:
+            cells[3] = "accepted"
+            spawned = _write_idea(title=f"Workflow change ({rid} {pid})",
+                                  born_from=rid, found_by="retro",
+                                  why=cells[1], discovery_type="out-of-scope")
+            cells[4] = spawned
+        else:
+            cells[3] = "rejected"
+        lines[i] = "| " + " | ".join(cells) + " |"
+        break
+    else:
+        _fatal(f"{pid} not found in {rid}", event="sprint-retro")
+    rfm.pop("_path", None)
+    new_body = "\n".join(lines)
+    if not new_body.endswith("\n"):
+        new_body += "\n"
+    with open(os.path.join(RETROS, f"{rid}.md"), "w", encoding="utf-8") as f:
+        f.write(dump_fm(rfm, new_body))
+    verb = "accepted" if accept else "rejected"
+    print(f"{rid}: {pid} -> {verb}" + (f" (spawned {spawned} in the inbox)" if spawned else ""))
+    _log("sprint-retro", message=f"{pid} {verb}", batch_id=(rfm.get("batch") or ""),
+         **({"result": spawned} if spawned else {}))
+
+
+def cmd_sprint_retro(args):
+    """Sprint STEP 2 — author/extend a retrospective on a CLOSED sprint.
+
+    No flags scaffold `RETRO-NNN` from the closing batch: a committed-vs-shipped
+    delta + a frozen windowed metrics snapshot + an empty proposal table for the
+    ceremony to fill. `--accept P-N` flips a proposal to accepted and spawns an
+    IDEA (the accepted workflow change lands at Gate 1, capture≠commit); `--reject
+    P-N` flips it to rejected. Refuses to retro an ACTIVE sprint — close it first.
+    """
+    accept = getattr(args, "accept", None)
+    reject = getattr(args, "reject", None)
+    if accept and reject:
+        _fatal("pass --accept OR --reject, not both", event="sprint-retro")
+    if accept or reject:
+        return _retro_decide(args, accept, reject)
+
+    bid = getattr(args, "batch", None)
+    if bid:
+        fm, body = find_batch(bid)
+        if not fm:
+            _fatal(f"{bid} not found in backlog/batches/", event="sprint-retro")
+    else:
+        fm, body = latest_closed_batch()
+        if not fm:
+            _fatal("no closed sprint to retro — close one first "
+                   "(board.py sprint-close <id>)", event="sprint-retro")
+        bid = fm.get("id")
+    if (fm.get("status") or "").strip() == "active":
+        _fatal(f"{bid} is still active — close the sprint first "
+               f"(board.py sprint-close {bid}), then retro", event="sprint-retro")
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    window = sprint_window(fm)
+    start, end = window
+    committed = committed_stories(fm)
+    done_set = _stories_done_in_window(window)
+    shipped = [s for s in committed if s in done_set]
+    carried = [s for s in committed if s not in done_set]
+    unplanned = sorted(done_set - set(committed))
+    m = compute_metrics(window)
+
+    rid = _next_item_id(RETROS, "RETRO")
+    rfm = {
+        "id": rid,
+        "type": "retro",
+        "batch": bid,
+        "created": now.date().isoformat(),
+        "window_start": start.date().isoformat() if start else "~",
+        "window_end": end.isoformat() if end else now.isoformat(),
+        "committed": str(len(committed)),
+        "shipped": str(len(shipped)),
+    }
+    body_out = _retro_body(committed, shipped, carried, unplanned, m)
+    os.makedirs(RETROS, exist_ok=True)
+    out = os.path.join(RETROS, f"{rid}.md")
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(dump_fm(rfm, body_out))
+    if any((rf.get("batch") or "").strip() == bid for rf, _ in all_retros()
+           if rf.get("id") != rid):
+        print(f"note: {bid} already had a retro — {rid} is an additional one")
+    print(f"created {rid} for {bid}: committed {len(committed)}, shipped "
+          f"{len(shipped)} (carried {len(carried)}, unplanned {len(unplanned)})")
+    print(f"  edit {os.path.relpath(out, ROOT)} — fill Observations + proposals, "
+          f"then `sprint-retro --accept P-N` to land them at Gate 1")
+    _log("sprint-retro", message=rid, batch_id=bid,
+         count=len(committed), shipped=len(shipped))
 
 
 def cmd_logs(args):
@@ -2215,9 +2841,61 @@ def main():
     bl.add_argument("--json", action="store_true")
     bl.set_defaults(fn=cmd_batch_list)
 
+    # Sprint vocabulary (Gate 3): a sprint IS a batch + its planning/retro
+    # ceremonies. `sprint-plan-new` is the human Gate-3 commit that ratifies the
+    # plan the /sprint-plan agent team prepared.
+    spn = sub.add_parser("sprint-plan-new",
+                         help="Gate 3: commit a sprint plan (enriched batch)")
+    spn.add_argument("--capabilities", required=True, help="comma-separated CAP ids")
+    spn.add_argument("--goal", help="one-line falsifiable sprint goal (outcome, not a task list)")
+    spn.add_argument("--stories", help="comma-separated STORY ids committed to the sprint")
+    spn.add_argument("--prep", help="prep items: story:ID,idea:ID,note:text (comma-separated)")
+    spn.add_argument("--exec-strategy", dest="exec_strategy",
+                     help="how Claude Code agent teams run the work (parallel vs sequenced)")
+    spn.add_argument("--wip", type=int, help=f"in-progress WIP limit (default {DEFAULT_WIP_LIMIT})")
+    spn.add_argument("--id", help="BATCH-NNN (default: auto-numbered)")
+    spn.set_defaults(fn=cmd_batch_new)
+
+    ss = sub.add_parser("sprint-show",
+                        help="detailed view of a sprint (active by default): goal, "
+                             "committed stories + live columns, prep, WIP")
+    ss.add_argument("id", nargs="?")
+    ss.add_argument("--json", action="store_true")
+    ss.set_defaults(fn=cmd_sprint_show)
+
+    scl = sub.add_parser("sprint-close",
+                         help="close the active sprint (alias of batch-close)")
+    scl.add_argument("id")
+    scl.set_defaults(fn=cmd_batch_close)
+
+    scr = sub.add_parser("sprint-retro",
+                         help="Sprint STEP 2: retro a closed sprint "
+                              "(scaffold, or --accept/--reject a proposal)")
+    scr.add_argument("--batch", help="BATCH-NNN to retro (default: latest closed)")
+    scr.add_argument("--accept", metavar="P-N",
+                     help="flip a proposal to accepted AND spawn an IDEA (Gate 1)")
+    scr.add_argument("--reject", metavar="P-N", help="flip a proposal to rejected")
+    scr.set_defaults(fn=cmd_sprint_retro)
+
     ex = sub.add_parser("exceptions", help="Gate 2/5 queue: blocked work needing a human")
     ex.add_argument("--json", action="store_true")
     ex.set_defaults(fn=cmd_exceptions)
+
+    # Idea inbox (#16 return-edge): provenance-stamped, firewalled from the build
+    # loop. `idea-new` is the capture command; `sprint-retro --accept` reuses the
+    # same writer so accepted workflow changes land here too (capture≠commit).
+    inew = sub.add_parser("idea-new", help="capture an out-of-scope discovery to the inbox")
+    inew.add_argument("--title")
+    inew.add_argument("--born-from", dest="born_from", help="origin STORY/RETRO id")
+    inew.add_argument("--found-by", dest="found_by", help="who/what surfaced it")
+    inew.add_argument("--why", help="what SAD section / ADR the idea would need")
+    inew.add_argument("--discovery-type", dest="discovery_type", default="out-of-scope")
+    inew.add_argument("--id", help="IDEA-NNN (default: auto-numbered)")
+    inew.set_defaults(fn=cmd_idea_new)
+
+    il = sub.add_parser("idea-list", help="show the firewalled idea inbox")
+    il.add_argument("--json", action="store_true")
+    il.set_defaults(fn=cmd_idea_list)
 
     s = sub.add_parser("show"); s.add_argument("id"); s.set_defaults(fn=cmd_show)
     sub.add_parser("render").set_defaults(fn=cmd_render)
@@ -2239,6 +2917,9 @@ def main():
 
     mt = sub.add_parser("metrics", help="retrospective off events.jsonl (#9)")
     mt.add_argument("--json", action="store_true")
+    mt.add_argument("--sprint", help="scope to a sprint's window (BATCH-NNN)")
+    mt.add_argument("--since", help="window start (ISO date/datetime)")
+    mt.add_argument("--until", help="window end (ISO date/datetime)")
     mt.set_defaults(fn=cmd_metrics)
 
     rc = sub.add_parser("review-check"); rc.add_argument("id")

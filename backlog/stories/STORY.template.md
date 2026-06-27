@@ -7,6 +7,9 @@ sad_refs: SAD#5.2              # REQUIRED, non-empty. One anchor, comma-separate
                                 # or bracket list: [SAD#5.2, SAD#6.1]
 target: ~                  # optional named slice, e.g. alpha
 estimate: ~
+work_type: feature         # feature | enabler | spike | techdebt | tooling.
+                           # non-feature = "preparation work that makes future
+                           # sprints easier" (see sprint planning); still needs sad_refs.
 attempts: 0                # bookkeeping, stamped by board.py on each start
 prev_column: ~             # set by board.py when blocked, so unblock returns home
 blocked_reason: ~
