@@ -37,6 +37,11 @@ Commands:
   exceptions [--json]           # Gate 2/5 queue: blocked work split decision vs process
   show <id>
   render            # write a human-readable board.md (pure read, not state)
+  render-html       # write a self-contained backlog/index.html with three tabs:
+                    # a kanban board (columns + WIP/batch/blocked banners), an
+                    # EPIC→FEATURE→STORY→SAD traceability tree, and SAD-anchor
+                    # coverage (leaf anchors no story reaches + dangling refs).
+                    # `validate` nudges (non-blocking) when this view is stale.
   validate          # check invariants across the whole board (incl. WIP + batch)
   metrics [--json]  # retrospective off events.jsonl: cycle time, refusal/bounce
                     # rate, attempts spread, blocked time, demo-sweep (F7) flag
@@ -1166,6 +1171,525 @@ def cmd_render(args):
     print(f"wrote {p}")
 
 
+# ---------- render-html (self-contained backlog site) ----------
+def _item_title(fm, body):
+    """Title from a `# ID — Title` heading, else the id."""
+    m = re.search(r"^#\s+\S+\s*[—\-–]\s*(.+)$", body, re.MULTILINE)
+    return m.group(1).strip() if m else fm.get("id", "?")
+
+
+def _story_title(fm, body):
+    """Stories have no H1; fall back to the first line of the User Story."""
+    m = re.search(r"^#\s+\S+\s*[—\-–]\s*(.+)$", body, re.MULTILINE)
+    if m:
+        return m.group(1).strip()
+    m = re.search(r"##\s*User Story\s*\n+(.+)", body)
+    if m:
+        t = re.sub(r"\s+", " ", m.group(1)).strip()
+        return (t[:90] + "…") if len(t) > 90 else t
+    return fm.get("id", "?")
+
+
+def _story_criteria(body):
+    m = re.search(r"##\s*Acceptance Criteria\s*\n(.*?)(\n##|\Z)", body, re.DOTALL)
+    if not m:
+        return []
+    out = []
+    for line in m.group(1).splitlines():
+        bm = re.match(r"^\s*-\s*\[( |x|X)\]\s*(.*)$", line)
+        if bm and bm.group(2).strip():
+            out.append({"done": bm.group(1).lower() == "x", "text": bm.group(2).strip()})
+    return out
+
+
+def _full_stories():
+    """Every story with body-derived fields, ordered by column then id."""
+    out = []
+    for col in COLUMNS:
+        for p in sorted(glob.glob(os.path.join(BOARD, col, "STORY-*.md"))):
+            fm, body = read_story(p)
+            crit = _story_criteria(body)
+            out.append({
+                "id": fm.get("id", os.path.splitext(os.path.basename(p))[0]),
+                "column": col,
+                "title": _story_title(fm, body),
+                "capability": (fm.get("capability") or "").strip(),
+                "parent": (fm.get("parent") or "").strip(),
+                "sad_refs": parse_sad_refs(fm.get("sad_refs")),
+                "attempts": (fm.get("attempts") or "").strip(),
+                "target": (fm.get("target") or "").strip(),
+                "blocked_reason": (fm.get("blocked_reason") or "").strip(),
+                "prev_column": (fm.get("prev_column") or "").strip(),
+                "criteria": crit,
+                "criteria_done": sum(1 for c in crit if c["done"]),
+                "criteria_total": len(crit),
+            })
+    return out
+
+
+def _sentinel(v):
+    v = (v or "").strip()
+    return "" if v in SENTINELS else v
+
+
+# Anchors come in both conventions: bare `SAD#x.y` (single-SAD, SAD-001) and
+# the multi-SAD `SAD-002#x.y` form — mirror SAD_REF_RE so both parse.
+SAD_ANCHOR_HEAD = re.compile(r"^(#{2,4})\s+(SAD(?:-\d{3})?#\d+(?:\.\d+)?)\b\s*(.*)$")
+
+
+def parse_sad_anchors():
+    """Every `## / ### SAD#x.y Title` heading across all SAD files, in order."""
+    anchors = []
+    for p in list_sad_files():
+        sad_id = os.path.splitext(os.path.basename(p))[0]
+        with open(p, encoding="utf-8") as f:
+            for line in f:
+                m = SAD_ANCHOR_HEAD.match(line.rstrip("\n"))
+                if m:
+                    anchors.append({
+                        "id": m.group(2),
+                        "level": len(m.group(1)),
+                        "title": m.group(3).strip(),
+                        "sad": sad_id,
+                    })
+    return anchors
+
+
+def build_sad_coverage(stories, features, epics):
+    """Anchor-by-anchor coverage: which stories pin each SAD anchor, and the
+    leaf anchors no story reaches. A ref covers an anchor if it IS that anchor
+    or a descendant of it (a leaf ref rolls up to its section; a section ref
+    does NOT trickle down to mark every leaf covered)."""
+    anchors = parse_sad_anchors()
+    ids = {a["id"] for a in anchors}
+
+    def covers(ref, aid):
+        return ref == aid or ref.startswith(aid + ".")
+
+    def is_leaf(aid):
+        return not any(other != aid and other.startswith(aid + ".") for other in ids)
+
+    rows = []
+    for a in anchors:
+        aid = a["id"]
+        rows.append({
+            **a,
+            "section": aid.split(".")[0],
+            "leaf": is_leaf(aid),
+            "story_ids": [s["id"] for s in stories
+                          if any(covers(r, aid) for r in s["sad_refs"])],
+            "feature_refs": sum(1 for f in features
+                                if any(covers(r, aid) for r in f["sad_refs"])),
+            "epic_refs": sum(1 for e in epics
+                             if any(covers(r, aid) for r in e["sad_refs"])),
+        })
+
+    # sad_refs used by stories that match no anchor on disk (typo / removed).
+    dangling = {}
+    for s in stories:
+        for r in s["sad_refs"]:
+            if r not in ids and not any(r.startswith(i + ".") or i.startswith(r + ".")
+                                        for i in ids):
+                dangling.setdefault(r, []).append(s["id"])
+    dangling_refs = [{"ref": r, "story_ids": sids} for r, sids in sorted(dangling.items())]
+
+    leaves = [r for r in rows if r["leaf"]]
+    covered = sum(1 for r in leaves if r["story_ids"])
+    return {
+        "anchors": rows,
+        "dangling_refs": dangling_refs,
+        "leaf_total": len(leaves),
+        "leaf_covered": covered,
+    }
+
+
+def build_board_model():
+    """The full data model the static site renders, as plain dicts."""
+    stories = _full_stories()
+
+    epics = []
+    for fm in all_epics():
+        _, body = read_backlog_file(fm["_path"])
+        epics.append({
+            "id": fm.get("id", "?"),
+            "title": _item_title(fm, body),
+            "sad": _sentinel(fm.get("sad")),
+            "parent": _sentinel(fm.get("parent")),
+            "capabilities": parse_list(fm.get("capabilities")),
+            "sad_refs": parse_sad_refs(fm.get("sad_refs")),
+        })
+
+    features = []
+    for fm in all_features():
+        _, body = read_backlog_file(fm["_path"])
+        features.append({
+            "id": fm.get("id", "?"),
+            "title": _item_title(fm, body),
+            "parent": _sentinel(fm.get("parent")),
+            "capabilities": parse_list(fm.get("capabilities")),
+            "sad_refs": parse_sad_refs(fm.get("sad_refs")),
+        })
+
+    fm_b, _ = active_batch()
+    ip = sum(1 for s in stories if s["column"] == "in-progress")
+    limit = batch_wip_limit()
+    batch = None
+    if fm_b:
+        batch = {
+            "id": fm_b.get("id", "?"),
+            "capabilities": parse_list(fm_b.get("capabilities")),
+            "goal": _sentinel(fm_b.get("goal")),
+        }
+
+    blocked = []
+    for s in stories:
+        if s["column"] == "blocked":
+            reason = s["blocked_reason"] or "unspecified"
+            blocked.append({
+                "id": s["id"],
+                "reason": reason,
+                "kind": "decision" if DECISION_SIGNAL.search(reason) else "process",
+                "prev_column": s["prev_column"],
+            })
+
+    return {
+        "columns": COLUMNS,
+        "stories": stories,
+        "epics": epics,
+        "features": features,
+        "wip": {"in_progress": ip, "limit": limit, "over": ip > limit},
+        "batch": batch,
+        "blocked": blocked,
+        "sad_coverage": build_sad_coverage(stories, features, epics),
+    }
+
+
+HTML_TEMPLATE = r"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backlog — Kanban &amp; Traceability</title>
+<style>
+:root{
+  --bg:#0f1419; --panel:#171c24; --panel2:#1d232d; --line:#2a323d;
+  --ink:#e6edf3; --muted:#8b97a6; --accent:#5aa6ff;
+  --todo:#6b7785; --prog:#d6a740; --review:#9b7bd6; --done:#3fb37f; --blocked:#e0625e;
+}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  background:var(--bg);color:var(--ink)}
+header{padding:18px 24px 0;border-bottom:1px solid var(--line)}
+h1{font-size:18px;margin:0 0 4px}
+.sub{color:var(--muted);font-size:12px;margin-bottom:14px}
+.tabs{display:flex;gap:4px}
+.tab{padding:9px 16px;cursor:pointer;border:none;background:none;color:var(--muted);
+  font-size:13px;font-weight:600;border-bottom:2px solid transparent}
+.tab.active{color:var(--ink);border-bottom-color:var(--accent)}
+main{padding:18px 24px 60px}
+.banner{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px}
+.chip{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:5px 10px;font-size:12px}
+.chip b{color:var(--ink)}
+.chip.warn{border-color:var(--blocked);color:#ffb4b1}
+.chip.cap{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:var(--accent);padding:2px 7px}
+.cols{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;align-items:start}
+.col{background:var(--panel);border:1px solid var(--line);border-radius:10px;min-height:60px}
+.col-h{padding:10px 12px;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+.col-h .n{color:var(--muted);font-weight:600}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
+.cards{padding:10px;display:flex;flex-direction:column;gap:9px}
+.card{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--line);
+  border-radius:7px;padding:9px 10px;cursor:pointer;transition:border-color .12s}
+.card:hover{border-color:var(--accent)}
+.card .cid{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:var(--accent)}
+.card .ct{margin-top:3px;font-size:12.5px;color:var(--ink)}
+.card .meta{margin-top:7px;display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.tag{font-size:10px;padding:1px 6px;border-radius:4px;background:#222c38;color:var(--muted);
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.tag.sad{color:#cda6ff;background:#2a2440}
+.prog{margin-top:7px;height:4px;background:#222c38;border-radius:3px;overflow:hidden}
+.prog>i{display:block;height:100%;background:var(--done)}
+.prog-t{font-size:10px;color:var(--muted);margin-top:3px}
+/* traceability */
+.tree{display:flex;flex-direction:column;gap:12px;max-width:1100px}
+.epic{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.epic-h{padding:12px 14px;background:var(--panel2);display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.epic-h .eid{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--accent);font-weight:700}
+.epic-h .et{font-weight:600}
+.feat{border-top:1px solid var(--line);padding:10px 14px 10px 22px}
+.feat-h{display:flex;gap:9px;align-items:baseline;flex-wrap:wrap;margin-bottom:7px}
+.feat-h .fid{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#7fd6a8;font-weight:600}
+.srow{display:flex;gap:9px;align-items:center;padding:4px 0 4px 14px;border-left:2px solid var(--line);
+  margin-left:6px;flex-wrap:wrap}
+.srow .sid{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--accent)}
+.srow .st{font-size:12.5px;color:var(--muted);flex:1;min-width:160px}
+.pill{font-size:10px;padding:1px 8px;border-radius:10px;font-weight:600;text-transform:uppercase;letter-spacing:.03em}
+.muted{color:var(--muted)}
+.empty{color:var(--muted);font-style:italic;padding:8px 0}
+/* sad coverage */
+.cov{max-width:1000px}
+.cov-sec{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:12px;overflow:hidden}
+.cov-sec-h{padding:11px 14px;background:var(--panel2);display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.cov-sec-h .aid{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#cda6ff;font-weight:700}
+.bar{height:6px;width:120px;background:#222c38;border-radius:3px;overflow:hidden;margin-left:auto}
+.bar>i{display:block;height:100%;background:var(--done)}
+.arow{display:flex;gap:10px;align-items:center;padding:7px 14px 7px 24px;border-top:1px solid var(--line);flex-wrap:wrap}
+.arow .aid{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:#cda6ff;min-width:78px}
+.arow .at{font-size:12.5px;flex:1;min-width:160px;color:var(--muted)}
+.arow.uncov{background:#2a1d1d}
+.arow.uncov .at{color:#ffb4b1}
+.badge{font-size:10px;padding:1px 7px;border-radius:10px;font-weight:700;text-transform:uppercase;letter-spacing:.03em}
+.badge.ok{background:#163a2a;color:#5fd39c}
+.badge.no{background:#3a1d1d;color:#ff8d88}
+.sref{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:var(--accent);
+  background:#1d2530;border:1px solid var(--line);border-radius:4px;padding:1px 6px;cursor:pointer}
+/* modal */
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:flex-start;
+  justify-content:center;padding:60px 16px;z-index:10}
+.ov.show{display:flex}
+.modal{background:var(--panel);border:1px solid var(--line);border-radius:12px;max-width:640px;width:100%;
+  padding:20px 22px;max-height:80vh;overflow:auto}
+.modal h2{margin:0 0 2px;font-size:15px}
+.modal .mid{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--accent);font-size:12px}
+.modal ul{margin:10px 0 0;padding-left:18px}
+.modal li{margin:3px 0}
+.modal li.done{color:var(--muted);text-decoration:line-through}
+.x{float:right;cursor:pointer;color:var(--muted);font-size:20px;line-height:1;border:none;background:none}
+.legend{display:flex;gap:14px;font-size:11px;color:var(--muted);margin:0 0 14px}
+.legend span{display:flex;align-items:center}
+@media(max-width:960px){.cols{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Backlog</h1>
+  <div class="sub">Kanban &amp; traceability — generated snapshot. The <code>backlog/</code> folder is the source of truth.</div>
+  <div class="tabs">
+    <button class="tab active" data-tab="board">Kanban board</button>
+    <button class="tab" data-tab="trace">Traceability</button>
+    <button class="tab" data-tab="cover">SAD coverage</button>
+  </div>
+</header>
+<main>
+  <section id="board"></section>
+  <section id="trace" style="display:none"></section>
+  <section id="cover" style="display:none"></section>
+</main>
+<div class="ov" id="ov"><div class="modal" id="modal"></div></div>
+<script>
+const DATA = __DATA__;
+const COLW = {todo:'var(--todo)','in-progress':'var(--prog)',review:'var(--review)',done:'var(--done)',blocked:'var(--blocked)'};
+const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const byId = {}; DATA.stories.forEach(s=>byId[s.id]=s);
+
+function tags(s){
+  let t='';
+  if(s.capability) t+=`<span class="tag">${esc(s.capability)}</span>`;
+  s.sad_refs.forEach(r=>t+=`<span class="tag sad">${esc(r)}</span>`);
+  return t;
+}
+function progress(s){
+  if(!s.criteria_total) return '';
+  const pct=Math.round(100*s.criteria_done/s.criteria_total);
+  return `<div class="prog"><i style="width:${pct}%"></i></div>
+    <div class="prog-t">${s.criteria_done}/${s.criteria_total} criteria</div>`;
+}
+function card(s){
+  return `<div class="card" style="border-left-color:${COLW[s.column]}" onclick="open_('${s.id}')">
+    <div class="cid">${esc(s.id)}</div>
+    <div class="ct">${esc(s.title)}</div>
+    <div class="meta">${tags(s)}</div>
+    ${s.column==='blocked' && s.blocked_reason ? `<div class="prog-t">⚠ ${esc(s.blocked_reason)}</div>`:progress(s)}
+  </div>`;
+}
+function renderBoard(){
+  const w=DATA.wip, parts=[];
+  let banner='<div class="banner">';
+  banner+=`<div class="chip ${w.over?'warn':''}"><b>WIP</b> ${w.in_progress}/${w.limit}${w.over?' ⚠ over limit':''}</div>`;
+  if(DATA.batch){
+    banner+=`<div class="chip"><b>Batch</b> ${esc(DATA.batch.id)}`;
+    DATA.batch.capabilities.forEach(c=>banner+=` <span class="chip cap">${esc(c)}</span>`);
+    banner+='</div>';
+  } else banner+='<div class="chip"><b>Batch</b> none (Gate 3 open)</div>';
+  DATA.blocked.forEach(b=>banner+=`<div class="chip warn"><b>${esc(b.id)}</b> ${b.kind==='decision'?'🔶':''} ${esc(b.reason)}</div>`);
+  banner+='</div>';
+  parts.push(banner);
+
+  let cols='<div class="cols">';
+  DATA.columns.forEach(col=>{
+    const items=DATA.stories.filter(s=>s.column===col);
+    cols+=`<div class="col"><div class="col-h"><span><span class="dot" style="background:${COLW[col]}"></span>${esc(col.replace('-',' '))}</span><span class="n">${items.length}</span></div>
+      <div class="cards">${items.map(card).join('')||'<div class="empty">—</div>'}</div></div>`;
+  });
+  cols+='</div>';
+  parts.push(cols);
+  document.getElementById('board').innerHTML=parts.join('');
+}
+function srow(s){
+  return `<div class="srow"><span class="pill" style="background:${COLW[s.column]}33;color:${COLW[s.column]}">${esc(s.column)}</span>
+    <span class="sid" style="cursor:pointer" onclick="open_('${s.id}')">${esc(s.id)}</span>
+    <span class="st">${esc(s.title)}</span>${tags(s)}</div>`;
+}
+function renderTrace(){
+  const feats=DATA.features, stories=DATA.stories;
+  let html=`<div class="legend">
+    <span><span class="dot" style="background:var(--todo)"></span>todo</span>
+    <span><span class="dot" style="background:var(--prog)"></span>in-progress</span>
+    <span><span class="dot" style="background:var(--review)"></span>review</span>
+    <span><span class="dot" style="background:var(--done)"></span>done</span>
+    <span><span class="dot" style="background:var(--blocked)"></span>blocked</span></div><div class="tree">`;
+  const usedFeat=new Set(), usedStory=new Set();
+  DATA.epics.forEach(e=>{
+    html+=`<div class="epic"><div class="epic-h"><span class="eid">${esc(e.id)}</span><span class="et">${esc(e.title)}</span>`;
+    if(e.sad) html+=`<span class="tag sad">${esc(e.sad)}</span>`;
+    e.capabilities.forEach(c=>html+=`<span class="tag">${esc(c)}</span>`);
+    html+='</div>';
+    const efs=feats.filter(f=>f.parent===e.id);
+    if(!efs.length) html+='<div class="feat"><span class="empty">no features</span></div>';
+    efs.forEach(f=>{
+      usedFeat.add(f.id);
+      html+=`<div class="feat"><div class="feat-h"><span class="fid">${esc(f.id)}</span><span>${esc(f.title)}</span>`;
+      f.sad_refs.forEach(r=>html+=`<span class="tag sad">${esc(r)}</span>`);
+      html+='</div>';
+      const fss=stories.filter(s=>s.parent===f.id);
+      if(!fss.length) html+='<div class="empty" style="padding-left:14px">no stories</div>';
+      fss.forEach(s=>{usedStory.add(s.id);html+=srow(s);});
+      html+='</div>';
+    });
+    html+='</div>';
+  });
+  const orphanF=feats.filter(f=>!usedFeat.has(f.id));
+  const orphanS=stories.filter(s=>!usedStory.has(s.id));
+  if(orphanF.length||orphanS.length){
+    html+=`<div class="epic"><div class="epic-h"><span class="eid">unparented</span><span class="muted">features/stories with no matching parent</span></div>`;
+    orphanF.forEach(f=>{html+=`<div class="feat"><div class="feat-h"><span class="fid">${esc(f.id)}</span><span>${esc(f.title)} <span class="muted">(parent ${esc(f.parent||'—')})</span></span></div>`;
+      stories.filter(s=>s.parent===f.id).forEach(s=>{usedStory.add(s.id);html+=srow(s);});html+='</div>';});
+    const stillOrphan=stories.filter(s=>!usedStory.has(s.id));
+    if(stillOrphan.length){html+='<div class="feat">';stillOrphan.forEach(s=>html+=srow(s));html+='</div>';}
+    html+='</div>';
+  }
+  html+='</div>';
+  document.getElementById('trace').innerHTML=html;
+}
+function renderCover(){
+  const cov=DATA.sad_coverage;
+  if(!cov||!cov.anchors.length){
+    document.getElementById('cover').innerHTML='<div class="empty">No SAD anchors found in backlog/sad/.</div>';
+    return;
+  }
+  const pct=cov.leaf_total?Math.round(100*cov.leaf_covered/cov.leaf_total):0;
+  const uncov=cov.leaf_total-cov.leaf_covered;
+  let html=`<div class="banner">
+    <div class="chip"><b>Leaf coverage</b> ${cov.leaf_covered}/${cov.leaf_total} (${pct}%)</div>
+    <div class="chip ${uncov?'warn':''}"><b>Uncovered</b> ${uncov}</div>
+    <div class="chip ${cov.dangling_refs.length?'warn':''}"><b>Dangling refs</b> ${cov.dangling_refs.length}</div>
+  </div><div class="cov">`;
+
+  // group anchors by top-level section, preserving file order
+  const order=[], groups={};
+  cov.anchors.forEach(a=>{if(!groups[a.section]){groups[a.section]=[];order.push(a.section)}groups[a.section].push(a);});
+  order.forEach(sec=>{
+    const items=groups[sec];
+    const header=items.find(a=>a.id===sec);
+    const leaves=items.filter(a=>a.leaf);
+    const done=leaves.filter(a=>a.story_ids.length).length;
+    const p=leaves.length?Math.round(100*done/leaves.length):100;
+    html+=`<div class="cov-sec"><div class="cov-sec-h"><span class="aid">${esc(sec)}</span>
+      <span>${esc(header?header.title:'')}</span>
+      <span class="muted" style="font-size:11px">${done}/${leaves.length} leaves</span>
+      <div class="bar"><i style="width:${p}%"></i></div></div>`;
+    items.forEach(a=>{
+      if(a.id===sec && a.level<=2 && leaves.length) return; // section header already shown
+      const covered=a.story_ids.length>0;
+      html+=`<div class="arow ${a.leaf&&!covered?'uncov':''}">
+        <span class="aid">${esc(a.id)}</span>
+        <span class="at">${esc(a.title)}</span>`;
+      if(a.story_ids.length){
+        html+=a.story_ids.map(id=>`<span class="sref" onclick="open_('${id}')">${esc(id)}</span>`).join(' ');
+      } else if(a.leaf){
+        html+='<span class="badge no">uncovered</span>';
+      } else {
+        html+='<span class="muted" style="font-size:11px">section</span>';
+      }
+      if(a.feature_refs||a.epic_refs) html+=`<span class="muted" style="font-size:10px">${a.epic_refs?'E·'+a.epic_refs+' ':''}${a.feature_refs?'F·'+a.feature_refs:''}</span>`;
+      html+='</div>';
+    });
+    html+='</div>';
+  });
+  if(cov.dangling_refs.length){
+    html+=`<div class="cov-sec"><div class="cov-sec-h"><span class="aid" style="color:#ff8d88">dangling refs</span>
+      <span class="muted">story sad_refs that match no anchor in backlog/sad/</span></div>`;
+    cov.dangling_refs.forEach(d=>{
+      html+=`<div class="arow uncov"><span class="aid">${esc(d.ref)}</span><span class="at">referenced by</span>
+        ${d.story_ids.map(id=>`<span class="sref" onclick="open_('${id}')">${esc(id)}</span>`).join(' ')}</div>`;
+    });
+    html+='</div>';
+  }
+  html+='</div>';
+  document.getElementById('cover').innerHTML=html;
+}
+function open_(id){
+  const s=byId[id]; if(!s) return;
+  let h=`<button class="x" onclick="close_()">×</button>
+    <div class="mid">${esc(s.id)} · ${esc(s.column)}${s.capability?' · '+esc(s.capability):''}</div>
+    <h2>${esc(s.title)}</h2>`;
+  if(s.sad_refs.length) h+=`<div class="meta" style="margin-top:8px">${s.sad_refs.map(r=>`<span class="tag sad">${esc(r)}</span>`).join('')}</div>`;
+  if(s.blocked_reason) h+=`<div class="chip warn" style="margin-top:10px">⚠ ${esc(s.blocked_reason)} (from ${esc(s.prev_column||'?')})</div>`;
+  if(s.criteria.length){
+    h+=`<div style="margin-top:12px;font-weight:600;font-size:12px">Acceptance criteria (${s.criteria_done}/${s.criteria_total})</div><ul>`;
+    s.criteria.forEach(c=>h+=`<li class="${c.done?'done':''}">${c.done?'✓ ':'☐ '}${esc(c.text)}</li>`);
+    h+='</ul>';
+  }
+  document.getElementById('modal').innerHTML=h;
+  document.getElementById('ov').classList.add('show');
+}
+function close_(){document.getElementById('ov').classList.remove('show');}
+document.getElementById('ov').onclick=e=>{if(e.target.id==='ov')close_();};
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  t.classList.add('active');
+  const tab=t.dataset.tab;
+  document.getElementById('board').style.display=tab==='board'?'':'none';
+  document.getElementById('trace').style.display=tab==='trace'?'':'none';
+  document.getElementById('cover').style.display=tab==='cover'?'':'none';
+});
+renderBoard(); renderTrace(); renderCover();
+</script>
+</body>
+</html>
+"""
+
+
+def html_staleness():
+    """Return a nudge string if backlog/index.html is missing or older than the
+    newest backlog source file, else ''. Pure read — never regenerates."""
+    out = os.path.join(ROOT, "backlog", "index.html")
+    if not os.path.exists(out):
+        return "backlog/index.html not generated — run `board.py render-html`"
+    html_mtime = os.path.getmtime(out)
+    newest = 0.0
+    for sub in ("board", "epics", "features", "sad", "batches"):
+        for p in glob.glob(os.path.join(ROOT, "backlog", sub, "**", "*.md"),
+                           recursive=True):
+            newest = max(newest, os.path.getmtime(p))
+    if newest > html_mtime:
+        return "backlog/index.html is stale — re-run `board.py render-html`"
+    return ""
+
+
+def cmd_render_html(args):
+    model = build_board_model()
+    data_json = json.dumps(model, ensure_ascii=False, separators=(",", ":"))
+    html = HTML_TEMPLATE.replace("__DATA__", data_json)
+    out = os.path.join(ROOT, "backlog", "index.html")
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(html)
+    n = len(model["stories"])
+    print(f"wrote {out} ({n} stories, {len(model['epics'])} epics, "
+          f"{len(model['features'])} features)")
+
+
 def cmd_validate(args):
     problems = []
     warnings = []  # surfaced but non-blocking (e.g. Draft SAD, stale ## Status)
@@ -1354,6 +1878,10 @@ def cmd_validate(args):
         for cap in batch_capabilities(fm):
             if all_caps and cap not in all_caps:
                 problems.append(f"{bid}: unknown capability {cap} (not a SAD#3 cap)")
+
+    stale = html_staleness()
+    if stale:
+        warnings.append(stale)
 
     if warnings:
         print("WARNINGS (non-blocking):")
@@ -1693,6 +2221,9 @@ def main():
 
     s = sub.add_parser("show"); s.add_argument("id"); s.set_defaults(fn=cmd_show)
     sub.add_parser("render").set_defaults(fn=cmd_render)
+    sub.add_parser("render-html",
+                   help="write a self-contained backlog/index.html (kanban + traceability)"
+                   ).set_defaults(fn=cmd_render_html)
     v = sub.add_parser("validate")
     v.add_argument("--sad", help="SAD-NNN id when multiple contracts exist")
     v.set_defaults(fn=cmd_validate, sad=None)

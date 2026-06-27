@@ -373,6 +373,42 @@ def run():
         check("board.md shows WIP usage", "WIP " in board_md)
         check("board.md surfaces the exception queue", "Exception queue:" in board_md and "STORY-400" in board_md)
 
+        print("\n[render-html] self-contained site + SAD coverage")
+        # A clean SAD with real sub-anchor *headings* so coverage has leaves to
+        # score (the shared write_sad emits SAD#1.1 as body text, not a heading).
+        sad_path = os.path.join(tmp, "backlog", "sad", "SAD-001.md")
+        with open(sad_path, "w", encoding="utf-8") as f:
+            f.write("---\nid: SAD-001\nstatus: Approved\n---\n\n"
+                    "## SAD#1 Context & Scope\n### SAD#1.1 In scope\nbody\n"
+                    "## SAD#3 Capabilities\n### SAD#3.1 CAP-x: a\n### SAD#3.2 CAP-y: b\n")
+        repo.write_story("STORY-700", "todo", sad_refs="[SAD#1.1]")  # covers SAD#1.1
+        r = repo.board("render-html")
+        check("render-html succeeds", r.returncode == 0)
+        idx = os.path.join(tmp, "backlog", "index.html")
+        check("backlog/index.html written", os.path.exists(idx))
+        html = open(idx, encoding="utf-8").read()
+        m = re.search(r"const DATA = (\{.*?\});\n", html)
+        check("embedded DATA json present", bool(m))
+        data = json.loads(m.group(1))
+        check("model carries stories + columns", bool(data["stories"]) and len(data["columns"]) == 5)
+        cov = data["sad_coverage"]
+        anchors = {a["id"]: a for a in cov["anchors"]}
+        check("SAD#1.1 leaf is covered by its story",
+              "STORY-700" in anchors.get("SAD#1.1", {}).get("story_ids", []))
+        check("SAD#3.1 capability leaf is uncovered",
+              "SAD#3.1" in anchors and not anchors["SAD#3.1"]["story_ids"])
+        # STORY-100 was repointed to SAD#9.9 earlier — no such anchor → dangling.
+        dangling = {d["ref"] for d in cov["dangling_refs"]}
+        check("a ref with no matching anchor is flagged dangling", "SAD#9.9" in dangling)
+
+        print("\n[render-html] validate nudges only when the site is stale")
+        r = repo.board("validate")
+        check("fresh site → no stale nudge", "index.html is stale" not in (r.stdout + r.stderr))
+        os.utime(repo.story_path("STORY-100"), None)  # bump mtime past index.html
+        r = repo.board("validate")
+        check("changed board → stale nudge surfaces",
+              "index.html is stale" in (r.stdout + r.stderr))
+
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

@@ -17,6 +17,7 @@ dist-ssr
 
 # Workflow generated artifacts (regenerable views / local telemetry — not source of truth)
 board.md
+backlog/index.html
 .workflow/events.jsonl
 
 # Editor directories and files
