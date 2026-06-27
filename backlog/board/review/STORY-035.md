@@ -9,7 +9,6 @@ estimate: ~
 attempts: 1
 prev_column: ~
 blocked_reason: ~
-reject_reason: ~
 base_commit: e9ea925b3437a3a1eefdd3ba86593d7b16ae74e7
 ---
 
