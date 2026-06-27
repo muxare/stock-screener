@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useScreener } from '../../store';
 import { HButton, HDiv } from '../ui/Hoverable';
 
@@ -7,8 +7,13 @@ import { HButton, HDiv } from '../ui/Hoverable';
  * (Stock Screener.dc.html lines 52–72). Each card shows a live match count and
  * active-state styling per renderVals (lines 1642–1656). Click selects the
  * preset; the ✎ button (only when id !== 'all') opens the preset builder.
+ *
+ * The card list lives behind an accordion (collapsed by default) so the sidebar
+ * leads with active filters; the header arrow mirrors the filter-builder
+ * sections (▾/▸).
  */
 export function Presets() {
+  const [open, setOpen] = useState(false);
   const presetStore = useScreener((s) => s.presetStore);
   const presetCounts = useScreener((s) => s.presetCounts);
   const activePreset = useScreener((s) => s.activePreset);
@@ -46,17 +51,26 @@ export function Presets() {
   return (
     <>
       <div style={{ padding: '18px 18px 12px 18px', flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-        <span style={{ fontSize: 11, color: '#98a0a8', textTransform: 'uppercase', letterSpacing: '0.09em', fontWeight: 600 }}>Strategy presets</span>
+        <HButton
+          onClick={() => setOpen((o) => !o)}
+          title={open ? 'Hide strategy presets' : 'Show strategy presets'}
+          aria-expanded={open}
+          style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 7, border: 'none', background: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}
+          hoverStyle={{ opacity: 0.7 }}
+        >
+          <span style={{ fontSize: 10, color: '#aab0b6' }}>{open ? '▾' : '▸'}</span>
+          <span style={{ fontSize: 11, color: '#98a0a8', textTransform: 'uppercase', letterSpacing: '0.09em', fontWeight: 600 }}>Strategy presets</span>
+        </HButton>
         <HButton
           onClick={newPreset}
           title="Save the current filters as a new preset"
-          style={{ border: 'none', background: '#eafaf3', color: '#06865a', fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 7, cursor: 'pointer', fontFamily: 'inherit' }}
+          style={{ flex: 'none', border: 'none', background: '#eafaf3', color: '#06865a', fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 7, cursor: 'pointer', fontFamily: 'inherit' }}
           hoverStyle={{ background: '#dcf5ea' }}
         >
           + New
         </HButton>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+      <div style={{ display: open ? 'flex' : 'none', flexDirection: 'column', gap: 7 }}>
         {cards.map((p) => (
           <HDiv
             key={p.id}

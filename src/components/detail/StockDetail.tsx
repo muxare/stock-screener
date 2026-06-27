@@ -28,6 +28,15 @@ type FullInd = {
 
 type View = { start: number; count: number };
 
+// geometry captured by draw() so the crosshair handler can map mouse -> bar/value
+type Geom = {
+  padL: number; plotWd: number; padT: number; contentBottom: number;
+  start: number; N: number; dpr: number; cssW: number; cssH: number;
+  price: { top: number; h: number; lo: number; hi: number };
+};
+
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
 export interface StockDetailProps {
   stock: Stock;
   panels: Panels;
@@ -103,26 +112,47 @@ function whySpark(stock: Stock, rule: Rule, pass: boolean): JSX.Element | null {
 
 export function StockDetail({ stock, panels, rules, onClose, onTogglePanel, ruleLabel }: StockDetailProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const overlayRef = useRef<HTMLCanvasElement | null>(null);
+  const readoutRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<View | null>(null);
   const viewKeyRef = useRef<string | null>(null);
   const fullRef = useRef<FullInd | null>(null);
   const fullKeyRef = useRef<string | null>(null);
   const datesRef = useRef<Date[] | null>(null);
+  const datesKeyRef = useRef<string | null>(null);
   const LRef = useRef<number>(0);
   const dragRef = useRef<{ x: number; start: number } | null>(null);
+  const geomRef = useRef<Geom | null>(null);
+  const mouseRef = useRef<{ x: number; y: number; in: boolean }>({ x: 0, y: 0, in: false });
 
   // keep the latest props available to the imperative draw / handlers
   const stockR = useRef(stock); stockR.current = stock;
   const panelsR = useRef(panels); panelsR.current = panels;
   const rulesR = useRef(rules); rulesR.current = rules;
 
-  // weekday dates across the FULL history, ending "today"
+  // Real trading-day dates across the FULL history. Sourced from the data
+  // (`stock.full.d`, the calendar date per bar carried through from the provider)
+  // so the axis matches the underlying bars. Only when that is missing (legacy
+  // fixtures predating dated bars) do we fall back to fabricating weekday dates.
+  // Cached per ticker — a length match alone is not enough now that different
+  // names cover different real date ranges.
   const datesFull = (L: number): Date[] => {
-    if (datesRef.current && datesRef.current.length === L) return datesRef.current;
-    const out: Date[] = []; const d = new Date(2026, 5, 19);
-    while (out.length < L) { const day = d.getDay(); if (day !== 0 && day !== 6) out.push(new Date(d)); d.setDate(d.getDate() - 1); }
-    datesRef.current = out.reverse();
-    return datesRef.current;
+    const s = stockR.current;
+    const key = s?.ticker ?? null;
+    if (datesKeyRef.current === key && datesRef.current && datesRef.current.length === L) return datesRef.current;
+    const iso = s?.full.d;
+    let out: Date[];
+    if (iso && iso.length === L) {
+      // 'YYYY-MM-DD' -> local Date (parse the parts so it is not shifted by UTC).
+      out = iso.map((str) => { const [y, m, day] = str.split('-').map(Number); return new Date(y, m - 1, day); });
+    } else {
+      out = []; const d = new Date(2026, 5, 19);
+      while (out.length < L) { const day = d.getDay(); if (day !== 0 && day !== 6) out.push(new Date(d)); d.setDate(d.getDate() - 1); }
+      out.reverse();
+    }
+    datesRef.current = out;
+    datesKeyRef.current = key;
+    return out;
   };
 
   // full-history indicator arrays, computed once per stock
@@ -211,6 +241,8 @@ export function StockDetail({ stock, panels, rules, onClose, onTogglePanel, rule
     const dpr = window.devicePixelRatio || 1;
     cv.width = cssW * dpr; cv.height = cssH * dpr;
     cv.style.height = cssH + 'px';
+    const ov = overlayRef.current;
+    if (ov) { ov.width = cssW * dpr; ov.height = cssH * dpr; ov.style.height = cssH + 'px'; }
     const ctx = cv.getContext('2d')!;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssW, cssH);
@@ -380,7 +412,117 @@ export function StockDetail({ stock, panels, rules, onClose, onTogglePanel, rule
     // month labels at very bottom
     ctx.fillStyle = '#b8bec4'; ctx.textAlign = 'center';
     monthX.forEach(([i, d]) => { ctx.fillText(mNames[d.getMonth()], x(i), cssH - 8); });
+
+    // publish geometry for the crosshair handler; keep the crosshair in sync
+    // after pan / zoom / resize / panel toggles (which re-run draw())
+    geomRef.current = {
+      padL, plotWd, padT, contentBottom: y0 - gap, start, N, dpr, cssW, cssH,
+      price: { top: pb.top, h: pb.h, lo, hi },
+    };
+    if (mouseRef.current.in) drawCrosshair(mouseRef.current.x, mouseRef.current.y);
   }
+
+  // ----- crosshair + per-candle readout (overlay canvas, no React re-render) -----
+  function drawCrosshair(clientX: number, clientY: number) {
+    const ov = overlayRef.current, g = geomRef.current, cv = canvasRef.current, s = stockR.current;
+    const readout = readoutRef.current;
+    if (!ov || !g || !cv || !s) return;
+    const ctx = ov.getContext('2d'); if (!ctx) return;
+    ctx.setTransform(g.dpr, 0, 0, g.dpr, 0, 0);
+    ctx.clearRect(0, 0, g.cssW, g.cssH);
+
+    const rect = cv.getBoundingClientRect();
+    const mx = (clientX - rect.left) * (g.cssW / rect.width);
+    const my = (clientY - rect.top) * (g.cssH / rect.height);
+    if (mx < g.padL || mx > g.padL + g.plotWd || my < g.padT || my > g.contentBottom) {
+      if (readout) readout.style.display = 'none';
+      return;
+    }
+
+    const step = g.plotWd / g.N;
+    const li = Math.max(0, Math.min(g.N - 1, Math.round((mx - g.padL) / step - 0.5)));
+    const a = g.start + li;
+    const snapX = g.padL + (li + 0.5) * step;
+    const o = s.full.o, h = s.full.h, l = s.full.l, c = s.full.c, vol = s.full.v as number[] | undefined;
+    const F = ensureFull(s);
+    const dates = datesFull(LRef.current);
+    const P = panelsR.current;
+
+    // crosshair lines (snapped vertically to the candle, free horizontally)
+    ctx.strokeStyle = '#8a929a'; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.moveTo(snapX, g.padT); ctx.lineTo(snapX, g.contentBottom); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(g.padL, my); ctx.lineTo(g.padL + g.plotWd, my); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // dot on the candle close
+    const pyc = g.price.top + (1 - (c[a] - g.price.lo) / (g.price.hi - g.price.lo)) * g.price.h;
+    ctx.fillStyle = c[a] >= o[a] ? '#06a96b' : '#e23d3d';
+    ctx.beginPath(); ctx.arc(snapX, pyc, 3, 0, Math.PI * 2); ctx.fill();
+
+    ctx.font = "11px 'Helvetica Neue',Helvetica,Arial,sans-serif";
+    ctx.textBaseline = 'middle';
+
+    // right-axis price tag at the cursor height (only meaningful over the price band)
+    if (my >= g.price.top && my <= g.price.top + g.price.h) {
+      const val = g.price.lo + (1 - (my - g.price.top) / g.price.h) * (g.price.hi - g.price.lo);
+      const tag = val.toFixed(val < 50 ? 2 : 1);
+      ctx.textAlign = 'left';
+      const tx = g.padL + g.plotWd + 2;
+      ctx.fillStyle = '#15171a'; ctx.fillRect(tx, my - 8, ctx.measureText(tag).width + 8, 16);
+      ctx.fillStyle = '#fff'; ctx.fillText(tag, tx + 4, my + 0.5);
+    }
+
+    // bottom date tag centered on the candle
+    const d = dates[a];
+    const dStr = `${MON[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+    ctx.textAlign = 'center';
+    const dw = ctx.measureText(dStr).width;
+    const dcx = Math.max(g.padL + dw / 2 + 4, Math.min(g.padL + g.plotWd - dw / 2 - 4, snapX));
+    ctx.fillStyle = '#15171a'; ctx.fillRect(dcx - dw / 2 - 4, g.contentBottom + 2, dw + 8, 16);
+    ctx.fillStyle = '#fff'; ctx.fillText(dStr, dcx, g.contentBottom + 10 + 0.5);
+
+    // HTML readout legend (top-left)
+    if (readout) {
+      const fmtP = (v: number | null | undefined) => (v == null || isNaN(v) ? '—' : '$' + v.toFixed(2));
+      const fmtN = (v: number | null | undefined) => (v == null || isNaN(v) ? '—' : v.toFixed(2));
+      const fmtV = (v: number | null | undefined) => (v == null || isNaN(v) ? '—'
+        : v >= 1e9 ? (v / 1e9).toFixed(2) + 'B' : v >= 1e6 ? (v / 1e6).toFixed(2) + 'M'
+          : v >= 1e3 ? (v / 1e3).toFixed(1) + 'K' : String(Math.round(v)));
+      const item = (lbl: string, val: string, color?: string) =>
+        `<span style="color:#9aa1a8">${lbl}</span><span style="color:${color || '#15171a'};font-weight:600;font-variant-numeric:tabular-nums;margin-left:3px">${val}</span>`;
+      const barCol = c[a] >= o[a] ? '#06a96b' : '#e23d3d';
+      const chg = a > 0 && c[a - 1] ? ((c[a] - c[a - 1]) / c[a - 1]) * 100 : 0;
+      const row1 = [
+        item('O', fmtP(o[a])), item('H', fmtP(h[a])), item('L', fmtP(l[a])), item('C', fmtP(c[a]), barCol),
+        item('Chg', (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%', chg >= 0 ? '#06a96b' : '#e23d3d'),
+      ];
+      if (P.volume) row1.push(item('Vol', fmtV(vol ? vol[a] : null)));
+      const row2: string[] = [];
+      if (P.ema) {
+        row2.push(item('EMA9', fmtN(F.ema9[a]), '#2b6cff'), item('EMA20', fmtN(F.ema20[a]), '#f5a623'),
+          item('EMA50', fmtN(F.ema50[a]), '#9b51e0'), item('EMA200', fmtN(F.ema200[a]), '#8a929a'));
+      }
+      if (P.rsi) row2.push(item('RSI', fmtN(F.rsi[a]), '#9b51e0'));
+      if (P.macd) row2.push(item('MACD', fmtN(F.macdHist[a]), col(F.macdHist[a])));
+      if (P.stoch) row2.push(item('Stoch %K', F.stochK[a] == null ? '—' : (F.stochK[a] as number).toFixed(1), '#2b6cff'));
+      readout.innerHTML =
+        `<div style="color:#15171a;font-weight:700;margin-bottom:3px">${dStr}</div>` +
+        `<div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center">${row1.join('')}</div>` +
+        (row2.length ? `<div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-top:3px">${row2.join('')}</div>` : '');
+      readout.style.display = 'block';
+    }
+  }
+
+  const onHoverMove = (e: MouseEvent) => {
+    mouseRef.current = { x: e.clientX, y: e.clientY, in: true };
+    drawCrosshair(e.clientX, e.clientY);
+  };
+  const hideCrosshair = () => {
+    mouseRef.current.in = false;
+    const ov = overlayRef.current, g = geomRef.current;
+    if (ov && g) { const c2 = ov.getContext('2d'); if (c2) { c2.setTransform(g.dpr, 0, 0, g.dpr, 0, 0); c2.clearRect(0, 0, g.cssW, g.cssH); } }
+    if (readoutRef.current) readoutRef.current.style.display = 'none';
+  };
 
   // wire canvas listeners + ResizeObserver once
   useEffect(() => {
@@ -393,6 +535,8 @@ export function StockDetail({ stock, panels, rules, onClose, onTogglePanel, rule
     cv.addEventListener('pointerup', onPointerUp);
     cv.addEventListener('pointerleave', onPointerUp);
     cv.addEventListener('dblclick', resetView);
+    cv.addEventListener('mousemove', onHoverMove);
+    cv.addEventListener('mouseleave', hideCrosshair);
     const ro = new ResizeObserver(() => draw());
     ro.observe(cv.parentElement!);
     draw();
@@ -403,6 +547,8 @@ export function StockDetail({ stock, panels, rules, onClose, onTogglePanel, rule
       cv.removeEventListener('pointerup', onPointerUp);
       cv.removeEventListener('pointerleave', onPointerUp);
       cv.removeEventListener('dblclick', resetView);
+      cv.removeEventListener('mousemove', onHoverMove);
+      cv.removeEventListener('mouseleave', hideCrosshair);
       ro.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -478,6 +624,16 @@ export function StockDetail({ stock, panels, rules, onClose, onTogglePanel, rule
       <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
         <div style={{ position: 'relative', padding: '8px 14px 0 14px' }}>
           <canvas ref={canvasRef} style={{ display: 'block', width: '100%' }} />
+          <canvas ref={overlayRef} style={{ display: 'block', position: 'absolute', left: 14, top: 8, right: 14, pointerEvents: 'none' }} />
+          <div
+            ref={readoutRef}
+            style={{
+              position: 'absolute', left: 20, top: 14, display: 'none', pointerEvents: 'none',
+              background: 'rgba(255,255,255,0.92)', border: '1px solid #ececef', borderRadius: 7,
+              padding: '6px 9px', fontSize: 11, lineHeight: 1.5, zIndex: 2,
+              boxShadow: '0 1px 4px rgba(0,0,0,0.06)', fontVariantNumeric: 'tabular-nums',
+            }}
+          />
         </div>
 
         <div style={{ padding: '16px 22px 22px 22px' }}>

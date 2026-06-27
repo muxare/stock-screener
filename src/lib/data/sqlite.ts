@@ -24,9 +24,10 @@ import type { InstrumentBars, MarketDataProvider } from './provider';
 // Row shapes for the two tables of the STORY-031 schema (SAD#6.1).
 interface InstrumentRow { ticker: string; name: string; sector: string; }
 // The engine `Bar` shape is {o,h,l,c,v}; the DB `date` column orders the bars
-// chronologically but is not part of `Bar` (SAD#6.1), so it appears only in the
-// ORDER BY and is never selected into a result row.
-interface OhlcvRow { o: number; h: number; l: number; c: number; v: number; }
+// chronologically and is NOT part of `Bar` (SAD#6.1). It is still selected so it
+// can be returned alongside the bars as `InstrumentBars.dates` (a parallel array
+// the detail chart labels with), never folded into a `Bar`.
+interface OhlcvRow { date: string; o: number; h: number; l: number; c: number; v: number; }
 interface TickerOhlcvRow extends OhlcvRow { ticker: string; } // + ticker, for grouping
 
 function toBar(r: OhlcvRow): Bar {
@@ -66,9 +67,9 @@ export function sqliteProvider(dbPath: string): MarketDataProvider {
 
   // Prepared once, reused per call (SAD#2.5 hot path) — no per-request recompile.
   const selInstruments = db.prepare('SELECT ticker, name, sector FROM instrument ORDER BY ticker');
-  const selAllBars = db.prepare('SELECT ticker, o, h, l, c, v FROM bar ORDER BY ticker, date');
+  const selAllBars = db.prepare('SELECT ticker, date, o, h, l, c, v FROM bar ORDER BY ticker, date');
   const selInstrument = db.prepare('SELECT ticker, name, sector FROM instrument WHERE ticker = ?');
-  const selInstrumentBars = db.prepare('SELECT o, h, l, c, v FROM bar WHERE ticker = ? ORDER BY date');
+  const selInstrumentBars = db.prepare('SELECT date, o, h, l, c, v FROM bar WHERE ticker = ? ORDER BY date');
 
   return {
     getUniverse(): InstrumentBars[] {
@@ -76,12 +77,17 @@ export function sqliteProvider(dbPath: string): MarketDataProvider {
 
       // One pass over all bars, chronological within each ticker, grouped by
       // ticker — avoids an N+1 query while keeping each name's bars date-ordered.
+      // Dates accumulate into a parallel array, index-aligned with `bars`.
       const barRows = selAllBars.all() as unknown as TickerOhlcvRow[];
       const barsByTicker = new Map<string, Bar[]>();
+      const datesByTicker = new Map<string, string[]>();
       for (const r of barRows) {
         let arr = barsByTicker.get(r.ticker);
         if (!arr) { arr = []; barsByTicker.set(r.ticker, arr); }
         arr.push(toBar(r));
+        let darr = datesByTicker.get(r.ticker);
+        if (!darr) { darr = []; datesByTicker.set(r.ticker, darr); }
+        darr.push(r.date);
       }
 
       return instruments.map((i) => ({
@@ -89,6 +95,7 @@ export function sqliteProvider(dbPath: string): MarketDataProvider {
         name: i.name,
         sector: i.sector,
         bars: barsByTicker.get(i.ticker) ?? [],
+        dates: datesByTicker.get(i.ticker) ?? [],
       }));
     },
 
@@ -97,7 +104,8 @@ export function sqliteProvider(dbPath: string): MarketDataProvider {
       if (!instrument) return null;
 
       // Same ORDER BY date as getUniverse, so the bars are identical to this
-      // name in getUniverse() (AC) — chronological, {o,h,l,c,v} only.
+      // name in getUniverse() (AC) — chronological, {o,h,l,c,v} only, with the
+      // calendar dates returned beside them in a parallel `dates` array.
       const barRows = selInstrumentBars.all(ticker) as unknown as OhlcvRow[];
 
       return {
@@ -105,6 +113,7 @@ export function sqliteProvider(dbPath: string): MarketDataProvider {
         name: instrument.name,
         sector: instrument.sector,
         bars: barRows.map(toBar),
+        dates: barRows.map((r) => r.date),
       };
     },
   };

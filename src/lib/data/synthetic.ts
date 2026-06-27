@@ -71,6 +71,28 @@ const TICKERS: [string, string, string][] = [
 
 const DAYS = 260;       // generated trading days (~1y)
 
+// Synthetic bars carry fabricated weekday dates so the detail chart has a real
+// date axis to label (the engine itself ignores them, ADR-002). Anchored to a
+// FIXED end date — never Date.now() — so the demo universe and its golden-master
+// fixtures stay bit-for-bit deterministic across runs.
+const SYNTH_END = '2026-06-19';
+
+// `count` weekday ISO dates ('YYYY-MM-DD') ending at (and including) `endIso`,
+// returned ascending so they align index-for-index with the chronological bars.
+function genDates(count: number, endIso: string): string[] {
+  const [ey, em, ed] = endIso.split('-').map(Number);
+  const d = new Date(ey, em - 1, ed);
+  const out: string[] = [];
+  while (out.length < count) {
+    const day = d.getDay();
+    if (day !== 0 && day !== 6) {
+      out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+    }
+    d.setDate(d.getDate() - 1);
+  }
+  return out.reverse();
+}
+
 function genSeries(rand: () => number, startPrice: number): Bar[] {
   // regime-based geometric random walk with occasional trend shifts
   const closes: number[] = [];
@@ -118,7 +140,7 @@ function instrumentAt(seed: number, idx: number): InstrumentBars {
   let startPrice = 0;
   for (let i = 0; i <= idx; i++) startPrice = 18 + priceRand() * 380;
   const bars = genSeries(mulberry32(seed * 131 + idx * 977), startPrice);
-  return { ticker, name, sector, bars };
+  return { ticker, name, sector, bars, dates: genDates(bars.length, SYNTH_END) };
 }
 
 /**

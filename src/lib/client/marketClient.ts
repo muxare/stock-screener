@@ -84,6 +84,30 @@ export interface DevImportReport {
   universe: number;
 }
 
+// ---- dev-only DB-selector (STORY-035) transport DTOs ----
+// Lists already-built market-data DBs and switches the active one at runtime.
+export interface DatabaseEntry {
+  name: string;
+  path: string;
+  sizeBytes: number;
+  instruments: number | null; // null when not a readable STORY-031 DB
+  valid: boolean;
+  active: boolean;
+}
+export interface DatabasesResp {
+  activeKind: 'synthetic' | 'sqlite';
+  activePath: string | null;
+  scanDir: string;
+  databases: DatabaseEntry[];
+}
+// Switch to a SQLite DB by path, OR back to the synthetic generator.
+export interface ActivateDbRequest { path?: string; synthetic?: boolean }
+export interface ActivateDbReport {
+  activeKind: 'synthetic' | 'sqlite';
+  activePath: string | null;
+  universe: number;
+}
+
 // The client-side read seam. Exposes exactly today's calls and nothing
 // speculative (STORY-035 AC#1).
 export interface MarketClient {
@@ -99,6 +123,10 @@ export interface MarketClient {
   devImportOptions(): Promise<ImportOptionsResp | null>;
   /** Run a dev-only EOD import. */
   devImport(body: DevImportRequest): Promise<DevImportReport>;
+  /** Dev-only list of selectable market-data DBs; `null` when DEV_TOOLS is off. */
+  databases(): Promise<DatabasesResp | null>;
+  /** Switch the active dataset (a SQLite DB by path, or the synthetic generator). */
+  activateDatabase(body: ActivateDbRequest): Promise<ActivateDbReport>;
 }
 
 // ----------------------------------------------------------------------------
@@ -181,6 +209,25 @@ export function httpMarketClient(): MarketClient {
       });
       const data = (await res.json().catch(() => ({}))) as { error?: string } & DevImportReport;
       if (!res.ok) throw new Error(data.error || 'import failed: ' + res.status);
+      return data;
+    },
+
+    // Dev-only DB-selector (STORY-035). Same DEV_TOOLS gate as /dev/import: a 404
+    // means the flag is off (or the service is down), so the selector stays hidden.
+    async databases() {
+      const res = await fetch('/dev/databases');
+      if (!res.ok) return null;
+      return res.json() as Promise<DatabasesResp>;
+    },
+
+    async activateDatabase(body) {
+      const res = await fetch('/dev/databases/activate', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string } & ActivateDbReport;
+      if (!res.ok) throw new Error(data.error || 'activate failed: ' + res.status);
       return data;
     },
   };

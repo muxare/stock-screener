@@ -17,6 +17,7 @@ import type {
   ImportDataEntry,
   DevImportRequest,
   DevImportReport,
+  DatabaseEntry,
 } from './lib/client/marketClient';
 
 // ----------------------------------------------------------------------------
@@ -30,7 +31,7 @@ import type {
 // Transport DTOs that other modules referenced (`Row` and the dev-import shapes)
 // are re-exported here so existing imports from `./store` keep working.
 // ----------------------------------------------------------------------------
-export type { Row, ImportConfigOption, ImportDataEntry, DevImportReport };
+export type { Row, ImportConfigOption, ImportDataEntry, DevImportReport, DatabaseEntry };
 
 // `limit: 0` returns the full `total` + `tickers` with no row payload — used for
 // match counts and rank pass-sets. The main screen passes ALL to get the rows.
@@ -206,6 +207,19 @@ export interface DevImportState {
   report: DevImportReport | null;
 }
 
+// ---------- dev-only DB-selector (STORY-035) ----------
+// UI state mirror for the active-dataset picker. Like DevImportState it is
+// present in the bundle but inert unless the service reports DEV_TOOLS on
+// (`available`). The DTOs (DatabaseEntry) live in the MarketClient seam.
+export interface DbSelectorState {
+  available: boolean; // service has DEV_TOOLS on — gates the picker UI
+  databases: DatabaseEntry[];
+  activeKind: 'synthetic' | 'sqlite';
+  activePath: string | null;
+  switching: boolean; // an activate request is in flight
+  error: string | null;
+}
+
 export interface ScreenerState {
   // ---- core state (mirrors POC `state`) ----
   ready: boolean;
@@ -265,6 +279,8 @@ export interface ScreenerState {
   editChip: number | null;
   // dev-only EOD import (STORY-031) — inert unless the service reports it on
   devImport: DevImportState;
+  // dev-only DB-selector (STORY-035) — inert unless the service reports it on
+  dbSelector: DbSelectorState;
 
   // ---- lifecycle ----
   init: () => void;
@@ -422,6 +438,13 @@ export interface ScreenerState {
   setImportTargetDb: (db: string) => void;
   /** run the import, then refresh facts + the active screen against the new data */
   runDevImport: () => Promise<void>;
+
+  // ---- dev-only DB-selector (STORY-035) ----
+  /** probe the DEV_TOOLS-gated /dev/databases endpoint; flips dbSelector.available on success */
+  probeDatabases: () => Promise<void>;
+  /** switch the active dataset (a DB path, or `null` for the synthetic generator),
+   *  then refresh facts + the active screen against it */
+  selectDatabase: (path: string | null) => Promise<void>;
 }
 
 // Store factory (STORY-035): the store consumes an injected `MarketClient`
@@ -525,6 +548,11 @@ export function makeScreenerState(client: MarketClient = httpMarketClient()): St
       inputMode: 'browse', selectedEntry: '', uploads: [], uploadLabel: '',
       running: false, error: null, report: null,
     },
+    dbSelector: {
+      available: false, databases: [],
+      activeKind: 'synthetic', activePath: null,
+      switching: false, error: null,
+    },
 
     // ---- lifecycle ----
     init: () => {
@@ -555,6 +583,8 @@ export function makeScreenerState(client: MarketClient = httpMarketClient()): St
       // Probe the dev-only import surface (STORY-031). Hidden unless DEV_TOOLS is
       // on server-side; a failure here is silent (the button just never shows).
       void get().probeDevImport();
+      // Probe the dev-only DB-selector (STORY-035). Same gate; hidden otherwise.
+      void get().probeDatabases();
     },
 
     // Fetch the universe-wide facts (size, sectors) and a single sample name.
@@ -1192,9 +1222,40 @@ export function makeScreenerState(client: MarketClient = httpMarketClient()): St
         // The data underneath changed; refresh the universe facts (of-N + sectors)
         // and re-run the active screen so results reflect the imported data. The
         // reactive subscription only fires on rule/preset edits, so this is manual.
-        await Promise.all([get().bootstrap(), get().runScreen()]);
+        // Also refresh the DB-selector: the imported DB is now the active dataset
+        // (and may be newly listed).
+        await Promise.all([get().bootstrap(), get().runScreen(), get().probeDatabases()]);
       } catch (e) {
         patch({ running: false, error: (e as Error).message });
+      }
+    },
+
+    // ---- dev-only DB-selector (STORY-035) ----
+    // Discover the selectable DBs + which dataset is active. Silent on failure
+    // (dev tools off / service down) so the picker just never appears.
+    probeDatabases: async () => {
+      const resp = await client.databases().catch(() => null);
+      if (!resp) return; // dev tools off / service down — leave available=false
+      set((s) => ({ dbSelector: { ...s.dbSelector,
+        available: true,
+        databases: resp.databases,
+        activeKind: resp.activeKind,
+        activePath: resp.activePath,
+        error: null,
+      } }));
+    },
+    // Switch the active dataset, then refresh facts + the active screen so the UI
+    // reflects the new data. `path === null` switches back to the synthetic
+    // generator. Mirrors runDevImport's post-swap refresh.
+    selectDatabase: async (path) => {
+      const patch = (p: Partial<DbSelectorState>) => set((s) => ({ dbSelector: { ...s.dbSelector, ...p } }));
+      patch({ switching: true, error: null });
+      try {
+        const report = await client.activateDatabase(path === null ? { synthetic: true } : { path });
+        patch({ switching: false, activeKind: report.activeKind, activePath: report.activePath });
+        await Promise.all([get().bootstrap(), get().runScreen(), get().probeDatabases()]);
+      } catch (e) {
+        patch({ switching: false, error: (e as Error).message });
       }
     },
 

@@ -50,6 +50,8 @@ function fakeClient(overrides: Partial<MarketClient> = {}): FakeClient {
     backtest: async () => null,
     devImportOptions: async () => null,
     devImport: async () => ({ files: 0, instruments: 0, bars: 0, skipped: 0, errors: [], targetDb: '', universe: 0 }),
+    databases: async () => null,
+    activateDatabase: async () => ({ activeKind: 'synthetic', activePath: null, universe: 0 }),
     ...overrides,
   };
 }

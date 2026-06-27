@@ -17,6 +17,8 @@ export default defineConfig({
       '/instrument': SCREEN_API,
       '/facts': SCREEN_API,
       '/metrics': SCREEN_API,
+      // Dev-only EOD import surface (DEV_TOOLS); 404s when the flag is off.
+      '/dev': SCREEN_API,
     },
   },
 })

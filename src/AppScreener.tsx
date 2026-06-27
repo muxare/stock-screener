@@ -9,6 +9,7 @@ import { BacktestModal } from './components/modals/BacktestModal';
 import { IndicatorBuilderModal } from './components/modals/IndicatorBuilderModal';
 import { ScreenBuilderModal } from './components/modals/ScreenBuilderModal';
 import { PresetBuilderModal } from './components/modals/PresetBuilderModal';
+import { DevImportModal } from './components/modals/DevImportModal';
 
 // Full screener — assembled from the feature components. Mirrors the POC root.
 export function AppScreener() {
@@ -33,6 +34,7 @@ export function AppScreener() {
       <CompareBar />
       <CompareDrawer />
       <BacktestModal />
+      <DevImportModal />
 
       {!ready && (
         <div style={{ position: 'fixed', inset: 0, background: '#f4f5f6', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 80 }}>

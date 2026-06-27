@@ -15,7 +15,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { EodDatabase } from '../../../tools/eod-import/db.ts';
 import type { ParsedBar } from '../../../tools/eod-import/parse.ts';
 import { sqliteProvider } from './sqlite.ts';
-import { providerFromEnv } from '../../../server/universe.ts';
+import { providerFromEnv, rememberDevDb } from '../../../server/universe.ts';
 import { buildUniverse } from '../market.ts';
 
 // AAPL bars are deliberately written OUT of chronological order to prove the
@@ -76,6 +76,18 @@ describe('sqliteProvider', () => {
     expect(Object.keys(aapl.bars[0]).sort()).toEqual(['c', 'h', 'l', 'o', 'v']);
   });
 
+  it('returns calendar dates as a parallel array aligned with the chronological bars', () => {
+    const p = sqliteProvider(dbPath);
+    const aapl = p.getInstrument('AAPL')!;
+    // dates ascend with the bars (the chart labels its axis from these), and the
+    // array is the same length as `bars` so the two stay index-aligned.
+    expect(aapl.dates).toEqual(['2024-01-01', '2024-01-02', '2024-01-03']);
+    expect(aapl.dates).toHaveLength(aapl.bars.length);
+    // getUniverse carries the same parallel dates as getInstrument.
+    const fromUniverse = p.getUniverse().find((i) => i.ticker === 'AAPL')!;
+    expect(fromUniverse.dates).toEqual(aapl.dates);
+  });
+
   it('getInstrument returns metadata + bars, or null for an unknown ticker', () => {
     const p = sqliteProvider(dbPath);
     const msft = p.getInstrument('MSFT');
@@ -134,5 +146,28 @@ describe('providerFromEnv (service seam)', () => {
     // the synthetic universe is the 44-name mulberry32 fixture, not our 2 names
     expect(p.getUniverse().length).toBeGreaterThan(2);
     expect(p.getInstrument('AAPL')).not.toBeNull();
+  });
+
+  // STORY-031: an import persists its DB via the dev "active dataset" pointer so
+  // the imported data survives a restart instead of reverting to synthetic.
+  it('boots from the persisted dev dataset when DEV_TOOLS is on and a pointer exists', () => {
+    const pointer = join(dir, '.dev-active-db');
+    rememberDevDb(dbPath, pointer);
+    const p = providerFromEnv({ DEV_TOOLS: '1' } as NodeJS.ProcessEnv, pointer);
+    expect(p.getUniverse().map((i) => i.ticker)).toEqual(['AAPL', 'MSFT']);
+  });
+
+  it('ignores the pointer when DEV_TOOLS is off (no silent prod downgrade)', () => {
+    const pointer = join(dir, '.dev-active-db');
+    rememberDevDb(dbPath, pointer);
+    const p = providerFromEnv({} as NodeJS.ProcessEnv, pointer);
+    expect(p.getUniverse().length).toBeGreaterThan(2); // synthetic, not our 2 names
+  });
+
+  it('falls back to synthetic when the pointer references a deleted DB', () => {
+    const pointer = join(dir, '.dev-active-db');
+    rememberDevDb(join(dir, 'gone.db'), pointer);
+    const p = providerFromEnv({ DEV_TOOLS: '1' } as NodeJS.ProcessEnv, pointer);
+    expect(p.getUniverse().length).toBeGreaterThan(2);
   });
 });

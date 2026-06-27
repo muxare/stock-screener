@@ -12,6 +12,15 @@ dist
 dist-ssr
 *.local
 
+# Dev EOD-import target DB (STORY-031) and local SQLite market-data builds
+dev-market.db
+*.db
+# SQLite WAL/SHM sidecar files (regenerated alongside the DB)
+*.db-shm
+*.db-wal
+# Pointer to the last-imported dev dataset (STORY-031) — local state, regenerable
+.dev-active-db
+
 # Claude Code personal settings
 .claude/settings.local.json
 

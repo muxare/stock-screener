@@ -34,6 +34,11 @@ export interface OHLC {
   l: number[];
   c: number[];
   v?: number[];
+  // ISO 'YYYY-MM-DD' calendar date per bar, parallel to the OHLC arrays. The
+  // engine never reads it (it has no notion of "today", ADR-002); it is carried
+  // through solely so the detail chart can label the real trading days instead
+  // of fabricating them. Optional: legacy fixtures that omit dates still build.
+  d?: string[];
 }
 
 // per-bar snapshot used by the legacy num/flag/ema rule path
@@ -362,6 +367,11 @@ export interface InstrumentBars {
   name: string;
   sector: string;
   bars: Bar[];
+  // Calendar dates ('YYYY-MM-DD') parallel to `bars`, in the same chronological
+  // order. Kept beside `bars` rather than inside `Bar` so the engine `Bar` stays
+  // pure OHLCV (SAD#6.1); only the detail chart consumes it. Optional so existing
+  // providers/fixtures that predate it still satisfy the contract.
+  dates?: string[];
 }
 
 // Build the full set of Stocks (with computed indicators) from adjusted bars.
@@ -370,7 +380,7 @@ export function buildUniverse(instruments: InstrumentBars[]): Stock[] {
 }
 
 // Build one Stock — all indicator math + snapshots — from its metadata + bars.
-export function buildStock({ ticker, name, sector, bars }: InstrumentBars): Stock {
+export function buildStock({ ticker, name, sector, bars, dates }: InstrumentBars): Stock {
   {
     const closes = bars.map(b => b.c);
     const vols = bars.map(b => b.v);
@@ -450,7 +460,7 @@ export function buildStock({ ticker, name, sector, bars }: InstrumentBars): Stoc
       },
       snapAt: (i: number) => snap(closes.length - VISIBLE + i), // map visible idx -> snapshot
       snapAbs: snap,                                            // snapshot at any absolute bar index
-      full: { o: bars.map(b => b.o), h: bars.map(b => b.h), l: bars.map(b => b.l), c: closes.slice(), v: vols },
+      full: { o: bars.map(b => b.o), h: bars.map(b => b.h), l: bars.map(b => b.l), c: closes.slice(), v: vols, d: dates },
       nLast: closes.length - 1,
       visStart: closes.length - VISIBLE,
       indExtra,

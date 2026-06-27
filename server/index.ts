@@ -22,9 +22,16 @@ import type { UniverseStore } from './universe.ts';
 import { handleScreen, handleBacktest, handleFacets, RequestError } from './handlers.ts';
 import type { ScreenRequest, BacktestRequest } from './handlers.ts';
 import { metrics } from './metrics.ts';
+import { devToolsEnabled, listImportOptions, runDevImport } from './devImport.ts';
+import type { DevImportRequest } from './devImport.ts';
+import { listDatabases, activateDatabase } from './devDataset.ts';
+import type { ActivateRequest } from './devDataset.ts';
 import type { Stock } from '../src/lib/market.ts';
 
 const MAX_BODY_BYTES = 1 << 20; // 1 MiB — rule sets are small
+// Dev-import requests can carry uploaded CSV contents (DEV_TOOLS only), so they
+// need a far larger ceiling than the tiny rule-set bodies the API normally sees.
+const MAX_IMPORT_BODY_BYTES = 64 << 20; // 64 MiB
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
@@ -32,13 +39,13 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(payload);
 }
 
-function readJsonBody(req: IncomingMessage): Promise<unknown> {
+function readJsonBody(req: IncomingMessage, maxBytes: number = MAX_BODY_BYTES): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
     req.on('data', (chunk: Buffer) => {
       size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
+      if (size > maxBytes) {
         reject(new RequestError('request body too large'));
         req.destroy();
         return;
@@ -93,8 +100,47 @@ function runBacktestStream(res: ServerResponse, universe: Stock[], req: Backtest
 }
 
 export function createScreenServer(store: UniverseStore = productionUniverse) {
+  // DEV/TEST ONLY (SAD#8.7): the EOD-import surface exists only when DEV_TOOLS is
+  // set. Resolved once at server creation — the flag does not change at runtime.
+  const devOn = devToolsEnabled();
   return createServer((req: IncomingMessage, res: ServerResponse) => {
     const url = req.url ?? '/';
+
+    // Dev-only data tooling (STORY-031 import + STORY-035 DB-selector). Gated:
+    // when DEV_TOOLS is off these paths simply fall through to the 404 below, so
+    // the feature cannot exist in a production deployment.
+    if (devOn && url.startsWith('/dev/')) {
+      // EOD CSV import from the UI (STORY-031): build a SQLite DB and switch onto it.
+      if (req.method === 'GET' && url === '/dev/import/options') {
+        sendJson(res, 200, listImportOptions());
+        return;
+      }
+      if (req.method === 'POST' && url === '/dev/import') {
+        readJsonBody(req, MAX_IMPORT_BODY_BYTES)
+          .then((body) => sendJson(res, 200, runDevImport(body as DevImportRequest, store)))
+          .catch((err: unknown) => {
+            if (err instanceof RequestError) sendJson(res, 400, { error: err.message });
+            else sendJson(res, 500, { error: 'internal error' });
+          });
+        return;
+      }
+
+      // DB-selector (STORY-035): list already-built DBs and switch the active one
+      // at runtime (no import, no restart) — a provider swap behind the port.
+      if (req.method === 'GET' && url === '/dev/databases') {
+        sendJson(res, 200, listDatabases(store));
+        return;
+      }
+      if (req.method === 'POST' && url === '/dev/databases/activate') {
+        readJsonBody(req)
+          .then((body) => sendJson(res, 200, activateDatabase(body as ActivateRequest, store)))
+          .catch((err: unknown) => {
+            if (err instanceof RequestError) sendJson(res, 400, { error: err.message });
+            else sendJson(res, 500, { error: 'internal error' });
+          });
+        return;
+      }
+    }
 
     if (req.method === 'GET' && url === '/health') {
       sendJson(res, 200, { ok: true, universe: store.get().length });
