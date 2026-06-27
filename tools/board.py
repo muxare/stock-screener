@@ -62,8 +62,13 @@ BATCH_TEMPLATE = os.path.join(BATCHES, "BATCH.template.md")
 # Optional ledger of SAD#3 capabilities consciously NOT scheduled yet, so the
 # coverage invariant (#10) can tell "deferred on purpose" from "silently dropped".
 DEFERRED_CAPS = os.path.join(ROOT, "backlog", "deferred-capabilities.md")
-ANCHOR_RE = re.compile(r"SAD#\d+(?:\.\d+)*")
-CAPABILITY_RE = re.compile(r"### SAD#3(?:\.\d+)?\s+([\w.*-]+):")
+# Anchors may be document-qualified (`SAD-002#5.1`) now that multiple SADs
+# coexist, or bare (`SAD#5.1`) for the original single-SAD backlog. Both forms
+# are recognised everywhere refs and capabilities are parsed.
+ANCHOR_RE = re.compile(r"(?:SAD-\d{3}#|SAD#)\d+(?:\.\d+)*")
+CAPABILITY_RE = re.compile(r"### (?:SAD-\d{3}#|SAD#)3(?:\.\d+)?\s+([\w.*-]+):")
+# Predicate for an individual sad_ref token (qualified or bare).
+SAD_REF_RE = re.compile(r"^SAD(?:-\d{3})?#")
 IDEA_ID = re.compile(r"^IDEA-\d{3}$")
 PLAN_ID = re.compile(r"^PLAN-\d{3}$")
 SAD_ID = re.compile(r"^SAD-\d{3}$")
@@ -164,10 +169,10 @@ def parse_sad_refs(value):
         return []
     if v.startswith("[") and v.endswith("]"):
         return [p.strip() for p in v[1:-1].split(",")
-                if p.strip().startswith("SAD#")]
+                if SAD_REF_RE.match(p.strip())]
     if "," in v:
-        return [p.strip() for p in v.split(",") if p.strip().startswith("SAD#")]
-    return [v] if v.startswith("SAD#") else []
+        return [p.strip() for p in v.split(",") if SAD_REF_RE.match(p.strip())]
+    return [v] if SAD_REF_RE.match(v) else []
 
 
 def sad_refs_nonempty(fm):
@@ -416,7 +421,8 @@ def sad_out_of_scope_tokens(text):
     `mulberry32`, `<x-dc>`). A token must look like a real identifier/path —
     plain English in backticks is ignored to avoid false positives.
     """
-    m = re.search(r"###\s*SAD#1\.2\b.*?\n(.*?)(\n###|\n##\s|\Z)", text, re.DOTALL)
+    m = re.search(r"###\s*(?:SAD-\d{3}#|SAD#)1\.2\b.*?\n(.*?)(\n###|\n##\s|\Z)",
+                  text, re.DOTALL)
     if not m:
         return set()
     tokens = set()
@@ -1168,11 +1174,11 @@ def cmd_validate(args):
     story_caps = set()
     sad_files = list_sad_files()
     sad_id = getattr(args, "sad", None)
-    if len(sad_files) > 1 and not sad_id:
-        problems.append(
-            "multiple SAD files in backlog/sad/; pass --sad SAD-NNN to validate"
-        )
-    elif sad_id and not os.path.exists(sad_file_path(sad_id)):
+    # Multi-SAD aware: each story is validated against the SAD that governs it
+    # (resolved via feature → epic → sad), so several SADs can coexist and a
+    # bare `validate` checks every story against its own contract. `--sad` still
+    # scopes the coverage report (and Draft-status warning) to one SAD.
+    if sad_id and not os.path.exists(sad_file_path(sad_id)):
         problems.append(f"{sad_id}: SAD file not found in backlog/sad/")
 
     # Gate 3 + WIP (#6, #7): at most one active batch, and in-progress within cap.
@@ -1260,51 +1266,94 @@ def cmd_validate(args):
             warnings.append(f"{fm.get('id','?')}: has a stale `## Status` section "
                             f"(removed in Phase 4 — the column is the status)")
 
-    sad_text = load_sad_content(sad_id)
-    if sad_text:
-        anchors = sad_anchors(sad_text)
-        caps = sad_capabilities(sad_text)
+    deferred = deferred_capabilities()
+    _sad_info = {}
+
+    def sad_info(sid_):
+        """(anchors, caps, oos_tokens, status) for a SAD id, or None. Cached."""
+        if not sid_:
+            return None
+        if sid_ not in _sad_info:
+            path = sad_file_path(sid_)
+            if os.path.exists(path):
+                with open(path, encoding="utf-8") as f:
+                    txt = f.read()
+                _sad_info[sid_] = (sad_anchors(txt), sad_capabilities(txt),
+                                   sad_out_of_scope_tokens(txt), sad_status(txt))
+            else:
+                _sad_info[sid_] = None
+        return _sad_info[sid_]
+
+    # Per-story checks against the story's OWN governing SAD (resolved via the
+    # feature → epic → sad chain; falls back to the explicit --sad SAD when the
+    # chain can't be resolved). Capabilities found are tallied per SAD so the
+    # coverage check below counts only stories that belong to that contract.
+    covered_by_sad = {}
+    for fm in stories:
+        ssid = story_sad_id(fm) or sad_id
+        info = sad_info(ssid)
+        if not info:
+            continue
+        anchors, caps, oos_tokens, _status = info
+        sid = fm.get("id", "?")
+        for ref in parse_sad_refs(fm.get("sad_refs")):
+            if ref not in anchors:
+                problems.append(f"{sid}: dangling sad_ref {ref}")
+        cap = (fm.get("capability") or "").strip()
+        if cap and cap not in SENTINELS:
+            if caps and cap not in caps:
+                problems.append(f"{sid}: unknown capability {cap}")
+            else:
+                covered_by_sad.setdefault(ssid, set()).add(cap)
+        # SAD#1.2 out-of-scope guard (#10): a story may not aim its Touch
+        # scope at an artifact its SAD explicitly excludes.
+        if oos_tokens:
+            _, sbody = read_story(fm["_path"])
+            for g in touch_scope(sbody):
+                segs = set(re.split(r"[/*]+", g)) | {g}
+                hit = oos_tokens & {s for s in segs if s}
+                if hit:
+                    problems.append(f"{sid}: Touch scope targets out-of-scope "
+                                    f"(SAD#1.2) artifact {', '.join(sorted(hit))}")
+
+    # Coverage (#10) + Draft-status warning, run per target SAD: the explicit
+    # --sad one, else every SAD on disk.
+    target_sads = ([sad_id] if sad_id
+                   else [os.path.splitext(os.path.basename(p))[0] for p in sad_files])
+    for tsid in target_sads:
+        info = sad_info(tsid)
+        if not info:
+            continue
+        anchors, caps, _oos, status = info
         # Gate 2 (#10): a non-Approved SAD is decomposed/built at your own risk.
         # Surfaced as a warning, not a hard block, so continuous validate stays
         # green while a Draft SAD is being worked.
-        status = sad_status(sad_text)
         if status and status != "Approved":
-            warnings.append(f"governing SAD is '{status}', not Approved "
+            warnings.append(f"governing SAD {tsid} is '{status}', not Approved "
                             f"(Gate 2: architecture not signed off)")
-        oos_tokens = sad_out_of_scope_tokens(sad_text)
-        deferred = deferred_capabilities()
-        for fm in stories:
-            sid = fm.get("id", "?")
-            for ref in parse_sad_refs(fm.get("sad_refs")):
-                if ref not in anchors:
-                    problems.append(f"{sid}: dangling sad_ref {ref}")
-            cap = (fm.get("capability") or "").strip()
-            if cap and cap not in SENTINELS and caps and cap not in caps:
-                problems.append(f"{sid}: unknown capability {cap}")
-            # SAD#1.2 out-of-scope guard (#10): a story may not aim its Touch
-            # scope at an artifact the SAD explicitly excludes.
-            if oos_tokens:
-                _, sbody = read_story(fm["_path"])
-                for g in touch_scope(sbody):
-                    segs = set(re.split(r"[/*]+", g)) | {g}
-                    hit = oos_tokens & {s for s in segs if s}
-                    if hit:
-                        problems.append(f"{sid}: Touch scope targets out-of-scope "
-                                        f"(SAD#1.2) artifact {', '.join(sorted(hit))}")
+        covered = covered_by_sad.get(tsid, set())
         if stories and caps:
             for cap in sorted(caps):
-                if cap in story_caps:
+                if cap in covered:
                     continue
                 if cap in deferred:
                     warnings.append(f"capability {cap}: no story yet — deferred "
                                     f"({deferred[cap] or 'see deferred-capabilities.md'})")
                 else:
                     problems.append(f"capability {cap}: no story coverage")
-        for fm, _ in actives:
-            bid = fm.get("id", "?")
-            for cap in batch_capabilities(fm):
-                if caps and cap not in caps:
-                    problems.append(f"{bid}: unknown capability {cap} (not a SAD#3 cap)")
+    # Batch capabilities are validated against EVERY SAD on disk — a batch may
+    # commit work spanning more than one contract, so scoping to --sad here
+    # would wrongly flag the others.
+    all_caps = set()
+    for p in sad_files:
+        info = sad_info(os.path.splitext(os.path.basename(p))[0])
+        if info:
+            all_caps |= info[1]
+    for fm, _ in actives:
+        bid = fm.get("id", "?")
+        for cap in batch_capabilities(fm):
+            if all_caps and cap not in all_caps:
+                problems.append(f"{bid}: unknown capability {cap} (not a SAD#3 cap)")
 
     if warnings:
         print("WARNINGS (non-blocking):")
