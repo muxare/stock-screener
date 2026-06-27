@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+import { create, type StateCreator } from 'zustand';
 import * as M from './lib/market';
 import type {
   Stock,
@@ -7,115 +7,34 @@ import type {
   Rule,
   Screen,
   Preset,
-  InstrumentBars,
   BacktestResult,
 } from './lib/market';
+import { httpMarketClient } from './lib/client/marketClient';
+import type {
+  MarketClient,
+  Row,
+  ImportConfigOption,
+  ImportDataEntry,
+  DevImportRequest,
+  DevImportReport,
+} from './lib/client/marketClient';
 
 // ----------------------------------------------------------------------------
-// Screening-service client (SAD#4.2, consumed by the SAD#4.1 web client).
-// The browser no longer builds or evaluates the full universe (SAD#2.5); it
-// asks the Node service over same-origin HTTP/JSON (vite proxies the paths in
-// dev). Full-universe screens and backtests run server-side over the shared
-// engine; the client computes locally only for the names it displays.
+// All client-to-service HTTP now lives behind the SAD#4.1 `MarketClient` seam
+// (src/lib/client/marketClient.ts, STORY-035); the store consumes an injected
+// client rather than calling `fetch` directly. The browser still never builds
+// or evaluates the full universe (SAD#2.5): full-universe screens and backtests
+// run server-side over the shared engine, and the client computes locally only
+// for the names it displays.
+//
+// Transport DTOs that other modules referenced (`Row` and the dev-import shapes)
+// are re-exported here so existing imports from `./store` keep working.
 // ----------------------------------------------------------------------------
+export type { Row, ImportConfigOption, ImportDataEntry, DevImportReport };
 
-// Per-match row returned by /screen — mirrors `ScreenRow` in server/screen.ts.
-// Carries the scalars the results table renders plus the 40-day sparkline, so a
-// row draws without fetching that name's bars.
-export interface Row {
-  ticker: string;
-  name: string;
-  sector: string;
-  price: number;
-  changePct: number;
-  rsi: number;
-  macdHist: number;
-  stochK: number;
-  relVol: number;
-  ema20: number;
-  ema50: number;
-  ema200: number;
-  pct52w: number;
-  sparkline: number[];
-}
-interface ScreenResp {
-  total: number;
-  count: number;
-  offset: number;
-  limit: number;
-  elapsedMs: number;
-  tickers: string[];
-  results: Row[];
-}
 // `limit: 0` returns the full `total` + `tickers` with no row payload — used for
 // match counts and rank pass-sets. The main screen passes ALL to get the rows.
 const ALL_ROWS = 1_000_000;
-
-async function apiScreen(rules: Rule[], limit = 0, signal?: AbortSignal): Promise<ScreenResp> {
-  const res = await fetch('/screen', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ rules, limit }),
-    signal,
-  });
-  if (!res.ok) throw new Error('screen failed: ' + res.status);
-  return res.json() as Promise<ScreenResp>;
-}
-
-// Universe facts only (STORY-028): count + sector facets with NO per-name row
-// payload. `bootstrap` used to pull a full `ALL_ROWS` screen just to read the
-// total and distinct sectors, downloading every row + its 40-point sparkline for
-// nothing; `/facts` returns just the scalars the load path needs.
-interface FactsResp {
-  total: number;
-  sectors: string[];
-  sample: string | null;
-}
-
-async function apiFacts(signal?: AbortSignal): Promise<FactsResp> {
-  const res = await fetch('/facts', { signal });
-  if (!res.ok) throw new Error('facts failed: ' + res.status);
-  return res.json() as Promise<FactsResp>;
-}
-
-async function apiInstrument(ticker: string): Promise<InstrumentBars | null> {
-  const res = await fetch('/instrument/' + encodeURIComponent(ticker));
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error('instrument failed: ' + res.status);
-  return res.json() as Promise<InstrumentBars>;
-}
-
-// NDJSON stream (SAD#2.4): throttled `progress` lines, then one `result` line
-// carrying the single summary payload (SAD#6.5).
-async function apiBacktest(rules: Rule[], onProgress?: (pct: number) => void, signal?: AbortSignal): Promise<BacktestResult | null> {
-  const res = await fetch('/backtest', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ rules }),
-    signal,
-  });
-  if (!res.ok || !res.body) throw new Error('backtest failed: ' + res.status);
-  const reader = res.body.getReader();
-  const dec = new TextDecoder();
-  let buf = '';
-  let result: BacktestResult | null = null;
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    let nl: number;
-    while ((nl = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, nl).trim();
-      buf = buf.slice(nl + 1);
-      if (!line) continue;
-      const msg = JSON.parse(line) as { type: string; pct?: number; error?: string } & Record<string, unknown>;
-      if (msg.type === 'progress') onProgress?.(msg.pct ?? 0);
-      else if (msg.type === 'result') result = msg as unknown as BacktestResult;
-      else if (msg.type === 'error') throw new Error(String(msg.error));
-    }
-  }
-  return result;
-}
 
 // ----------------------------------------------------------------------------
 // This store is a faithful port of the POC's single `class Component extends
@@ -260,6 +179,33 @@ function replaceIndInRule(rule: Rule, id: string, newInd: IndicatorDef): Rule {
 
 // ----------------------------------------------------------------------------
 
+// ---------- dev-only EOD import (STORY-031) ----------
+// The wire DTOs (ImportConfigOption / ImportDataEntry / ImportOptionsResp /
+// DevImportRequest / DevImportReport) live in the MarketClient seam; this slice
+// is the UI state mirror. Present in the bundle but inert unless the service
+// reports DEV_TOOLS on (`devImport.available`).
+export interface DevImportState {
+  available: boolean; // service has DEV_TOOLS on — gates the whole UI
+  open: boolean;
+  // options from the service
+  configs: ImportConfigOption[];
+  dataDir: string;
+  dataEntries: ImportDataEntry[];
+  targetDb: string;
+  // form
+  configName: string;
+  configText: string; // the inline JSON editor's contents
+  configDirty: boolean; // edited away from the file's contents
+  inputMode: 'browse' | 'upload';
+  selectedEntry: string; // browse: absolute path of the chosen file/dir
+  uploads: { name: string; content: string }[]; // upload: staged CSV contents
+  uploadLabel: string; // human summary of the staged upload
+  // run
+  running: boolean;
+  error: string | null;
+  report: DevImportReport | null;
+}
+
 export interface ScreenerState {
   // ---- core state (mirrors POC `state`) ----
   ready: boolean;
@@ -317,6 +263,8 @@ export interface ScreenerState {
   presetName: string;
   presetDesc: string;
   editChip: number | null;
+  // dev-only EOD import (STORY-031) — inert unless the service reports it on
+  devImport: DevImportState;
 
   // ---- lifecycle ----
   init: () => void;
@@ -460,26 +408,47 @@ export interface ScreenerState {
   closeBacktest: () => void;
   toggleHeatmap: () => void;
   toggleAlert: (id: string) => void;
+
+  // ---- dev-only EOD import (STORY-031) ----
+  /** probe the DEV_TOOLS-gated options endpoint; flips devImport.available on success */
+  probeDevImport: () => Promise<void>;
+  openDevImport: () => void;
+  closeDevImport: () => void;
+  selectImportConfig: (name: string) => void;
+  setImportConfigText: (text: string) => void;
+  setImportMode: (mode: 'browse' | 'upload') => void;
+  selectImportEntry: (path: string) => void;
+  setImportUploads: (files: { name: string; content: string }[], label: string) => void;
+  setImportTargetDb: (db: string) => void;
+  /** run the import, then refresh facts + the active screen against the new data */
+  runDevImport: () => Promise<void>;
 }
 
-// Request sequencing (SAD#5.9, STORY-025). The service calls are async, so rapid
-// rule changes / re-runs race: a slower earlier response could overwrite a newer
-// one. Generation counters make the LATEST call the only one allowed to commit
-// state (last-write-wins); an AbortController cancels the superseded in-flight
-// request so we guard/cancel rather than serialize (keeps SAD#2.3 / SAD#2.4
-// budgets). Single store instance, so module scope is the right place (mirrors
-// the `rulesSig` guards in the reactive subscription below).
-let screenGen = 0;
-let screenAbort: AbortController | null = null;
-let btGen = 0;
-let btAbort: AbortController | null = null;
-// The keyed-count refreshers race the same way (review finding 3); each gets its
-// own generation so a slower earlier batch can never overwrite a newer one.
-let presetCountGen = 0;
-let screenCountGen = 0;
-let rankPassGen = 0;
+// Store factory (STORY-035): the store consumes an injected `MarketClient`
+// (default `httpMarketClient()`) so its data flow is unit-testable without a
+// network. `useScreener` below wires the production HTTP client; tests build a
+// store with a fake client. Request sequencing (generation counters + abort
+// controllers) is orchestration, so it lives HERE in the store — not in the
+// pure-transport client (SAD#5.9). They sit in this closure (one set per store
+// instance) rather than module scope so each created store sequences itself.
+export function makeScreenerState(client: MarketClient = httpMarketClient()): StateCreator<ScreenerState> {
+  // Request sequencing (SAD#5.9, STORY-025). The service calls are async, so rapid
+  // rule changes / re-runs race: a slower earlier response could overwrite a newer
+  // one. Generation counters make the LATEST call the only one allowed to commit
+  // state (last-write-wins); an AbortController cancels the superseded in-flight
+  // request so we guard/cancel rather than serialize (keeps SAD#2.3 / SAD#2.4
+  // budgets), mirroring the `rulesSig` guards in the reactive subscription below.
+  let screenGen = 0;
+  let screenAbort: AbortController | null = null;
+  let btGen = 0;
+  let btAbort: AbortController | null = null;
+  // The keyed-count refreshers race the same way (review finding 3); each gets its
+  // own generation so a slower earlier batch can never overwrite a newer one.
+  let presetCountGen = 0;
+  let screenCountGen = 0;
+  let rankPassGen = 0;
 
-export const useScreener = create<ScreenerState>((set, get) => {
+  return (set, get) => {
   const saveView = () => {
     const s = get();
     save(VIEW, { activePreset: s.activePreset, sortKey: s.sortKey, sortDir: s.sortDir, density: s.density, layout: s.layout, sectorFilter: s.sectorFilter });
@@ -549,6 +518,13 @@ export const useScreener = create<ScreenerState>((set, get) => {
     presetName: '',
     presetDesc: '',
     editChip: null,
+    devImport: {
+      available: false, open: false,
+      configs: [], dataDir: '', dataEntries: [], targetDb: '',
+      configName: '', configText: '', configDirty: false,
+      inputMode: 'browse', selectedEntry: '', uploads: [], uploadLabel: '',
+      running: false, error: null, report: null,
+    },
 
     // ---- lifecycle ----
     init: () => {
@@ -576,6 +552,9 @@ export const useScreener = create<ScreenerState>((set, get) => {
       // sample name for the indicator-builder preview (SAD#2.5: displayed-name
       // compute only).
       void get().bootstrap();
+      // Probe the dev-only import surface (STORY-031). Hidden unless DEV_TOOLS is
+      // on server-side; a failure here is silent (the button just never shows).
+      void get().probeDevImport();
     },
 
     // Fetch the universe-wide facts (size, sectors) and a single sample name.
@@ -583,10 +562,10 @@ export const useScreener = create<ScreenerState>((set, get) => {
     // full row payload is pulled just to derive the total and sector list.
     bootstrap: async () => {
       try {
-        const facts = await apiFacts();
+        const facts = await client.facts();
         set({ universeSize: facts.total, sectorList: facts.sectors });
         if (facts.sample) {
-          const bars = await apiInstrument(facts.sample);
+          const bars = await client.instrument(facts.sample);
           if (bars) set({ sampleStock: M.buildStock(bars) });
         }
       } catch { /* service unavailable — leave defaults; runScreen surfaces the error */ }
@@ -609,9 +588,9 @@ export const useScreener = create<ScreenerState>((set, get) => {
     ensureSampleStock: async () => {
       if (get().sampleStock) return;
       try {
-        const facts = await apiFacts();
+        const facts = await client.facts();
         if (get().sampleStock || !facts.sample) return; // raced, or empty universe
-        const bars = await apiInstrument(facts.sample);
+        const bars = await client.instrument(facts.sample);
         if (bars) set({ sampleStock: M.buildStock(bars) });
       } catch { /* still unavailable — preview stays "—"; retries on next open */ }
     },
@@ -1125,7 +1104,7 @@ export const useScreener = create<ScreenerState>((set, get) => {
       // / SAD#2.4); stream progress so the UI thread is never blocked.
       set({ backtestOpen: true, backtestResult: null, backtestError: null, backtestRunning: true, backtestProgress: 0 });
       const failed = () => { if (gen === btGen) set({ backtestRunning: false, backtestError: 'Backtest service unavailable — start it with `node server/index.ts`.' }); };
-      apiBacktest(eff, (pct) => { if (gen === btGen) set({ backtestProgress: pct }); }, ac.signal)
+      client.backtest(eff, (pct) => { if (gen === btGen) set({ backtestProgress: pct }); }, ac.signal)
         // A stream that ends without a `result` line yields null — that is a
         // service failure, not a zero-signal result; surface it as an error so
         // the modal never reports a real run as "never fired" (review finding 1).
@@ -1152,6 +1131,73 @@ export const useScreener = create<ScreenerState>((set, get) => {
       return { alertScreens };
     }),
 
+    // ---- dev-only EOD import (STORY-031) ----
+    // One helper to patch the nested devImport slice without clobbering siblings.
+    probeDevImport: async () => {
+      const opts = await client.devImportOptions().catch(() => null);
+      if (!opts) return; // dev tools off / service down — leave available=false
+      const first = opts.configs[0];
+      set((s) => ({ devImport: { ...s.devImport,
+        available: true,
+        configs: opts.configs,
+        dataDir: opts.dataDir,
+        dataEntries: opts.dataEntries,
+        targetDb: opts.targetDb,
+        configName: first ? first.name : '',
+        configText: first ? JSON.stringify(first.json, null, 2) : '',
+        configDirty: false,
+        selectedEntry: opts.dataEntries[0] ? opts.dataEntries[0].path : '',
+      } }));
+    },
+    openDevImport: () => set((s) => ({ devImport: { ...s.devImport, open: true, error: null } })),
+    closeDevImport: () => set((s) => ({ devImport: { ...s.devImport, open: false } })),
+    selectImportConfig: (name) => set((s) => {
+      const cfg = s.devImport.configs.find((c) => c.name === name);
+      return { devImport: { ...s.devImport,
+        configName: name,
+        configText: cfg ? JSON.stringify(cfg.json, null, 2) : s.devImport.configText,
+        configDirty: false,
+      } };
+    }),
+    setImportConfigText: (text) => set((s) => ({ devImport: { ...s.devImport, configText: text, configDirty: true } })),
+    setImportMode: (mode) => set((s) => ({ devImport: { ...s.devImport, inputMode: mode } })),
+    selectImportEntry: (path) => set((s) => ({ devImport: { ...s.devImport, selectedEntry: path } })),
+    setImportUploads: (files, label) => set((s) => ({ devImport: { ...s.devImport, uploads: files, uploadLabel: label } })),
+    setImportTargetDb: (db) => set((s) => ({ devImport: { ...s.devImport, targetDb: db } })),
+    runDevImport: async () => {
+      const di = get().devImport;
+      const patch = (p: Partial<DevImportState>) => set((s) => ({ devImport: { ...s.devImport, ...p } }));
+
+      // Resolve the (optionally inline-edited) config to send.
+      let configJson: unknown | undefined;
+      if (di.configDirty) {
+        try { configJson = JSON.parse(di.configText); }
+        catch (e) { patch({ error: 'Config JSON is invalid: ' + (e as Error).message, report: null }); return; }
+      }
+
+      const req: DevImportRequest = { configName: di.configName, targetDb: di.targetDb };
+      if (configJson !== undefined) req.configJson = configJson;
+      if (di.inputMode === 'upload') {
+        if (di.uploads.length === 0) { patch({ error: 'Choose one or more CSV files to upload.', report: null }); return; }
+        req.uploads = di.uploads;
+      } else {
+        if (!di.selectedEntry) { patch({ error: 'Choose a file or folder to import.', report: null }); return; }
+        req.inputPath = di.selectedEntry;
+      }
+
+      patch({ running: true, error: null, report: null });
+      try {
+        const report = await client.devImport(req);
+        patch({ running: false, report });
+        // The data underneath changed; refresh the universe facts (of-N + sectors)
+        // and re-run the active screen so results reflect the imported data. The
+        // reactive subscription only fires on rule/preset edits, so this is manual.
+        await Promise.all([get().bootstrap(), get().runScreen()]);
+      } catch (e) {
+        patch({ running: false, error: (e as Error).message });
+      }
+    },
+
     // ---- service data flow (SAD#4.2 / SAD#5.9) ----
     runScreen: async () => {
       // Last-write-wins: stamp this run's generation and cancel the prior in-flight
@@ -1163,7 +1209,7 @@ export const useScreener = create<ScreenerState>((set, get) => {
       screenAbort = ac;
       set({ screenLoading: true, screenError: null });
       try {
-        const r = await apiScreen(get().effectiveRules(), ALL_ROWS, ac.signal);
+        const r = await client.screen(get().effectiveRules(), ALL_ROWS, ac.signal);
         if (gen !== screenGen) return; // superseded by a newer run — drop this result
         // Commit the result AND reconcile the selection against the new match set
         // (STORY-018 finding 6) in one functional set, so a name that is no longer a
@@ -1184,7 +1230,7 @@ export const useScreener = create<ScreenerState>((set, get) => {
     ensureDisplayed: async (ticker) => {
       if (!ticker || get().displayed[ticker]) return;
       try {
-        const bars = await apiInstrument(ticker);
+        const bars = await client.instrument(ticker);
         if (!bars) return;
         const stock = M.buildStock(bars);
         set((s) => ({ displayed: { ...s.displayed, [ticker]: stock } }));
@@ -1194,7 +1240,7 @@ export const useScreener = create<ScreenerState>((set, get) => {
       // null = count unknown (service unreachable). The builders must not render
       // this as "0 matches", which would push the user to broaden a good screen
       // (review finding 2).
-      try { return (await apiScreen(rules, 0)).total; } catch { return null; }
+      try { return (await client.screen(rules, 0)).total; } catch { return null; }
     },
     // These keyed-count refreshers fire from the reactive subscription on rapid
     // preset/screen/rule edits, so they race exactly like runScreen did (review
@@ -1204,13 +1250,13 @@ export const useScreener = create<ScreenerState>((set, get) => {
       const gen = ++presetCountGen;
       const presets = get().presets();
       await Promise.all(presets.map(async (p) => {
-        try { const r = await apiScreen(p.rules, 0); if (gen !== presetCountGen) return; set((s) => ({ presetCounts: { ...s.presetCounts, [p.id]: r.total } })); } catch { /* ignore */ }
+        try { const r = await client.screen(p.rules, 0); if (gen !== presetCountGen) return; set((s) => ({ presetCounts: { ...s.presetCounts, [p.id]: r.total } })); } catch { /* ignore */ }
       }));
     },
     refreshScreenCounts: async () => {
       const gen = ++screenCountGen;
       await Promise.all(get().savedScreens.map(async (scr) => {
-        try { const r = await apiScreen([scr.rule], 0); if (gen !== screenCountGen) return; set((s) => ({ screenCounts: { ...s.screenCounts, [scr.id]: r.total } })); } catch { /* ignore */ }
+        try { const r = await client.screen([scr.rule], 0); if (gen !== screenCountGen) return; set((s) => ({ screenCounts: { ...s.screenCounts, [scr.id]: r.total } })); } catch { /* ignore */ }
       }));
     },
     refreshRankPass: async () => {
@@ -1218,11 +1264,16 @@ export const useScreener = create<ScreenerState>((set, get) => {
       const rankRules = get().customRules.filter((r) => (r as { kind: string }).kind === 'rank');
       await Promise.all(rankRules.map(async (rr) => {
         const sig = JSON.stringify(rr);
-        try { const r = await apiScreen([rr], 0); if (gen !== rankPassGen) return; set((s) => ({ rankTickers: { ...s.rankTickers, [sig]: r.tickers } })); } catch { /* ignore */ }
+        try { const r = await client.screen([rr], 0); if (gen !== rankPassGen) return; set((s) => ({ rankTickers: { ...s.rankTickers, [sig]: r.tickers } })); } catch { /* ignore */ }
       }));
     },
   };
-});
+  };
+}
+
+// Production store: the single client-side source of truth (SAD#5.9), wired to
+// the HTTP MarketClient. `useScreener` is unchanged for callers.
+export const useScreener = create<ScreenerState>(makeScreenerState());
 
 // ----------------------------------------------------------------------------
 // Reactive service sync (SAD#5.9). The store is the single client-side source of
