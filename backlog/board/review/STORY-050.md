@@ -7,10 +7,10 @@ sad_refs: [SAD-003#5.1, SAD-003#3.1, SAD-003#8.3, SAD-003#8.6, SAD-003#2.7, SAD-
 target: ~
 estimate: ~
 work_type: feature
-attempts: 0
+attempts: 1
 prev_column: ~
 blocked_reason: ~
-reject_reason: ~
+base_commit: ee2e5e4efbd80385b77d4142b10ce5199b158d18
 ---
 
 ## User Story
@@ -28,22 +28,22 @@ reporting is STORY-053. Structure it like `tools/eod-import`: pure parse/normali
 functions plus a thin CLI that does I/O.
 
 ## Acceptance Criteria
-- [ ] A function/CLI fetches one ticker's daily bars over a date range from the
+- [x] A function/CLI fetches one ticker's daily bars over a date range from the
       Yahoo **v8 `chart` JSON endpoint** using Node's built-in `fetch` — no
       third-party Yahoo wrapper as a runtime dependency (SAD-003#8.3 / ADR-003).
-- [ ] The response is parsed into normalised daily rows carrying
+- [x] The response is parsed into normalised daily rows carrying
       `date, open, high, low, close, adjClose, volume`, with `adjClose` returned
       **distinct from** raw `close` (the ingest seam maps `adjClose` → `bar.c`;
       that mapping is STORY-051, not here).
-- [ ] The HTTP layer is **injectable**, so tests run against **recorded Yahoo
+- [x] The HTTP layer is **injectable**, so tests run against **recorded Yahoo
       responses** with **no live network call in CI** (SAD-003#8.6 / ADR-006).
-- [ ] Fetching is **polite**: a configurable inter-request delay/batch size and a
+- [x] Fetching is **polite**: a configurable inter-request delay/batch size and a
       bounded **retry/backoff** on transient failures; a test asserts the backoff
       path on a simulated transient error (SAD-003#2.7).
-- [ ] A ticker that ultimately fails to fetch surfaces a structured failure (with
+- [x] A ticker that ultimately fails to fetch surfaces a structured failure (with
       a reason) to the caller — it is **never silently dropped** (the run-level
       coverage policy consumes this; STORY-053).
-- [ ] The module is **server/CLI-only** and never imported by client code; it
+- [x] The module is **server/CLI-only** and never imported by client code; it
       checks in **no secret/credential** (SAD-003#2.5).
 
 ## Architectural Constraints (from SAD)

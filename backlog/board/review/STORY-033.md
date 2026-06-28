@@ -6,10 +6,10 @@ capability: CAP-screen
 sad_refs: [SAD#5.10, SAD#8.7, SAD#8.8]
 target: ~
 estimate: ~
-attempts: 0
+attempts: 1
 prev_column: ~
 blocked_reason: ~
-reject_reason: ~
+base_commit: ee2e5e4efbd80385b77d4142b10ce5199b158d18
 ---
 
 ## User Story
@@ -29,12 +29,12 @@ misconfiguration, not a today-bug — hence a separate story rather than an
 in-scope STORY-032 fix.
 
 ## Acceptance Criteria
-- [ ] In a production environment (e.g. `NODE_ENV=production`), selecting a
+- [x] In a production environment (e.g. `NODE_ENV=production`), selecting a
       dev/test adapter (synthetic, or SQLite via `MARKETDATA_DB`) fails fast with
       a clear error instead of serving dev/test data.
-- [ ] In non-production environments behaviour is unchanged: synthetic by
+- [x] In non-production environments behaviour is unchanged: synthetic by
       default, SQLite when `MARKETDATA_DB` is set.
-- [ ] The guard is covered by a test for both the production-refusal and the
+- [x] The guard is covered by a test for both the production-refusal and the
       dev/test-allowed paths.
 
 ## Architectural Constraints (from SAD)

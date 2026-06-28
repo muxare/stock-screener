@@ -6,19 +6,20 @@ capability: CAP-results
 sad_refs: [SAD#2.7]
 target: ~
 estimate: ~
-attempts: 0
+attempts: 1
 prev_column: ~
 blocked_reason: ~
+base_commit: ee2e5e4efbd80385b77d4142b10ce5199b158d18
 ---
 
 ## User Story
 As a user, I want a not-investment-advice disclosure on every signal surface so that the product's compliance posture is consistent.
 
 ## Acceptance Criteria
-- [ ] A shared disclosure component exists.
-- [ ] It is rendered on the results and detail surfaces (the backtest modal already has it).
-- [ ] Backtest results remain labelled naive/illustrative.
-- [ ] No signal-bearing surface ships without the disclosure (SAD#2.7).
+- [x] A shared disclosure component exists.
+- [x] It is rendered on the results and detail surfaces (the backtest modal already has it).
+- [x] Backtest results remain labelled naive/illustrative.
+- [x] No signal-bearing surface ships without the disclosure (SAD#2.7).
 
 ## Architectural Constraints (from SAD)
 - SAD#2.7 requires the disclosure on every signal surface; centralise it in one component, do not copy strings.
