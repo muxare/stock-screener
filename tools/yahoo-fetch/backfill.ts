@@ -103,7 +103,12 @@ export async function runBackfill(opts: BackfillOptions): Promise<BackfillReport
   const dbPath = resolve(opts.dbPath ?? DEFAULT_YAHOO_DB);
   const configPath = opts.configPath ?? YAHOO_CONFIG;
 
-  const results = await fetchTickers(opts.tickers, opts.range, opts);
+  // De-duplicate the supplied list (positional + --tickers file can repeat a
+  // name): each ticker is fetched once, and `requested`/`succeeded` reflect
+  // distinct names rather than double-counting. The importer upsert would dedupe
+  // the DB regardless, but the run report should not over-report.
+  const tickers = [...new Set(opts.tickers)];
+  const results = await fetchTickers(tickers, opts.range, opts);
 
   const csv = toImporterCsv(results);
   const failures = results.filter((r): r is Extract<FetchResult, { ok: false }> => !r.ok).map((r) => r.failure);
@@ -123,7 +128,7 @@ export async function runBackfill(opts: BackfillOptions): Promise<BackfillReport
     const report = runImport([csvPath], dbPath, config, metadata);
     return {
       dbPath,
-      requested: opts.tickers.length,
+      requested: tickers.length,
       succeeded,
       failures,
       instruments: report.instruments,

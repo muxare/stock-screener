@@ -130,6 +130,27 @@ describe('runBackfill', () => {
     expect(sqliteProvider(dbPath).getInstrument('AAPL')).not.toBeNull();
     expect(sqliteProvider(dbPath).getInstrument('NOPE')).toBeNull();
   });
+
+  it('reports every failure and writes no bars when all tickers fail (no crash, no silent drop)', async () => {
+    const dbPath = join(dir, 'yahoo.db');
+    const report = await runBackfill({ tickers: ['NOPE', 'NOPE2'], range: RANGE, dbPath, http: routedHttp });
+
+    expect(report.requested).toBe(2);
+    expect(report.succeeded).toEqual([]);
+    expect(report.failures.map((f) => f.ticker)).toEqual(['NOPE', 'NOPE2']);
+    expect(report.bars).toBe(0);
+    // An empty-but-valid DB is produced; the unchanged reader serves no names.
+    expect(sqliteProvider(dbPath).getInstrument('NOPE')).toBeNull();
+  });
+
+  it('de-duplicates a repeated ticker: fetched once, reported once', async () => {
+    const dbPath = join(dir, 'yahoo.db');
+    const report = await runBackfill({ tickers: ['AAPL', 'AAPL'], range: RANGE, dbPath, http: routedHttp });
+
+    expect(report.requested).toBe(1); // distinct names, not the supplied length
+    expect(report.succeeded).toEqual(['AAPL']);
+    expect(countBars(dbPath)).toBe(3); // no doubled rows
+  });
 });
 
 // Count bar rows directly (read-only) to assert idempotency.
