@@ -10,7 +10,6 @@ work_type: feature
 attempts: 1
 prev_column: ~
 blocked_reason: ~
-reject_reason: ~
 base_commit: 751d8cc44ba5be339e4593927b67256872d6d682
 ---
 
@@ -30,23 +29,23 @@ column shape (`Company` ticker column, `iso` dates, ignored Dividends/Stock
 Splits).
 
 ## Acceptance Criteria
-- [ ] A backfill run takes a **supplied ticker list** (config/file) + a historical
+- [x] A backfill run takes a **supplied ticker list** (config/file) + a historical
       range, fetches each via STORY-050, and **normalises rows into the importer's
       CSV input**, then runs `tools/eod-import` + `config.yahoo.json` to write the
       DB (SAD-003#8.2 / ADR-002).
-- [ ] `bar.c` is set to Yahoo's **`adjClose`**; `o/h/l` are the raw open/high/low
+- [x] `bar.c` is set to Yahoo's **`adjClose`**; `o/h/l` are the raw open/high/low
       and `v` the raw volume, into the unchanged `instrument`/`bar` schema
       (SAD-003#6.1, SAD-003#8.4 / ADR-004). **No** corporate-action math is added.
-- [ ] The written DB is opened and served by the **existing** `sqliteProvider`
+- [x] The written DB is opened and served by the **existing** `sqliteProvider`
       with **zero changes** to `provider.ts` / `sqlite.ts` / `market.ts` / the
       service handlers; pointing `MARKETDATA_DB` at the Yahoo DB runs the app/screen
       exactly as against synthetic (SAD-003#2.1).
-- [ ] Name/sector are resolved via the importer's existing precedence (CSV column
+- [x] Name/sector are resolved via the importer's existing precedence (CSV column
       → metadata file → default), since the Yahoo response carries none.
-- [ ] The Yahoo DB is written to a **stable, documented path** distinct from the
+- [x] The Yahoo DB is written to a **stable, documented path** distinct from the
       synthetic and golden-master DBs (SAD-003#6.2); re-running the backfill is
       idempotent (upsert on `(ticker, date)`), adding no duplicate rows.
-- [ ] Tests use recorded fetch fixtures (via STORY-050's injectable HTTP); no live
+- [x] Tests use recorded fetch fixtures (via STORY-050's injectable HTTP); no live
       network in CI (ADR-006).
 
 ## Architectural Constraints (from SAD)
