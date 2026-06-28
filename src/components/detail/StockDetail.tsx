@@ -3,6 +3,7 @@ import * as M from '../../lib/market';
 import type { Stock, Rule, IndicatorDef } from '../../lib/market';
 import type { Panels } from '../../store';
 import { HButton } from '../ui/Hoverable';
+import { Disclosure } from '../ui/Disclosure';
 
 // ----------------------------------------------------------------------------
 // Faithful React port of poc/StockDetail.dc.html. The header/tiles/toggles and
@@ -726,6 +727,9 @@ export function StockDetail({ stock, panels, rules, onClose, onTogglePanel, rule
             <div style={{ fontSize: 13, color: '#98a0a8' }}>No filters active — showing the full chart with overlays.</div>
           )}
         </div>
+
+        {/* SAD#2.7 persistent not-investment-advice disclosure (SAD#5.4). */}
+        <Disclosure style={{ padding: '0 22px 22px 22px' }} />
       </div>
     </div>
   );

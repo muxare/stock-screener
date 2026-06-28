@@ -9,6 +9,7 @@ import {
 import { useScreener, type Row } from '../store';
 import { HButton, HDiv } from './ui/Hoverable';
 import { Spark } from './ui/Spark';
+import { Disclosure } from './ui/Disclosure';
 
 const GRID = '156px 92px 84px 62px 86px 78px 74px 96px 104px 92px';
 
@@ -245,6 +246,8 @@ export function Results() {
           {rows.length === 0 && (
             <div style={{ padding: '60px 20px', textAlign: 'center', color: '#aab0b6', fontSize: '14px' }}>No stocks match these filters. Loosen a rule or pick another preset.</div>
           )}
+          {/* SAD#2.7 persistent not-investment-advice disclosure (SAD#5.2). */}
+          <Disclosure style={{ marginTop: 16 }} />
         </div>
       </div>
     </div>

@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import type { Rule } from '../../lib/market';
 import { useScreener } from '../../store';
 import { HButton } from '../ui/Hoverable';
+import { Disclosure } from '../ui/Disclosure';
 
 // ----------------------------------------------------------------------------
 // Faithful port of the POC backtest modal (Stock Screener.dc.html 681–725).
@@ -110,7 +111,7 @@ export function BacktestModal() {
               </div>
             ))}
           </div>
-          <div style={{ fontSize: 11, color: '#aab0b6', lineHeight: 1.5, marginTop: 16 }}>Demo data for illustrating the workflow — not investment advice. Ranking filters are excluded from history.</div>
+          <Disclosure note="Ranking filters are excluded from history." style={{ marginTop: 16 }} />
         </div>
         <div style={{ display: 'flex', padding: '14px 24px 20px', borderTop: '1px solid #f0f1f2' }}>
           <HButton onClick={closeBacktest} style={{ marginLeft: 'auto', padding: '11px 22px', border: 'none', borderRadius: 10, background: '#15171a', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }} hoverStyle={{ background: '#000' }}>Done</HButton>
