@@ -6,10 +6,10 @@ adjusted close — from the Yahoo **v8 `chart` JSON endpoint** (`SAD-003#8.3 /
 ADR-003`) using Node's built-in `fetch`, and normalises the response into daily
 rows. This is the **per-ticker fetch primitive only**.
 
-The downstream pieces are separate stories: the fetch → importer ingest seam is
-STORY-051, the daily post-close append is STORY-052, and run-level coverage /
-freshness reporting is STORY-053. This tool produces the structured per-ticker
-results those stories consume.
+The downstream pieces are separate stories: the daily post-close append is
+STORY-052 and run-level coverage / freshness reporting is STORY-053. This tool
+produces the structured per-ticker results those stories consume. The fetch →
+importer ingest seam (STORY-051) ships here as `backfill.ts` — see below.
 
 ## Scope & assumptions (binding)
 
@@ -41,6 +41,59 @@ failed. The run-level coverage threshold / exit policy is STORY-053.
 | `-t, --to` | End date (inclusive), ISO `YYYY-MM-DD`. **Required.** |
 | `-b, --batch-size` | Tickers fetched concurrently per batch (default 1). |
 | `-d, --delay-ms` | Inter-batch delay in ms (default 0). |
+
+## Backfill → existing importer → SQLite (STORY-051, `SAD-003#5.2`)
+
+`backfill.ts` is the **fetch → import seam** (`CAP-eod-ingest`). Given a
+**supplied** ticker list + a historical range it fetches each ticker (reusing the
+primitive above), **normalises the successful rows into the importer's CSV input**,
+and runs the **existing** `tools/eod-import` with `config.yahoo.json` to land them
+in the `SAD-001#6.1` `instrument`/`bar` schema. Per `ADR-002` it emits the CSV and
+invokes the importer's `runImport` — it never calls the importer's `db.ts` writer,
+so there is exactly **one** idempotent write path.
+
+```sh
+node tools/yahoo-fetch/backfill.ts --from 2024-01-01 --to 2024-02-01 AAPL MSFT
+# or a supplied ticker file (one ticker per line, # comments allowed):
+npm run yahoo:backfill -- --from 2024-01-01 --to 2024-02-01 --tickers universe.txt
+```
+
+| Option | Meaning |
+| --- | --- |
+| `-f, --from` / `-t, --to` | Range (inclusive), ISO `YYYY-MM-DD`. **Required.** |
+| `-T, --tickers` | File of tickers, one per line (`#` comments allowed). |
+| `-o, --out` | Output SQLite DB. Defaults to `yahoo-market.db` (see below). |
+| `-b, --batch-size` / `-d, --delay-ms` | Politeness knobs, as for `yahoo:fetch`. |
+
+**Column mapping** (into the unchanged schema, `SAD-003#6.1` / `ADR-004`):
+
+| Yahoo field | CSV column (`config.yahoo.json`) | DB column |
+| --- | --- | --- |
+| `adjClose` | `Close` | `bar.c` — the **adjusted** close the engine sees |
+| `open` / `high` / `low` | `Open` / `High` / `Low` | `bar.o/h/l` — **raw** |
+| `volume` | `Volume` | `bar.v` — raw |
+| ticker | `Company` | `bar.ticker` / `instrument.ticker` |
+
+No corporate-action arithmetic is performed — only the close is adjusted; raw OHL
+are **not** back-adjusted across splits (the documented `SAD-003#6.1` limitation).
+Name/sector are resolved by the importer's existing precedence (CSV column →
+`config.yahoo.json`'s `metadata.synthetic.json` → default), since Yahoo carries
+neither.
+
+### Output DB path & selection (`SAD-003#6.2`)
+
+The Yahoo-sourced DB defaults to **`yahoo-market.db` at the repo root** — a stable,
+documented path **distinct** from the synthetic generator (which has no file), the
+EOD dev-import default (`dev-market.db`), and golden-master fixtures. It is
+gitignored (`*.db`). Serve it through the **existing** `sqliteProvider` with **no**
+code change by pointing `MARKETDATA_DB` at it:
+
+```sh
+MARKETDATA_DB=yahoo-market.db npm run dev
+```
+
+Re-running a backfill against the same DB is **idempotent** — the importer upserts
+on `(ticker, date)`, so no duplicate rows are added (`SAD-003#2.2`).
 
 ## Politeness (`SAD-003#2.7`)
 

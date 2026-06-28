@@ -9,6 +9,7 @@
     "dev:server": "DEV_TOOLS=1 node --watch server/index.ts",
     "eod:import": "node tools/eod-import/index.ts",
     "yahoo:fetch": "node tools/yahoo-fetch/index.ts",
+    "yahoo:backfill": "node tools/yahoo-fetch/backfill.ts",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
