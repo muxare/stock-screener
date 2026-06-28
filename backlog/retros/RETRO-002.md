@@ -41,3 +41,20 @@ shipped: 5
 | P-1 | `tools/hooks/` SessionStart re-grounding hook (fires `sad-grounding`) | hook | accepted | IDEA-009 |
 | P-2 | `tools/board.py sprint-plan-new` precondition/`note:` handling | tool | accepted | IDEA-010 |
 | P-3 | `tools/board.py validate` companion-file id matcher | tool | accepted | IDEA-011 |
+
+## Carry-forward to next sprint plan
+Explicit handoff for the next `/sprint-plan` (Gate 3). These are not equal-priority
+inbox ideas — order them as below, because the next sprint is the **multi-story DAG
+sprint** (SAD-002, STORY-039–047) and will re-hit the same shared-branch wall this
+sprint papered over with `--skip-review-check`.
+
+1. **IDEA-005 + IDEA-008 (do FIRST, enabler).** The stale-base Gate-4 friction — 3
+   refusals + 2 hard blocks + 3 overrides this sprint. Land the gate fix (per-story
+   commit-range diff *or* enforced worktree isolation) **before** the DAG sprint, or
+   it recurs at higher volume across 9 stories.
+2. **IDEA-009 (do SECOND, enabler).** SessionStart re-grounding hook — unshipped 2
+   sprints running, `sad-grounding` fired 0/5. The DAG sprint runs against a Draft
+   SAD (SAD-002), so per-session re-grounding matters more there than it did here.
+3. **IDEA-010 / IDEA-011 (process hardening, fit as capacity allows).**
+
+STORY-029 stays parked WON'T-DO until **IDEA-003** (terminal board column) is planned.

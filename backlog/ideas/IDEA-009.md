@@ -13,4 +13,6 @@ why: `tools/hooks/` SessionStart re-grounding hook (fires `sad-grounding`)
 
 `tools/hooks/` SessionStart re-grounding hook (fires `sad-grounding`)
 
+**Carry-priority (RETRO-002): #2 for the next `/sprint-plan` (enabler), do before the multi-story DAG sprint (SAD-002, STORY-039–047) — it runs against a Draft SAD where per-session re-grounding matters most. See RETRO-002 § Carry-forward.**
+
 _Capture≠commit: firewalled from the build loop until a human promotes it through Gate 1 (refine → plan → SAD amendment/ADR)._
