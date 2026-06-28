@@ -227,6 +227,114 @@ describe('STORY-027: the app recovers once the service becomes reachable', () =>
   });
 });
 
+// STORY-026 — a displayed name's on-demand /instrument fetch (detail + compare,
+// SAD#5.4) may be slow or fail. Before this story `ensureDisplayed` swallowed the
+// failure, so the detail overlay rendered nothing and the compare drawer silently
+// dropped the column. The per-ticker status in the store (SAD#5.9) is what the
+// detail panel and compare columns read to show a spinner / error+retry instead.
+describe('STORY-026: on-demand displayed-name fetch exposes loading/error state', () => {
+  type ClearableState = { displayed: Record<string, unknown>; displayStatus: Record<string, unknown> };
+  const clear = (useScreener: { setState: (fn: (s: ClearableState) => Partial<ClearableState>) => void }, ...tickers: string[]) =>
+    useScreener.setState((s) => {
+      const displayed = { ...s.displayed }, displayStatus = { ...s.displayStatus };
+      for (const t of tickers) { delete displayed[t]; delete displayStatus[t]; }
+      return { displayed, displayStatus };
+    });
+
+  it('a failing /instrument records an error status instead of silently no-op-ing (AC1, finding 7/8)', async () => {
+    const { useScreener } = await import('../src/store.ts');
+    const ticker = 'NOPE-026';
+    await withStubbedFetch((real) => ((input, init) =>
+      urlOf(input).includes('/instrument/') ? Promise.reject(new Error('simulated outage')) : real(input, init)) as typeof fetch,
+      () => useScreener.getState().ensureDisplayed(ticker));
+    expect(useScreener.getState().displayStatus[ticker]).toBe('error');
+    expect(useScreener.getState().displayed[ticker]).toBeUndefined(); // no half-built Stock
+  });
+
+  it('a 404 (no bars) is an error state, not a loaded blank (AC1)', async () => {
+    const { useScreener } = await import('../src/store.ts');
+    const ticker = 'GONE-026';
+    await withStubbedFetch((real) => ((input, init) =>
+      urlOf(input).includes('/instrument/')
+        ? Promise.resolve({ ok: false, status: 404, json: async () => null } as unknown as Response)
+        : real(input, init)) as typeof fetch,
+      () => useScreener.getState().ensureDisplayed(ticker));
+    expect(useScreener.getState().displayStatus[ticker]).toBe('error');
+  });
+
+  it('marks a name loading while its fetch is in flight, then loaded on success (AC2)', async () => {
+    const { useScreener } = await import('../src/store.ts');
+    const ticker = useScreener.getState().screen!.tickers[0];
+    clear(useScreener, ticker);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const done = withStubbedFetch((real) => ((input, init) =>
+      urlOf(input).includes('/instrument/') ? gate.then(() => real(input, init)) : real(input, init)) as typeof fetch,
+      () => useScreener.getState().ensureDisplayed(ticker));
+    // In flight → the detail/compare loading affordance is driven off this.
+    expect(await waitFor(() => useScreener.getState().displayStatus[ticker] === 'loading')).toBe(true);
+    expect(useScreener.getState().displayed[ticker]).toBeUndefined();
+    release();
+    await done;
+    expect(useScreener.getState().displayStatus[ticker]).toBe('loaded');
+    expect(useScreener.getState().displayed[ticker]!.full.c.length).toBeGreaterThan(0);
+  });
+
+  it('retryDisplayed re-requests a failed name and resolves it on success (AC4)', async () => {
+    const { useScreener } = await import('../src/store.ts');
+    const ticker = useScreener.getState().screen!.tickers[1] ?? useScreener.getState().screen!.tickers[0];
+    clear(useScreener, ticker);
+    // Phase 1 — fetch fails: error state the UI shows with a Retry button.
+    await withStubbedFetch((real) => ((input, init) =>
+      urlOf(input).includes('/instrument/') ? Promise.reject(new Error('simulated outage')) : real(input, init)) as typeof fetch,
+      () => useScreener.getState().ensureDisplayed(ticker));
+    expect(useScreener.getState().displayStatus[ticker]).toBe('error');
+    // Phase 2 — service reachable: retry re-requests and resolves the affordance.
+    useScreener.getState().retryDisplayed(ticker);
+    expect(await waitFor(() => useScreener.getState().displayStatus[ticker] === 'loaded')).toBe(true);
+    expect(useScreener.getState().displayed[ticker]!.full.c.length).toBeGreaterThan(0);
+  });
+
+  it('retryDisplayed is a no-op while a fetch is already in flight (no duplicate /instrument calls)', async () => {
+    const { useScreener } = await import('../src/store.ts');
+    const ticker = useScreener.getState().screen!.tickers[0];
+    clear(useScreener, ticker);
+    let calls = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const done = withStubbedFetch((real) => ((input, init) => {
+      if (urlOf(input).includes('/instrument/')) { calls++; return gate.then(() => real(input, init)); }
+      return real(input, init);
+    }) as typeof fetch, async () => {
+      const p = useScreener.getState().ensureDisplayed(ticker);     // request A — in flight, status 'loading'
+      expect(await waitFor(() => useScreener.getState().displayStatus[ticker] === 'loading')).toBe(true);
+      useScreener.getState().retryDisplayed(ticker);                // must NOT start a second fetch
+      useScreener.getState().retryDisplayed(ticker);
+      release();
+      await p;
+    });
+    await done;
+    expect(calls).toBe(1);                                          // the in-flight guard held — one fetch only
+    expect(useScreener.getState().displayStatus[ticker]).toBe('loaded');
+  });
+
+  it('compare keeps a column per selected name: a failed name stays an error, not a dropped column (AC3, finding 8)', async () => {
+    const { useScreener } = await import('../src/store.ts');
+    const [a, b] = useScreener.getState().screen!.tickers;
+    clear(useScreener, a, b);
+    useScreener.setState({ compareSel: [] });
+    await useScreener.getState().ensureDisplayed(a); // loads
+    await withStubbedFetch((real) => ((input, init) =>
+      urlOf(input).includes('/instrument/' + b) ? Promise.reject(new Error('simulated outage')) : real(input, init)) as typeof fetch,
+      () => useScreener.getState().ensureDisplayed(b)); // fails
+    useScreener.setState({ compareSel: [a, b], compareOpen: true });
+    const st = useScreener.getState();
+    expect(st.compareSel).toEqual([a, b]);     // selection never collapses below the picked set
+    expect(st.displayStatus[a]).toBe('loaded'); // rendered as a data column
+    expect(st.displayStatus[b]).toBe('error');  // rendered as an error column, not dropped
+  });
+});
+
 // STORY-025 — request sequencing in the client store (SAD#5.9). Moving screen &
 // backtest to async service calls removed the synchronous guarantees of the old
 // in-browser compute: responses race, streams overlap, and selection outlives the

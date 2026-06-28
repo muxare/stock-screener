@@ -128,16 +128,52 @@ function CompareColumn({ stock }: { stock: Stock }) {
   );
 }
 
+const spinner = <div style={{ width: 24, height: 24, border: '3px solid #ececef', borderTopColor: '#9aa1a8', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />;
+
+// While a selected name's /instrument fetch is in flight, hold its column with a
+// spinner instead of dropping it — so the drawer never collapses to fewer names
+// than the user picked (STORY-026, SAD#3.12).
+function CompareLoadingColumn({ ticker }: { ticker: string }) {
+  return (
+    <div role="status" aria-live="polite" style={{ flex: 1, minWidth: 0, background: '#fff', padding: '16px 16px 18px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, minHeight: 280, color: '#9aa1a8' }}>
+      <div style={{ fontSize: 18, fontWeight: 700, color: '#15171a' }}>{ticker}</div>
+      {spinner}
+      <div style={{ fontSize: 12.5, fontWeight: 600 }}>Loading…</div>
+    </div>
+  );
+}
+
+// A name whose fetch failed keeps its column as an explicit error with a retry,
+// rather than silently vanishing from the comparison (STORY-026, finding 8).
+function CompareErrorColumn({ ticker }: { ticker: string }) {
+  const retryDisplayed = useScreener((s) => s.retryDisplayed);
+  const toggleCompare = useScreener((s) => s.toggleCompare);
+  return (
+    <div role="alert" style={{ flex: 1, minWidth: 0, background: '#fff', padding: '16px 16px 18px', display: 'flex', flexDirection: 'column', minHeight: 280 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+        <div style={{ fontSize: 18, fontWeight: 700 }}>{ticker}</div>
+        <button onClick={() => toggleCompare(ticker)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#c0c5ca', fontSize: 13 }}>✕</button>
+      </div>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, textAlign: 'center' }}>
+        <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#b3641a' }}>Couldn't load</span>
+        <div style={{ fontSize: 12.5, color: '#a98a52', lineHeight: 1.5 }}>Its data request didn't complete.</div>
+        <button onClick={() => retryDisplayed(ticker)} style={{ marginTop: 2, padding: '6px 14px', border: '1px solid #d9a85a', borderRadius: 8, background: '#fff', color: '#8a6321', fontSize: 12, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer' }}>Retry</button>
+      </div>
+    </div>
+  );
+}
+
 export function CompareDrawer() {
   const compareOpen = useScreener((s) => s.compareOpen);
   const compareSel = useScreener((s) => s.compareSel);
   const displayed = useScreener((s) => s.displayed);
+  const displayStatus = useScreener((s) => s.displayStatus);
   const closeCompare = useScreener((s) => s.closeCompare);
 
   if (!compareOpen || compareSel.length < 2) return null;
-  // Displayed-name bars are fetched on demand (SAD#2.5); a column appears once
-  // its instrument has loaded.
-  const cols = compareSel.map((t) => displayed[t]).filter((s): s is Stock => !!s);
+  // Displayed-name bars are fetched on demand (SAD#2.5). Every selected name
+  // gets a column — loaded, loading, or error — so CAP-compare's ≥2 side-by-side
+  // guarantee (SAD#3.12) holds instead of columns silently disappearing.
 
   return (
     <div onClick={closeCompare} style={{ position: 'fixed', inset: 0, background: 'rgba(20,23,26,0.32)', zIndex: 55, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
@@ -150,7 +186,12 @@ export function CompareDrawer() {
           <button onClick={closeCompare} style={{ width: 34, height: 34, border: '1px solid #ececef', background: '#fff', borderRadius: 8, cursor: 'pointer', fontSize: 16, color: '#6b7280' }}>✕</button>
         </div>
         <div style={{ display: 'flex', gap: 1, background: '#ececef' }}>
-          {cols.map((s) => <CompareColumn key={s.ticker} stock={s} />)}
+          {compareSel.map((t) => {
+            const stock = displayed[t];
+            if (stock) return <CompareColumn key={t} stock={stock} />;
+            if (displayStatus[t] === 'error') return <CompareErrorColumn key={t} ticker={t} />;
+            return <CompareLoadingColumn key={t} ticker={t} />;
+          })}
         </div>
       </div>
     </div>

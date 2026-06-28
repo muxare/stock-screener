@@ -6,9 +6,10 @@ capability: CAP-detail
 sad_refs: [SAD#5.4, SAD#3.12, SAD#2.3]
 target: ~
 estimate: ~
-attempts: 0
+attempts: 1
 prev_column: ~
 blocked_reason: ~
+base_commit: e785f23eaac47dd27c04c453a473da94bea106bf
 ---
 
 ## User Story
@@ -22,19 +23,19 @@ not-yet-landed) fetch renders as silence: the detail overlay returns null and
 Compare drops the column — with no spinner, error, or explanation.
 
 ## Acceptance Criteria
-- [ ] `ensureDisplayed` records a per-ticker status (loading / loaded / error)
+- [x] `ensureDisplayed` records a per-ticker status (loading / loaded / error)
       rather than silently no-op'ing on failure. (`src/store.ts`)
-- [ ] Selecting a row whose `/instrument` fetch is in flight shows a loading
+- [x] Selecting a row whose `/instrument` fetch is in flight shows a loading
       affordance in the detail panel; a fetch that fails shows an error state
       with a retry, not a blank/absent panel. (finding 7 —
       `src/components/detail/DetailPanels.tsx`, overlay + docked)
-- [ ] The Compare drawer never opens under-populated: while selected names are
+- [x] The Compare drawer never opens under-populated: while selected names are
       still loading it shows a loading state, and a name whose fetch failed is
       shown as an error column (or excluded with a visible note) — it never
       silently renders a 1-column or empty "comparison". (finding 8 —
       `src/components/compare/Compare.tsx`)
-- [ ] A retry re-requests the failed name and resolves the affordance on success.
-- [ ] Tests cover detail + compare under a failing/slow `/instrument` fetch.
+- [x] A retry re-requests the failed name and resolves the affordance on success.
+- [x] Tests cover detail + compare under a failing/slow `/instrument` fetch.
 
 ## Architectural Constraints (from SAD)
 - Detail/compare compute locally for the displayed name only (SAD#5.4 / SAD#2.5)

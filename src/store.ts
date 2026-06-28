@@ -115,6 +115,11 @@ export interface Diff {
   alerts: { name: string; count: number }[];
 }
 export type Panels = { ema: boolean; volume: boolean; macd: boolean; rsi: boolean; stoch: boolean; markers: boolean };
+// Per-ticker state for the on-demand /instrument fetch behind detail/compare
+// (STORY-026). A 'loaded' name has its built Stock in `displayed`; this map
+// carries the in-flight and failed states so the UI can show a spinner/error
+// instead of silently rendering nothing.
+export type DisplayStatus = 'loading' | 'loaded' | 'error';
 
 // ---------- localStorage helpers ----------
 function load<T>(key: string, fallback: T): T {
@@ -230,6 +235,7 @@ export interface ScreenerState {
   universeSize: number;     // full-universe count (for the "of N" total)
   sectorList: string[];     // every sector in the universe (sector facets)
   displayed: Record<string, Stock>; // built Stocks for displayed names (detail/compare), fetched on demand
+  displayStatus: Record<string, DisplayStatus>; // per-ticker fetch state for the on-demand bars (loading/error); 'loaded' names live in `displayed` (STORY-026)
   sampleStock: Stock | null;        // a single name for the indicator-builder live preview
   presetCounts: Record<string, number>;  // preset id -> full-universe match count
   screenCounts: Record<string, number>;  // saved-screen id -> full-universe match count
@@ -311,8 +317,11 @@ export interface ScreenerState {
   // ---- service data flow (SAD#4.2 / SAD#5.9) ----
   /** run the active rule set against the service and store the matched rows */
   runScreen: () => Promise<void>;
-  /** fetch one name's bars and build its Stock locally (detail/compare) */
+  /** fetch one name's bars and build its Stock locally (detail/compare); records
+      a per-ticker loading/loaded/error status so a failed fetch is visible (STORY-026) */
   ensureDisplayed: (ticker: string) => Promise<void>;
+  /** clear a failed name's error status and re-request its bars (STORY-026 retry) */
+  retryDisplayed: (ticker: string) => void;
   /** full-universe match count for an ad-hoc rule set (builder previews); null when the service is unreachable */
   previewCount: (rules: Rule[]) => Promise<number | null>;
   refreshPresetCounts: () => Promise<void>;
@@ -494,6 +503,7 @@ export function makeScreenerState(client: MarketClient = httpMarketClient()): St
     universeSize: 0,
     sectorList: [],
     displayed: {},
+    displayStatus: {},
     sampleStock: null,
     presetCounts: {},
     screenCounts: {},
@@ -1289,13 +1299,35 @@ export function makeScreenerState(client: MarketClient = httpMarketClient()): St
       }
     },
     ensureDisplayed: async (ticker) => {
-      if (!ticker || get().displayed[ticker]) return;
+      if (!ticker || get().displayed[ticker]) return;       // already loaded — nothing to do
+      if (get().displayStatus[ticker] === 'loading') return; // a fetch is already in flight
+      // Mark in-flight so detail/compare can show a loading affordance rather
+      // than a blank panel or a silently dropped column (STORY-026, SAD#5.9).
+      set((s) => ({ displayStatus: { ...s.displayStatus, [ticker]: 'loading' } }));
       try {
         const bars = await client.instrument(ticker);
-        if (!bars) return;
+        if (!bars) { // 404 — no such name / no data: an explicit error, not silence
+          set((s) => ({ displayStatus: { ...s.displayStatus, [ticker]: 'error' } }));
+          return;
+        }
         const stock = M.buildStock(bars);
-        set((s) => ({ displayed: { ...s.displayed, [ticker]: stock } }));
-      } catch { /* ignore — detail panel shows its empty state */ }
+        set((s) => ({ displayed: { ...s.displayed, [ticker]: stock }, displayStatus: { ...s.displayStatus, [ticker]: 'loaded' } }));
+      } catch {
+        // network/5xx — surface an error state the UI can retry, don't swallow it
+        set((s) => ({ displayStatus: { ...s.displayStatus, [ticker]: 'error' } }));
+      }
+    },
+    retryDisplayed: (ticker) => {
+      if (!ticker) return;
+      const st = get();
+      if (st.displayed[ticker]) return;                    // already loaded — nothing to retry
+      if (st.displayStatus[ticker] === 'loading') return;  // a fetch is already in flight — don't duplicate it
+      // Only a failed (or never-started) name reaches here. Drop its stale 'error'
+      // so ensureDisplayed re-requests rather than short-circuiting, then fetch.
+      // Guarding on 'loading' above keeps two Retry sources (the detail panel and
+      // the compare column are both mounted) from racing duplicate /instrument calls.
+      set((s) => { const next = { ...s.displayStatus }; delete next[ticker]; return { displayStatus: next }; });
+      void get().ensureDisplayed(ticker);
     },
     previewCount: async (rules) => {
       // null = count unknown (service unreachable). The builders must not render
