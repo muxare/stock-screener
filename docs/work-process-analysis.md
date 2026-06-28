@@ -751,6 +751,31 @@ thin `/`-commands** (no `.claude/agents/` dir exists yet — create it).
 
 ---
 
+## 11. Forward work: leveraging the Claude Code / Anthropic API
+
+_Added 2026-06-27. Analysis only — implementation deliberately deferred._
+
+A separate study (`docs/claude-code-api-leverage.md`) asks where the programmatic Claude
+Code surface (hooks, headless `-p`, the Agent SDK) and the Anthropic API (Batch,
+structured output, context-editing beta) can augment or outsource parts of this system.
+Headline findings, ranked there:
+
+1. **Context is disposable here** — board folders, `events.jsonl`, frontmatter and the SAD
+   already hold the truth, so a **`SessionStart` re-grounding hook** lets the build loop
+   `/clear` between stories and reset from disk instead of growing context until
+   auto-compaction thrashes. _(Highest-value, lowest-risk; do first.)_
+2. **Keep the gates mechanical** — `board.py` and the hooks are deterministic by design;
+   never LLM-ify a gate.
+3. **The one high-value outsource** is making the loop's mandatory code-review pass a
+   *gateable* headless step (`claude -p … --output-format json`) that `board.py move` can
+   require — closing **F2** (defects that slip past the heuristic `review-check`).
+4. **The cadence gap** (`/loop` dies with the session) wants OS-cron / GitHub Actions
+   driving `claude -p`, or `/schedule`, for a cross-session heartbeat.
+
+See that document for the full mapping, what is *not* possible, and the effort/risk table.
+
+---
+
 _Appendix — sources: `.workflow/events.jsonl` (182+ events, 2026-06-22→24); `tools/board.py`,
 `tools/hooks/*`, `.claude/settings.json`; `.claude/skills/{idea-refiner,poc-to-plan,sad-author,
 backlog-decomposer,sad-grounding,story-syncer}/SKILL.md` and matching `.claude/commands/*`;
