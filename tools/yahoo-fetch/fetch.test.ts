@@ -76,6 +76,78 @@ describe('parseChart', () => {
     const parsed = parseChart('<html>429 Too Many Requests</html>');
     expect(parsed).toMatchObject({ ok: false, reason: 'malformed' });
   });
+
+  it('labels the trading date in the exchange timezone, not UTC (gmtoffset)', () => {
+    // An ASX-style listing: open 10:00 AEDT (gmtoffset +39600) for the
+    // 2024-01-03 session is 1704236400 = 2024-01-02T23:00:00Z. Without the
+    // offset the bar would be mislabelled 2024-01-02 (a day early).
+    const body = JSON.stringify({
+      chart: {
+        result: [
+          {
+            meta: { gmtoffset: 39600 },
+            timestamp: [1704236400],
+            indicators: {
+              quote: [{ open: [10], high: [11], low: [9], close: [10.5], volume: [100] }],
+              adjclose: [{ adjclose: [10.2] }],
+            },
+          },
+        ],
+        error: null,
+      },
+    });
+    const parsed = parseChart(body);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.bars[0].date).toBe('2024-01-03');
+  });
+
+  it('falls back adjClose→close for a present row whose adjClose is null (no silent drop)', () => {
+    // OHLCV present but the adjclose series is null/truncated at that index: the
+    // row must still be emitted (SAD-003#2.4), with adjClose == raw close.
+    const body = JSON.stringify({
+      chart: {
+        result: [
+          {
+            meta: { gmtoffset: -18000 },
+            timestamp: [1704205800],
+            indicators: {
+              quote: [{ open: [1], high: [2], low: [0.5], close: [1.5], volume: [10] }],
+              adjclose: [{ adjclose: [null] }],
+            },
+          },
+        ],
+        error: null,
+      },
+    });
+    const parsed = parseChart(body);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.bars).toHaveLength(1);
+    expect(parsed.bars[0]).toMatchObject({ close: 1.5, adjClose: 1.5 });
+  });
+
+  it('keeps a legitimate zero value (volume 0) rather than treating it as missing', () => {
+    const body = JSON.stringify({
+      chart: {
+        result: [
+          {
+            meta: { gmtoffset: -18000 },
+            timestamp: [1704205800],
+            indicators: {
+              quote: [{ open: [1], high: [2], low: [0.5], close: [1.5], volume: [0] }],
+              adjclose: [{ adjclose: [1.4] }],
+            },
+          },
+        ],
+        error: null,
+      },
+    });
+    const parsed = parseChart(body);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.bars[0].volume).toBe(0);
+  });
 });
 
 // ---------- AC: injectable HTTP against a recorded fixture, no live network ----------
@@ -154,6 +226,36 @@ describe('retry/backoff (SAD-003#2.7)', () => {
     if (result.ok) return;
     expect(result.failure).toMatchObject({ reason: 'http-error', attempts: 2, status: 429 });
   });
+
+  it('treats a 403 bot/throttle block as transient and retries it', async () => {
+    const sleeps: number[] = [];
+    let calls = 0;
+    const http: HttpFetch = async () => {
+      calls++;
+      return calls < 2 ? { status: 403, body: '<html>Forbidden</html>' } : { status: 200, body: AAPL_BODY };
+    };
+    const result = await fetchTicker('AAPL', RANGE, {
+      http,
+      maxAttempts: 3,
+      baseDelayMs: 10,
+      sleep: async (ms) => { sleeps.push(ms); },
+    });
+    expect(result.ok).toBe(true); // recovered after the throttle cleared
+    expect(calls).toBe(2);
+    expect(sleeps).toEqual([10]);
+  });
+
+  it('reports a permanent non-2xx as http-error (not malformed) without retrying', async () => {
+    const sleeps: number[] = [];
+    const result = await fetchTicker('AAPL', RANGE, {
+      http: respond(400, '<html>Bad Request</html>'),
+      sleep: async (ms) => { sleeps.push(ms); },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure).toMatchObject({ reason: 'http-error', attempts: 1, status: 400 });
+    expect(sleeps).toHaveLength(0);
+  });
 });
 
 // ---------- AC: polite batching surfaces every ticker (no silent drop) ----------
@@ -177,5 +279,17 @@ describe('fetchTickers (politeness + coverage)', () => {
     expect(results[1]).toMatchObject({ ok: false, ticker: 'BOGUS' });
     // One inter-batch delay between the two single-ticker batches.
     expect(sleeps).toEqual([250]);
+  });
+
+  it('never drops tickers when given an invalid batchSize (defaults to 1)', async () => {
+    const http: HttpFetch = async () => ({ status: 200, body: AAPL_BODY });
+    // NaN here previously made the loop slice nothing and return [] silently.
+    const results = await fetchTickers(['AAPL', 'MSFT', 'GOOG'], RANGE, {
+      http,
+      batchSize: Number('not-a-number'),
+      sleep: async () => {},
+    });
+    expect(results).toHaveLength(3);
+    expect(results.every((r) => r.ok)).toBe(true);
   });
 });

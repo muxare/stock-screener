@@ -25,11 +25,32 @@ interface CliArgs {
 }
 
 function parseIsoDate(raw: string, flag: string): Date {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw.trim());
+  const s = raw.trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
   if (!m) throw new Error(`${flag} must be an ISO date (YYYY-MM-DD), got "${raw}"`);
-  const d = new Date(`${raw}T00:00:00Z`);
-  if (Number.isNaN(d.getTime())) throw new Error(`${flag} is not a valid date: "${raw}"`);
+  const [y, mo, day] = [+m[1], +m[2], +m[3]];
+  const d = new Date(`${s}T00:00:00Z`);
+  // Reject impossible calendar dates: `new Date('2024-02-30…')` rolls over to
+  // Mar 1 rather than failing, which would silently shift the fetch window.
+  if (
+    Number.isNaN(d.getTime()) ||
+    d.getUTCFullYear() !== y ||
+    d.getUTCMonth() !== mo - 1 ||
+    d.getUTCDate() !== day
+  ) {
+    throw new Error(`${flag} is not a valid calendar date: "${raw}"`);
+  }
   return d;
+}
+
+// Parse an integer CLI flag, rejecting NaN/garbage so a bad value never reaches
+// the fetch loop (where a non-numeric batch size would otherwise no-op).
+function parseIntFlag(raw: string | undefined, flag: string, min: number): number {
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < min) {
+    throw new Error(`${flag} must be an integer >= ${min}, got "${raw}"`);
+  }
+  return n;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -42,8 +63,8 @@ function parseArgs(argv: string[]): CliArgs {
     const a = argv[i];
     if (a === '--from' || a === '-f') from = parseIsoDate(argv[++i], '--from');
     else if (a === '--to' || a === '-t') to = parseIsoDate(argv[++i], '--to');
-    else if (a === '--batch-size' || a === '-b') batchSize = Number(argv[++i]);
-    else if (a === '--delay-ms' || a === '-d') delayMs = Number(argv[++i]);
+    else if (a === '--batch-size' || a === '-b') batchSize = parseIntFlag(argv[++i], '--batch-size', 1);
+    else if (a === '--delay-ms' || a === '-d') delayMs = parseIntFlag(argv[++i], '--delay-ms', 0);
     else if (a === '--help' || a === '-h') { printUsage(); process.exit(0); }
     else if (a.startsWith('-')) throw new Error(`unknown flag: ${a}`);
     else tickers.push(a.toUpperCase());
