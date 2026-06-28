@@ -1,7 +1,7 @@
 ---
 id: BATCH-001
 type: batch
-status: active
+status: closed
 created: 2026-06-26
 wip_limit: 3
 capabilities: [CAP-screen, CAP-detail]
