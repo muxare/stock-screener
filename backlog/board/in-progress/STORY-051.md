@@ -7,10 +7,11 @@ sad_refs: [SAD-003#5.2, SAD-003#3.2, SAD-003#6.1, SAD-003#8.2, SAD-003#8.4, SAD-
 target: ~
 estimate: ~
 work_type: feature
-attempts: 0
+attempts: 1
 prev_column: ~
 blocked_reason: ~
 reject_reason: ~
+base_commit: 751d8cc44ba5be339e4593927b67256872d6d682
 ---
 
 ## User Story
