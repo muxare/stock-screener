@@ -1,4 +1,4 @@
-import { useEffect, useRef, type JSX } from 'react';
+import { useEffect, useRef, type JSX, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import * as M from '../../lib/market';
 import type { Stock, Rule, IndicatorDef } from '../../lib/market';
 import type { Panels } from '../../store';
@@ -218,6 +218,37 @@ export function StockDetail({ stock, panels, rules, onClose, onTogglePanel, rule
   };
   const onPointerUp = () => { dragRef.current = null; if (canvasRef.current) canvasRef.current.style.cursor = 'grab'; };
   const resetView = () => { viewKeyRef.current = null; viewRef.current = null; draw(); };
+
+  // ----- non-pointer (keyboard / button) fallbacks for pan & zoom (SAD#2.9) -----
+  // The wheel/drag handlers anchor on the pointer; these anchor on the view centre
+  // so the same pan/zoom is reachable without a mouse. They mutate the shared
+  // viewRef and redraw, exactly like the pointer paths.
+  const ensureView = () => { if (!viewRef.current) draw(); return viewRef.current; };
+  const panBy = (bars: number) => {
+    const view = ensureView(); if (!view) return;
+    view.start += bars;
+    clampView(); draw();
+  };
+  const zoomBy = (factor: number) => {
+    const view = ensureView(); if (!view) return;
+    const centre = view.start + view.count / 2;
+    view.count *= factor;
+    view.start = centre - view.count / 2;
+    clampView(); draw();
+  };
+  // a pan step proportional to the visible window, like the drag feel
+  const panStep = () => { const v = viewRef.current; return Math.max(1, Math.round((v ? v.count : 60) * 0.12)); };
+  const onChartKeyDown = (e: ReactKeyboardEvent) => {
+    switch (e.key) {
+      case 'ArrowLeft': panBy(-panStep()); break;
+      case 'ArrowRight': panBy(panStep()); break;
+      case '+': case '=': zoomBy(1 / 1.18); break; // zoom in → fewer bars
+      case '-': case '_': zoomBy(1.18); break;      // zoom out → more bars
+      case '0': case 'Home': resetView(); break;
+      default: return; // leave other keys (Tab, etc.) to the browser
+    }
+    e.preventDefault();
+  };
 
   function draw() {
     const cv = canvasRef.current, s = stockR.current;
@@ -622,8 +653,40 @@ export function StockDetail({ stock, panels, rules, onClose, onTogglePanel, rule
 
       {/* chart + matches, scrollable */}
       <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+        {/* focusable, labelled pan/zoom controls — the non-pointer fallback for the
+            wheel/drag chart interactions (SAD#2.9). Each is a real <button>, so it
+            is reachable by Tab and operable with Enter/Space. */}
+        <div role="group" aria-label="Chart pan and zoom" style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, padding: '8px 14px 0 14px' }}>
+          {([
+            ['Pan left', '‹', () => panBy(-panStep())],
+            ['Pan right', '›', () => panBy(panStep())],
+            ['Zoom in', '+', () => zoomBy(1 / 1.18)],
+            ['Zoom out', '−', () => zoomBy(1.18)],
+            ['Reset zoom', '⤢', resetView],
+          ] as [string, string, () => void][]).map(([label, glyph, on]) => (
+            <HButton
+              key={label}
+              type="button"
+              aria-label={label}
+              title={label}
+              onClick={on}
+              style={{ width: 28, height: 26, border: '1px solid #ececef', borderRadius: 7, background: '#fff', color: '#6b7280', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}
+              hoverStyle={{ background: '#f5f6f7', color: '#15171a' }}
+            >{glyph}</HButton>
+          ))}
+        </div>
         <div style={{ position: 'relative', padding: '8px 14px 0 14px' }}>
-          <canvas ref={canvasRef} style={{ display: 'block', width: '100%' }} />
+          {/* The chart canvas itself is focusable and keyboard-operable: arrow keys
+              pan, +/- zoom, 0/Home reset (SAD#2.9). The default focus ring is kept
+              as the visible focus indicator. */}
+          <canvas
+            ref={canvasRef}
+            tabIndex={0}
+            role="img"
+            aria-label={`${s.ticker} price chart — arrow keys pan, plus and minus zoom, 0 resets`}
+            onKeyDown={onChartKeyDown}
+            style={{ display: 'block', width: '100%' }}
+          />
           <canvas ref={overlayRef} style={{ display: 'block', position: 'absolute', left: 14, top: 8, right: 14, pointerEvents: 'none' }} />
           <div
             ref={readoutRef}

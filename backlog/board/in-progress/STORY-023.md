@@ -6,17 +6,18 @@ capability: CAP-detail
 sad_refs: [SAD#2.9, SAD#5.4]
 target: ~
 estimate: ~
-attempts: 0
+attempts: 1
 prev_column: ~
 blocked_reason: ~
+base_commit: 3b9bef665c593c5785a53a26c55023ac1632be60
 ---
 
 ## User Story
 As a keyboard user, I want the detail chart to be operable without a pointer so that the app meets its accessibility posture.
 
 ## Acceptance Criteria
-- [ ] Detail chart pan/zoom/reset have non-pointer (keyboard) fallbacks (SAD#2.9).
-- [ ] Chart controls are focusable and labelled.
+- [x] Detail chart pan/zoom/reset have non-pointer (keyboard) fallbacks (SAD#2.9).
+- [x] Chart controls are focusable and labelled.
 
 ## Architectural Constraints (from SAD)
 - Accessibility per SAD#2.9; changes stay within the SAD#5.4 detail components.
