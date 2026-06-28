@@ -7,8 +7,8 @@ sad_refs: [SAD#4.2, SAD#4.3, SAD#5.10, SAD#5.9]
 target: ~
 estimate: ~
 attempts: 0
+blocked_reason: WON'T-DO (product decision 2026-06-28): reseed/new-session is a synthetic-data-only affordance; demos will use real historical data, so it has no production value. Closed, not pending. Revive only if a synthetic demo mode is wanted.
 prev_column: todo
-blocked_reason: product decision pending: reseed/new-session affordance — confirm with product owner it's still wanted before building (SAD open question, STORY-018 follow-up)
 ---
 
 ## User Story
@@ -25,6 +25,20 @@ is still wanted.
 > ⚠ PRODUCT DECISION PENDING — confirm with the product owner that a reseed/
 > new-session affordance is still wanted before building. If it is dropped,
 > close this story as won't-do. The acceptance criteria below assume it is in.
+
+## Decision — WON'T-DO (2026-06-28)
+Product owner resolved the open question: **not building this.** The reseed/
+new-session control only makes sense for the synthetic generator (advancing to a
+new random scenario via a new seed). The SAD already marks the synthetic adapter
+as dev/test-only and explicitly *not* a product data source (SAD#1.2), and this
+story's own constraints note a real-vendor universe "would not reseed this way."
+Demos will use **real historical data** instead, which carries no reseed concept,
+so the affordance has no production value. Closed as won't-do (kept in `blocked`
+since the board has no terminal closed column — see the captured tooling-gap idea).
+
+Not folded in: if the **session-diff banner / screen alerts** (entered/exited
+names between snapshots) are ever wanted, that mechanic is *not* synthetic-only
+and should be scoped as its own real-data story — it is unrelated to this reseed.
 
 ## Acceptance Criteria
 - [ ] The service can advance to a new session (reseed the synthetic universe)
