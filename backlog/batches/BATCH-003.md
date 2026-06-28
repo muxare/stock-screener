@@ -1,7 +1,7 @@
 ---
 id: BATCH-003
 type: batch
-status: active
+status: closed
 created: 2026-06-28
 wip_limit: 3
 capabilities: [CAP-eod-fetch, CAP-eod-ingest, CAP-eod-coverage]
