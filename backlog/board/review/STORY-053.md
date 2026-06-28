@@ -7,10 +7,10 @@ sad_refs: [SAD-003#5.3, SAD-003#3.3, SAD-003#2.4, SAD-003#8.5]
 target: ~
 estimate: ~
 work_type: feature
-attempts: 0
+attempts: 1
 prev_column: ~
 blocked_reason: ~
-reject_reason: ~
+base_commit: 740fbe77c850faae04dc07f5b8e41806c5c735d6
 ---
 
 ## User Story
@@ -26,16 +26,16 @@ turns them into a first-class run output. The driving rule from the plan: **"a r
 that silently drops names is a failure."**
 
 ## Acceptance Criteria
-- [ ] Every run emits a **structured + printable report** listing each requested
+- [x] Every run emits a **structured + printable report** listing each requested
       ticker as fetched or failed, with a **reason** for each failure (SAD-003#2.4).
-- [ ] The report includes **coverage** — % of the target universe fetched
+- [x] The report includes **coverage** — % of the target universe fetched
       successfully — and **freshness** — max staleness (newest written bar date vs
       the last trading day) after the run (SAD-003#2.4).
-- [ ] On partial failure the run **commits the successfully-fetched set** rather
+- [x] On partial failure the run **commits the successfully-fetched set** rather
       than discarding the whole run (SAD-003#8.5 / ADR-005).
-- [ ] The run **exits non-zero** when coverage falls below a **configurable
+- [x] The run **exits non-zero** when coverage falls below a **configurable
       threshold**, so automation can gate on it (SAD-003#8.5 / ADR-005).
-- [ ] A test with some tickers failing asserts: the rest are committed, every
+- [x] A test with some tickers failing asserts: the rest are committed, every
       failure is named in the report with a reason, coverage/max-staleness are
       correct, and the exit code reflects the threshold. A silently-dropped name is
       a test failure (SAD-003#2.4).
