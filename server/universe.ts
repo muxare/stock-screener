@@ -91,11 +91,26 @@ export function providerForSource(source: DatasetSource): MarketDataProvider {
 // non-STORY-031 DB throws here (fail-fast). It is deliberately NOT silently
 // downgraded to synthetic: the operator asked for imported data, so masking a
 // misconfiguration by serving demo data would be worse than a clear startup error.
+//
+// PRODUCTION GUARD (SAD#8.7): both adapters above are dev/test only — there is no
+// genuine production data path yet (the licensed-vendor adapter is deferred to
+// ADR-008 / SAD#8.8). So in a production environment selecting EITHER fails fast
+// with a clear error here, rather than letting demo/imported data silently back
+// production screening traffic.
 export function providerFromEnv(
   env: NodeJS.ProcessEnv = process.env,
   pointerPath: string = DEV_ACTIVE_DB_POINTER,
 ): MarketDataProvider {
-  return providerForSource(sourceFromEnv(env, pointerPath));
+  const source = sourceFromEnv(env, pointerPath);
+  if (env.NODE_ENV === 'production') {
+    throw new Error(
+      `Refusing to serve the '${source.kind}' dev/test market-data adapter in a ` +
+        `production environment (NODE_ENV=production): the synthetic generator (SAD#8.7) ` +
+        `and the SQLite reader (STORY-032) are dev/test only and must never back ` +
+        `production screening traffic. The production adapter is deferred to ADR-008 (SAD#8.8).`,
+    );
+  }
+  return providerForSource(source);
 }
 
 const defaultProvider: MarketDataProvider = providerFromEnv();
