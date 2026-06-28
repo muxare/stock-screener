@@ -27,6 +27,7 @@ import type { BatchOptions, FetchFailure, FetchResult } from './fetch.ts';
 import type { DateRange, YahooDailyBar } from './parse.ts';
 import { loadConfig } from '../eod-import/config.ts';
 import { loadMetadata, runImport } from '../eod-import/run.ts';
+import { buildCoverageReport, formatReport, newestBarDate } from './coverage.ts';
 
 // The default Yahoo-sourced DB: a STABLE, DOCUMENTED path at the repo root,
 // DISTINCT from the synthetic generator (which has no file) and from the EOD
@@ -151,7 +152,14 @@ interface CliArgs {
   dbPath?: string;
   batchSize?: number;
   delayMs?: number;
+  minCoverage: number; // STORY-053 threshold; defaults to DEFAULT_MIN_COVERAGE
 }
+
+// Default coverage threshold (a fraction): 1.0 means ANY failed/dropped ticker
+// makes the run exit non-zero (SAD-003#8.5 / ADR-005) — the conservative default
+// for "a run that silently drops names is a failure" (SAD-003#2.4). Loosen with
+// --min-coverage for a large universe where a few delisted names are tolerable.
+const DEFAULT_MIN_COVERAGE = 1.0;
 
 function parseIsoDate(raw: string, flag: string): Date {
   const s = (raw ?? '').trim();
@@ -171,12 +179,21 @@ function parseIntFlag(raw: string | undefined, flag: string, min: number): numbe
   return n;
 }
 
+// Parse the coverage threshold as a fraction in [0, 1], rejecting garbage so a
+// bad value never silently disables the gate.
+function parseFractionFlag(raw: string | undefined, flag: string): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0 || n > 1) throw new Error(`${flag} must be a number in [0, 1], got "${raw}"`);
+  return n;
+}
+
 function parseArgs(argv: string[]): CliArgs {
   let from: Date | undefined;
   let to: Date | undefined;
   let dbPath: string | undefined;
   let batchSize: number | undefined;
   let delayMs: number | undefined;
+  let minCoverage = DEFAULT_MIN_COVERAGE;
   const tickers: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -186,6 +203,7 @@ function parseArgs(argv: string[]): CliArgs {
     else if (a === '--tickers' || a === '-T') tickers.push(...loadTickers(argv[++i]));
     else if (a === '--batch-size' || a === '-b') batchSize = parseIntFlag(argv[++i], '--batch-size', 1);
     else if (a === '--delay-ms' || a === '-d') delayMs = parseIntFlag(argv[++i], '--delay-ms', 0);
+    else if (a === '--min-coverage' || a === '-c') minCoverage = parseFractionFlag(argv[++i], '--min-coverage');
     else if (a === '--help' || a === '-h') { printUsage(); process.exit(0); }
     else if (a.startsWith('-')) throw new Error(`unknown flag: ${a}`);
     else tickers.push(a.toUpperCase());
@@ -193,7 +211,7 @@ function parseArgs(argv: string[]): CliArgs {
   if (!from) throw new Error('--from <YYYY-MM-DD> is required');
   if (!to) throw new Error('--to <YYYY-MM-DD> is required');
   if (tickers.length === 0) throw new Error('at least one ticker (positional or via --tickers <file>) is required');
-  return { from, to, tickers, dbPath, batchSize, delayMs };
+  return { from, to, tickers, dbPath, batchSize, delayMs, minCoverage };
 }
 
 function printUsage(): void {
@@ -209,6 +227,7 @@ function printUsage(): void {
       `  -o, --out         output SQLite DB (default ${DEFAULT_YAHOO_DB})\n` +
       '  -b, --batch-size  tickers fetched concurrently per batch (default 1)\n' +
       '  -d, --delay-ms    inter-batch delay in ms (default 0)\n' +
+      `  -c, --min-coverage  exit non-zero below this coverage fraction [0,1] (default ${DEFAULT_MIN_COVERAGE})\n` +
       '  -h, --help        show this help\n',
   );
 }
@@ -237,16 +256,23 @@ async function main(): Promise<void> {
       `(${report.succeeded.length}/${report.requested} tickers) → ${report.dbPath}\n`,
   );
 
-  // Failures are surfaced loudly — never silently dropped (SAD-003#2.4). The
-  // coverage threshold / non-zero-exit policy is STORY-053; here a non-zero exit
-  // simply signals that some ticker failed.
-  if (report.failures.length > 0) {
-    process.stderr.write(`\n${report.failures.length} of ${report.requested} ticker(s) failed:\n`);
-    for (const f of report.failures) {
-      process.stderr.write(`  ${f.ticker}: ${f.reason} — ${f.message} (after ${f.attempts} attempt(s))\n`);
-    }
-    process.exitCode = 1;
-  }
+  // The coverage/freshness report is a FIRST-CLASS run output (SAD-003#5.3): the
+  // successful set is already committed by runBackfill (ADR-005); here we build
+  // and PRINT the report — naming every fetched and every failed ticker so no
+  // name is hidden (SAD-003#2.4) — and derive freshness from the newest WRITTEN
+  // bar in the committed DB vs the last trading day. The run exits non-zero only
+  // when coverage falls below --min-coverage, so automation can gate on it
+  // (SAD-003#8.5 / ADR-005).
+  const coverage = buildCoverageReport({
+    requested: report.succeeded.concat(report.failures.map((f) => f.ticker)),
+    succeeded: report.succeeded,
+    failures: report.failures,
+    newestBarDate: newestBarDate(report.dbPath),
+    asOf: args.to,
+    minCoverage: args.minCoverage,
+  });
+  process.stdout.write(formatReport(coverage) + '\n');
+  if (!coverage.meetsThreshold) process.exitCode = 1;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
