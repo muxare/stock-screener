@@ -28,6 +28,17 @@ dev-market.db
 board.md
 backlog/index.html
 .workflow/events.jsonl
+.workflow/review-*.json
+
+# Python (tools/, hooks, tests)
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
 
 # Editor directories and files
 .vscode/*
