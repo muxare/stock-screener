@@ -44,6 +44,14 @@ class Repo:
         return subprocess.run([sys.executable, "tools/board.py", *args],
                               cwd=self.root, capture_output=True, text=True, env=env)
 
+    def record_review(self, sid, verdict="clean", blocking=None):
+        """Drive `board.py review-record` with a findings JSON on stdin (R-1)."""
+        env = dict(os.environ, SAD_WF_LOG="0")
+        payload = json.dumps({"verdict": verdict, "blocking": blocking or []})
+        return subprocess.run(
+            [sys.executable, "tools/board.py", "review-record", sid],
+            cwd=self.root, capture_output=True, text=True, env=env, input=payload)
+
     def story_path(self, sid):
         for col in COLUMNS:
             p = os.path.join(self.root, "backlog", "board", col, f"{sid}.md")
@@ -198,6 +206,7 @@ def run():
         os.makedirs(os.path.join(tmp, "src", "foo"), exist_ok=True)
         with open(os.path.join(tmp, "src", "foo", "ok.py"), "w") as f:
             f.write("y = 2\n")
+        repo.record_review("STORY-100")  # R-1: clean code-review artifact required
         r = repo.board("move", "STORY-100", "review")
         check("move review SUCCEEDS when clean", r.returncode == 0)
         check("story now in review", repo.column_of("STORY-100") == "review")
@@ -216,8 +225,8 @@ def run():
             f.write("z = 3\n")  # out of scope + criteria unchecked
         r = repo.board("move", "STORY-101", "review")
         check("override needed: plain move refused", r.returncode != 0)
-        r = repo.board("move", "STORY-101", "review", "--skip-review-check")
-        check("move review SUCCEEDS with --skip-review-check", r.returncode == 0)
+        r = repo.board("move", "STORY-101", "review", "--skip-review-check", "--skip-code-review")
+        check("move review SUCCEEDS with --skip-review-check + --skip-code-review", r.returncode == 0)
         check("STORY-101 in review after override", repo.column_of("STORY-101") == "review")
         os.remove(os.path.join(tmp, "src", "other2.py"))
 
@@ -228,7 +237,7 @@ def run():
         r = repo.board("move", "STORY-102", "done")
         check("move done REFUSED without base_commit",
               r.returncode != 0 and "base_commit" in (r.stdout + r.stderr))
-        r = repo.board("move", "STORY-102", "done", "--base", "HEAD")
+        r = repo.board("move", "STORY-102", "done", "--base", "HEAD", "--skip-code-review")
         check("move done SUCCEEDS with explicit --base", r.returncode == 0)
 
         print("\n[#4] check --criterion ticks a single matching criterion")
@@ -260,6 +269,7 @@ def run():
         os.makedirs(os.path.join(tmp, "src", "foo"), exist_ok=True)
         with open(os.path.join(tmp, "src", "foo", "r.py"), "w") as f:
             f.write("r = 1\n")
+        repo.record_review("STORY-200")
         r = repo.board("move", "STORY-200", "review")
         check("STORY-200 reached review", r.returncode == 0 and repo.column_of("STORY-200") == "review")
         attempts_before = repo.fm("STORY-200", "attempts")
@@ -271,6 +281,7 @@ def run():
               repo.fm("STORY-200", "attempts") == str(int(attempts_before) + 1))
 
         print("\n[#11] reject_reason is cleared when the story is re-submitted to review")
+        repo.record_review("STORY-200")  # re-review the reworked diff
         r = repo.board("move", "STORY-200", "review")
         check("re-entry to review succeeds (gate re-runs, passes)", r.returncode == 0)
         rr = repo.fm("STORY-200", "reject_reason")
@@ -541,6 +552,68 @@ def ev(story, frm, to, ts):
             "story_id": story, "from": frm, "to": to}
 
 
+def run_phase_r1():
+    """R-1: the code-review gate requires a fresh, clean code-reviewer artifact."""
+    tmp = tempfile.mkdtemp(prefix="board-r1-test-")
+    try:
+        repo = setup_repo(tmp)
+        os.makedirs(os.path.join(tmp, "src", "foo"), exist_ok=True)
+
+        print("\n[R-1] move review REFUSED without a code-review artifact")
+        repo.write_story("STORY-600", "todo")
+        repo.board("move", "STORY-600", "in-progress")
+        repo.board("check", "STORY-600", "--all")
+        with open(os.path.join(tmp, "src", "foo", "a.py"), "w") as f:
+            f.write("a = 1\n")
+        r = repo.board("move", "STORY-600", "review")
+        check("review refused with no code-review artifact",
+              r.returncode != 0 and "code-review" in (r.stdout + r.stderr))
+        check("story stayed in in-progress", repo.column_of("STORY-600") == "in-progress")
+
+        print("\n[R-1] review-record then move review SUCCEEDS")
+        r = repo.record_review("STORY-600")
+        check("review-record succeeds", r.returncode == 0 and "clean" in r.stdout)
+        r = repo.board("move", "STORY-600", "review")
+        check("review SUCCEEDS with a clean, fresh artifact",
+              r.returncode == 0 and repo.column_of("STORY-600") == "review")
+
+        print("\n[R-1] a blocking verdict is refused (override available)")
+        repo.write_story("STORY-601", "todo")
+        repo.board("move", "STORY-601", "in-progress")
+        repo.board("check", "STORY-601", "--all")
+        with open(os.path.join(tmp, "src", "foo", "b.py"), "w") as f:
+            f.write("b = 1\n")
+        repo.record_review("STORY-601", verdict="blocking",
+                           blocking=[{"where": "src/foo/b.py", "why": "bug"}])
+        r = repo.board("move", "STORY-601", "review")
+        check("review refused on a blocking verdict",
+              r.returncode != 0 and "blocking" in (r.stdout + r.stderr))
+        r = repo.board("move", "STORY-601", "review", "--skip-code-review")
+        check("--skip-code-review overrides a blocking verdict", r.returncode == 0)
+
+        print("\n[R-1] a stale artifact (HEAD moved on) is refused")
+        repo.write_story("STORY-602", "todo")
+        repo.board("move", "STORY-602", "in-progress")
+        repo.board("check", "STORY-602", "--all")
+        with open(os.path.join(tmp, "src", "foo", "c.py"), "w") as f:
+            f.write("c = 1\n")
+        repo.record_review("STORY-602")                       # recorded at current HEAD
+        repo.git("commit", "--allow-empty", "-qm", "later")   # HEAD advances
+        r = repo.board("move", "STORY-602", "review")
+        check("review refused: artifact is stale (head mismatch)",
+              r.returncode != 0 and "stale" in (r.stdout + r.stderr))
+
+        print("\n[R-1] review-record refuses bad input")
+        r = repo.record_review("STORY-602", verdict="bogus")
+        check("review-record refuses an invalid verdict", r.returncode != 0)
+        repo.write_story("STORY-603", "todo")  # never started -> no base_commit
+        r = repo.record_review("STORY-603")
+        check("review-record refuses a story without base_commit",
+              r.returncode != 0 and "base_commit" in (r.stdout + r.stderr))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def report():
     print()
     if failures:
@@ -554,4 +627,5 @@ def report():
 if __name__ == "__main__":
     run()
     run_phase4()
+    run_phase_r1()
     report()

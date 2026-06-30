@@ -140,6 +140,13 @@ mapping is mechanical too. **Verdict: untouched.**
 
 ### 3.2 The one high-value outsource: the code-review gate (closes F2)
 
+> **✅ Shipped 2026-06-29.** Implemented as the read-only `code-reviewer` subagent
+> + `board.py review-record` (writes `.workflow/review-<id>.json`) + an R-1 gate in
+> `move review`/`done` that refuses a missing, stale (base/head ≠ current diff), or
+> blocking artifact (human override `--skip-code-review`, logged). Built as a
+> subagent rather than headless `-p`, but the gateable-precondition idea below is
+> what shipped. **F2 closed.**
+
 Today the mandatory code-review pass in `build-toward.md` is **loop discipline, not enforced**
 — `board.py` can't see whether it ran. STORY-018's 10 regressions are the evidence: the
 heuristic `review-check` passed; only a separate heavy review caught them.
@@ -240,7 +247,7 @@ to-confirm]**
 |---|---|---|---|---|
 | 1 | **C-1** `SessionStart` re-grounding hook | makes `/clear` safe; disposable context | S | low |
 | 2 | **C-2** `/clear` between stories in the action loop | flat token profile on long runs | S | low |
-| 3 | **R-1** code-review as a gateable headless step | **F2** (defects past the gate) | M | med |
+| 3 | **R-1** code-review as a gateable step ✅ _shipped (subagent + `review-record` gate)_ | **F2** (defects past the gate) | M | med |
 | 4 | **K-1** cron/Actions → `claude -p` nightly digest | cross-session heartbeat (§8.3) | S–M | low |
 | 5 | **3.3** Haiku/structured-output for triage, digest, semantic refs | cheaper lenses; **F8** | M | low |
 | 6 | **C-3** `PreCompact` telemetry | context-bloat signal for SM lens | S | low |

@@ -60,7 +60,7 @@ summarize — the user must be able to audit the gate.
    gate diffs only this story's changes. No manual capture needed; you may still
    override with `--base <ref>` on review-check/move.
 2. **Run a code-review pass** after tests are green and criteria are ticked,
-   BEFORE moving to review: run `/code-review` (or spawn a code-review agent) on
+   BEFORE moving to review: spawn the `code-reviewer` subagent (Task tool) on
    the story diff vs `base_commit`. Address blocking findings; fan out-of-scope
    findings into new stories. This is a mandatory loop step (it catches the
    defect class review-check's heuristics miss — the STORY-018 lesson).

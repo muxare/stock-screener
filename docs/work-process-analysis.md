@@ -322,7 +322,7 @@ metrics.
 | # | Friction | Evidence | Pulls you in because… |
 |---|---|---|---|
 | F1 | **`review-check` is advisory, not a `done` gate** | STORY-014 moved review→done with 5 then 4 open problems | you must personally verify quality before every accept |
-| F2 | **Real defects slip past the heuristic gate** | STORY-018: 10 regressions found by a _separate_ code review the loop doesn't run | you (or an ad-hoc review) are the only real correctness check |
+| F2 | **Real defects slip past the heuristic gate** ✅ _closed by R-1 (2026-06-29)_ | STORY-018: 10 regressions found by a _separate_ code review the loop doesn't run | the `code-reviewer` subagent + R-1 gate now make the heavy review a precondition of `move review`/`done` |
 | F3 | **Overload is hidden by fanning out into backlog** | STORY-018 → 025–029; 018 still in-progress | flow looks healthy while correctness debt accrues silently |
 | F4 | **Blocked work needs decisions only you can make** | STORY-015 parked on ADR-008 (vendor + legal sign-off) | legitimate — but there's no queue/notification surfacing it |
 | F5 | **The guard fights the agent** | 3× `git mv` refusals; agent never learned | wasted cycles; agents re-trip the same guard |
@@ -383,10 +383,11 @@ bounce, as STORY-018 shows).
    constantly); A2 runs the whole story to the `review` column autonomously and stops
    there. A2 _is_ the "remove myself from the general flow, keep the merge gate" model.
    (Reserve A1 for when architecture is still settling.)
-3. **Promote the heavy code review into the loop.** The defects in STORY-018 were caught
-   by an out-of-band review, not `review-check`. Add an agent-run review pass (a
-   `code-review` style step) as part of the build loop _before_ `move review`, so Gate 4
-   sees pre-reviewed work. Closes **F2**.
+3. **Promote the heavy code review into the loop.** ✅ **SHIPPED 2026-06-29.** The
+   defects in STORY-018 were caught by an out-of-band review, not `review-check`.
+   Now the read-only `code-reviewer` subagent runs the pass before `move review`,
+   `board.py review-record` captures its verdict, and the **R-1 gate** on
+   `move review`/`done` refuses a missing/stale/blocking artifact. Closes **F2**.
 4. **Extend the guard hook to `Write`/`Edit` on story files**, or have it allow body/AC
    edits only through `board.py`. Closes the "agent ticks its own boxes" half of **F6**.
 

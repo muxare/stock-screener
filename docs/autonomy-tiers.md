@@ -28,9 +28,11 @@ Before **`move review`** for any story:
    flipping checkboxes by hand on an active story)
 3. Run tests; failures block the gate
 4. **Run a code-review pass** on the story diff vs `base_commit` (the
-   `/code-review` skill or a code-review agent); address blocking findings, fan
-   out-of-scope findings into new stories — mandatory loop step, not enforced by
-   board.py
+   `code-reviewer` subagent); address blocking findings, fan out-of-scope
+   findings into new stories. Record the verdict with `python tools/board.py
+   review-record <id>` — the **R-1 code-review gate** then enforces it on
+   `move review`/`done` (refused on a missing/stale/blocking artifact; human
+   override `--skip-code-review`, logged)
 5. Optionally pre-flight `python tools/board.py review-check <id>` and paste the
    stdout (inspection only — see `sad-grounding` skill)
 6. `python tools/board.py move <id> review` — the move **automatically re-runs

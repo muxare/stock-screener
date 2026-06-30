@@ -55,15 +55,18 @@ for story in stories:
     run tests / check acceptance criteria; tick met boxes via board.py check (NOT by editing the file)
         board.py check <id> --criterion "<substring>"   # ticks the matching criterion
     if all criteria pass and tests green:
-        # MANDATORY code-review pass (loop discipline, not enforced by board.py):
-        run /code-review (or spawn a code-review agent) on the story diff vs base_commit
+        # MANDATORY code-review pass (now ENFORCED via the R-1 code-review gate):
+        spawn the `code-reviewer` subagent (Task tool) on the story diff vs base_commit
         address blocking findings; fan out-of-scope findings into new stories (existing pattern)
+        board.py review-record <id> < findings.json   # record the reviewer's JSON verdict (R-1)
         board.py review-check <id>            # pre-flight inspection (optional --base override)
-        board.py move <id> review            # the move RE-RUNS the review-check gate and
-                                             # REFUSES if it finds problems; (A3: then syncer push)
-                                             # human override: move --skip-review-check (logged)
+        board.py move <id> review            # the move RE-RUNS the review-check gate AND the
+                                             # R-1 code-review gate; REFUSES on problems or on a
+                                             # missing/stale/blocking code-review artifact
+                                             # (A3: then syncer push). human overrides:
+                                             # --skip-review-check / --skip-code-review (logged)
         if move refused:
-            fix the flagged scope/test issues, or
+            fix the flagged scope/test issues, re-review if the diff changed, or
             board.py move <id> blocked --reason "review-check: <summary>"
         # move review/done also refuses while any criterion box is unchecked,
         # or if the story has no base_commit (re-run move in-progress, or pass --base)

@@ -850,6 +850,18 @@ def cmd_move(args):
                  message=f"--skip-review-check over {len(problems)} problem(s)",
                  count=len(problems), **{"from": src, "to": dst})
 
+        # R-1: code-review gate -- require a fresh, clean code-reviewer artifact
+        head = _git_run(["git", "rev-parse", "HEAD"]).strip()
+        cr = code_review_problem(args.id, base, head)
+        if cr and not args.skip_code_review:
+            msg = f"code-review gate: {cr}"
+            _log("move", outcome="refused", message=msg, story_id=args.id, base=base,
+                 **{"from": src, "to": dst})
+            sys.exit(f"refused: {msg}; fix, or override with --skip-code-review")
+        if cr and args.skip_code_review:
+            _log("move", outcome="override", story_id=args.id, base=base,
+                 message=f"--skip-code-review: {cr}", **{"from": src, "to": dst})
+
     # frontmatter stamping
     fm.pop("_path", None); fm.pop("_column", None)
     if dst == "in-progress" and not base_commit_of(fm):
@@ -2490,6 +2502,74 @@ def run_review_check(fm, body, base):
     return problems, warnings
 
 
+def code_review_problem(story_id, base, head):
+    """R-1: require a fresh, clean code-reviewer artifact for review/done.
+
+    Returns a problem string, or '' if the gate is satisfied. The artifact is
+    pinned to BOTH ends of the diff (base + head): a bounced story keeps its
+    base_commit but gains commits, so head moves and the stale review is
+    rejected -- forcing rework to be re-reviewed.
+    """
+    p = os.path.join(workflow_log.log_dir(), f"review-{story_id}.json")
+    if not os.path.exists(p):
+        return (f"no code-review artifact; spawn the code-reviewer subagent, then "
+                f"`board.py review-record {story_id}`")
+    try:
+        with open(p, encoding="utf-8") as f:
+            doc = json.load(f)
+    except Exception:
+        return f"code-review artifact unreadable: {p}"
+    if doc.get("base") != base or doc.get("head") != head:
+        return ("code-review is stale (reviewed base/head != current diff); "
+                "re-run the code-reviewer on the latest commit")
+    if doc.get("verdict") != "clean" or doc.get("blocking"):
+        return (f"code-review verdict '{doc.get('verdict')}' with "
+                f"{len(doc.get('blocking', []))} blocking finding(s)")
+    return ""
+
+
+def cmd_review_record(args):
+    """Ingest code-reviewer findings as a gateable artifact (.workflow/review-<id>.json).
+
+    board.py stamps the authoritative base/head from the live story, so the
+    artifact cannot claim freshness it does not have. This keeps board.py the
+    only sanctioned writer of gate state.
+    """
+    from datetime import datetime, timezone
+    path = find_story(args.id)
+    if not path:
+        _fatal(f"error: {args.id} not found", event="review-record", story_id=args.id)
+    fm, _body = read_story(path)
+    base = base_commit_of(fm)
+    if not base:
+        sys.exit(f"refused: {args.id} has no base_commit; run `move {args.id} in-progress` first")
+    head = _git_run(["git", "rev-parse", "HEAD"]).strip()
+    if not head:
+        sys.exit("refused: could not resolve HEAD")
+    raw = open(args.from_, encoding="utf-8").read() if args.from_ else sys.stdin.read()
+    try:
+        doc = json.loads(raw)
+    except Exception as e:
+        sys.exit(f"refused: findings not valid JSON: {e}")
+    verdict = (doc.get("verdict") or "").strip()
+    if verdict not in ("clean", "blocking", "cannot-review"):
+        sys.exit("refused: verdict must be clean|blocking|cannot-review")
+    record = {
+        "story": args.id, "base": base, "head": head, "verdict": verdict,
+        "blocking": doc.get("blocking", []), "out_of_scope": doc.get("out_of_scope", []),
+        "reviewer": doc.get("reviewer", "code-reviewer"),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    os.makedirs(workflow_log.log_dir(), exist_ok=True)
+    out = os.path.join(workflow_log.log_dir(), f"review-{args.id}.json")
+    with open(out, "w", encoding="utf-8") as f:
+        json.dump(record, f, indent=2)
+    _log("review-record", story_id=args.id, base=base, verdict=verdict,
+         count=len(record["blocking"]))
+    print(f"recorded code-review for {args.id}: {verdict} "
+          f"({len(record['blocking'])} blocking)")
+
+
 def cmd_review_check(args):
     """Did the loop cheat? Check scope adherence + test integrity before done."""
     path = find_story(args.id)
@@ -2666,6 +2746,21 @@ def compute_metrics(window=None):
         and str(e.get("message", "")).startswith("review-check")
     )
 
+    # R-1 code-review gate health: refused moves (missing/stale/blocking artifact)
+    # and human --skip-code-review overrides. Over-use of overrides is the smell.
+    code_review_blocks = sum(
+        1 for e in events
+        if e.get("tool") == "board" and e.get("event") == "move"
+        and e.get("outcome") == "refused"
+        and str(e.get("message", "")).startswith("code-review gate")
+    )
+    code_review_overrides = sum(
+        1 for e in events
+        if e.get("tool") == "board" and e.get("event") == "move"
+        and e.get("outcome") == "override"
+        and str(e.get("message", "")).startswith("--skip-code-review")
+    )
+
     # bounce rate: rejects + any review→in-progress demote, over stories that
     # ever reached review.
     rejects = sum(1 for e in events if e.get("tool") == "board" and e.get("event") == "reject")
@@ -2697,6 +2792,8 @@ def compute_metrics(window=None):
         "review_check": {"runs": rc_total, "refused": rc_refused,
                          "refusal_rate": (rc_refused / rc_total) if rc_total else None,
                          "hard_gate_blocks": gate_blocks},
+        "code_review": {"gate_blocks": code_review_blocks,
+                        "overrides": code_review_overrides},
         "bounce": {"bounces": bounces, "reached_review": reached_review,
                    "rate": (bounces / reached_review) if reached_review else None},
         "blocked": {"total_s": sum(blocked_time.values()),
@@ -2746,6 +2843,9 @@ def cmd_metrics(args):
     print(f"\nReview-check gate: {rcheck['refused']}/{rcheck['runs']} runs refused"
           + (f" ({rate*100:.0f}%)" if rate is not None else "")
           + f" · {rcheck['hard_gate_blocks']} hard-gate move block(s)")
+    crv = m["code_review"]
+    print(f"Code-review gate (R-1): {crv['gate_blocks']} move block(s)"
+          f" · {crv['overrides']} override(s)")
     brate = b["rate"]
     print(f"Bounce rate: {b['bounces']} bounce(s) across {b['reached_review']} "
           f"stories that reached review"
@@ -2773,6 +2873,8 @@ def _retro_snapshot(m):
         f"- review-check: {rc['refused']}/{rc['runs']} refused"
         + (f" ({rate*100:.0f}%)" if rate is not None else "")
         + f" · {rc['hard_gate_blocks']} hard-gate block(s)",
+        f"- code-review gate (R-1): {m['code_review']['gate_blocks']} block(s) · "
+        f"{m['code_review']['overrides']} override(s)",
         f"- bounce: {b['bounces']} / {b['reached_review']} reached-review"
         + (f" ({b['rate']*100:.0f}%)" if b["rate"] is not None else ""),
         f"- blocked: " + (f"{bl['longest_story']} {_fmt_dur(bl['longest_s'])} (longest)"
@@ -2952,6 +3054,9 @@ def main():
     m.add_argument("--skip-ready", action="store_true",
                    help="human override: start a story despite a failing "
                         "Definition of Ready (logged as an override)")
+    m.add_argument("--skip-code-review", action="store_true",
+                   help="human override: move to review/done despite a missing "
+                        "or failing code-review artifact (logged as an override)")
     m.set_defaults(fn=cmd_move)
 
     l = sub.add_parser("list"); l.add_argument("--column"); l.add_argument("--capability")
@@ -3094,6 +3199,13 @@ def main():
     rc.add_argument("--base", default="HEAD",
                     help="git ref to diff against (default HEAD; use the pre-story commit)")
     rc.set_defaults(fn=cmd_review_check)
+
+    rr = sub.add_parser("review-record",
+                        help="ingest code-reviewer findings as a gateable artifact (R-1)")
+    rr.add_argument("id")
+    rr.add_argument("--from", dest="from_",
+                    help="read findings JSON from a file (default: stdin)")
+    rr.set_defaults(fn=cmd_review_record)
 
     args = ap.parse_args()
     args.fn(args)
