@@ -129,13 +129,32 @@ export interface MarketClient {
   activateDatabase(body: ActivateDbRequest): Promise<ActivateDbReport>;
 }
 
+// Bounded client-side transport timeout for the on-demand single-name fetch
+// (STORY-054). Unlike `screen`/`facts`/`backtest`, `instrument` takes no external
+// AbortSignal — the store's ensureDisplayed/retryDisplayed de-dup guard bails
+// while a name is 'loading', so a `/instrument` fetch that never settles (the
+// service accepts the connection but never responds) would strand the detail /
+// compare spinner forever with no way to recover but a full reload. This bounds
+// the TRANSPORT wait only — SAD#2.3's ≤ 50 ms single-name budget is a LOCAL
+// compute budget, not this network wait — so a hung connection aborts and the
+// promise rejects, surfacing through ensureDisplayed as the existing retryable
+// 'error' state (a timeout is indistinguishable from any other transport error).
+const DEFAULT_INSTRUMENT_TIMEOUT_MS = 10_000;
+
+// Construction options for the HTTP client. `instrumentTimeoutMs` is injectable
+// so tests can drive the timeout path without waiting the production ceiling.
+export interface MarketClientOptions {
+  instrumentTimeoutMs?: number;
+}
+
 // ----------------------------------------------------------------------------
 // The production HTTP implementation. Same-origin paths; vite proxies them to
 // the Node service in dev (vite.config.ts). Behaviour is a 1:1 move of the
 // former `api*` helpers from src/store.ts — same endpoints, same error/null
 // semantics, same NDJSON parse.
 // ----------------------------------------------------------------------------
-export function httpMarketClient(): MarketClient {
+export function httpMarketClient(opts: MarketClientOptions = {}): MarketClient {
+  const instrumentTimeoutMs = opts.instrumentTimeoutMs ?? DEFAULT_INSTRUMENT_TIMEOUT_MS;
   return {
     async facts(signal) {
       const res = await fetch('/facts', { signal });
@@ -144,7 +163,12 @@ export function httpMarketClient(): MarketClient {
     },
 
     async instrument(ticker) {
-      const res = await fetch('/instrument/' + encodeURIComponent(ticker));
+      // AbortSignal.timeout aborts the fetch after the bound; a service that
+      // accepts the connection but never responds therefore REJECTS here (with a
+      // TimeoutError) rather than hanging, so the caller's error path can run.
+      const res = await fetch('/instrument/' + encodeURIComponent(ticker), {
+        signal: AbortSignal.timeout(instrumentTimeoutMs),
+      });
       if (res.status === 404) return null;
       if (!res.ok) throw new Error('instrument failed: ' + res.status);
       return res.json() as Promise<InstrumentBars>;

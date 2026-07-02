@@ -335,6 +335,51 @@ describe('STORY-026: on-demand displayed-name fetch exposes loading/error state'
   });
 });
 
+// STORY-054 — the on-demand /instrument fetch had NO client-side timeout, so a
+// service that accepts the connection but never responds left the promise
+// unsettled forever: displayStatus stuck on 'loading', and the ensureDisplayed /
+// retryDisplayed de-dup guard (both bail while 'loading') blocked any recovery —
+// a perpetual spinner until a full reload. The seam now bounds the transport wait
+// with AbortSignal.timeout, so a hung fetch aborts and REJECTS, and the store's
+// existing error mapping turns that into the retryable 'error' state. Here we
+// drive a store whose client has a SHORT instrument timeout so the hung fetch is
+// unstuck by the timeout (not the server) within the test.
+describe('STORY-054: a hung /instrument aborts on the client timeout and recovers on retry', () => {
+  it('a never-responding /instrument transitions to error within the timeout, then retry resolves it', async () => {
+    const { makeScreenerState } = await import('../src/store.ts');
+    const { httpMarketClient } = await import('../src/lib/client/marketClient.ts');
+    const { create } = await import('zustand');
+
+    // A store instance whose /instrument fetch aborts after a short bound, so a
+    // hung connection surfaces quickly instead of the production ceiling.
+    const store = create(makeScreenerState(httpMarketClient({ instrumentTimeoutMs: 30 })));
+    store.getState().init();
+    await store.getState().runScreen(); // this instance has no singleton subscription
+    const ticker = store.getState().screen!.tickers[0];
+    expect(ticker).toBeTruthy();
+
+    // Phase 1 — the service accepts the connection but NEVER responds. The stub
+    // only settles when the client's timeout aborts the signal it attached, so a
+    // stuck 'loading' would mean the timeout failed to fire.
+    await withStubbedFetch((real) => ((input, init) =>
+      urlOf(input).includes('/instrument/')
+        ? new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject((init.signal as AbortSignal).reason));
+          })
+        : real(input, init)) as typeof fetch,
+      () => store.getState().ensureDisplayed(ticker));
+    // Aborted within the bound → the existing retryable error state, not 'loading'.
+    expect(store.getState().displayStatus[ticker]).toBe('error');
+    expect(store.getState().displayed[ticker]).toBeUndefined();
+
+    // Phase 2 — service reachable again: retry re-requests (the timeout error is
+    // indistinguishable from any other error to the UI) and resolves the name.
+    store.getState().retryDisplayed(ticker);
+    expect(await waitFor(() => store.getState().displayStatus[ticker] === 'loaded')).toBe(true);
+    expect(store.getState().displayed[ticker]!.full.c.length).toBeGreaterThan(0);
+  });
+});
+
 // STORY-025 — request sequencing in the client store (SAD#5.9). Moving screen &
 // backtest to async service calls removed the synchronous guarantees of the old
 // in-browser compute: responses race, streams overlap, and selection outlives the
