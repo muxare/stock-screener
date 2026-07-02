@@ -7,10 +7,10 @@ sad_refs: [SAD-003#3.2, SAD-003#2.2, SAD-003#8.8, SAD-003#5.2, SAD-003#6.2]
 target: ~
 estimate: ~
 work_type: feature
-attempts: 0
+attempts: 1
 prev_column: ~
 blocked_reason: ~
-reject_reason: ~
+base_commit: 4157da61a7150f4330fde2aeb74bf393898dfd62
 ---
 
 ## User Story
@@ -27,18 +27,18 @@ what makes both re-runs and interrupted backfills safe — resumability is "just
 re-run" (SAD-003#8.8 / ADR-008).
 
 ## Acceptance Criteria
-- [ ] A daily run fetches bars **since the last stored bar** per ticker and
+- [x] A daily run fetches bars **since the last stored bar** per ticker and
       appends them to the existing Yahoo DB via the same importer path as
       STORY-051 (`adjClose` → `bar.c`, unchanged schema).
-- [ ] Re-running the same day is **idempotent**: a second run produces **no
+- [x] Re-running the same day is **idempotent**: a second run produces **no
       duplicate rows** and overwrites same-date bars in place, via the importer's
       `ON CONFLICT(ticker, date)` upsert — verified by a test that runs the append
       twice and asserts row counts are unchanged on the second run (SAD-003#2.2).
-- [ ] The run is **externally triggered** — it builds no scheduler/cron/timer
+- [x] The run is **externally triggered** — it builds no scheduler/cron/timer
       (SAD-003#1.2, SAD-003#8.8 / ADR-008); it is a single-shot CLI invocation.
-- [ ] An interrupted or partial run is recovered simply by **re-running** (no
+- [x] An interrupted or partial run is recovered simply by **re-running** (no
       resume state file needed), because the upsert is idempotent (ADR-008).
-- [ ] The run targets the same documented Yahoo DB path as the backfill
+- [x] The run targets the same documented Yahoo DB path as the backfill
       (SAD-003#6.2); it does not write over synthetic/golden fixtures.
 
 ## Architectural Constraints (from SAD)
