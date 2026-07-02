@@ -202,4 +202,40 @@ describe('httpMarketClient.devImport', () => {
     fetchMock.mockResolvedValue({ ok: false, status: 500, json: async () => { throw new Error('no json'); } });
     await expect(httpMarketClient().devImport({ configName: 'x' })).rejects.toThrow('import failed: 500');
   });
+
+  it('throws when a 2xx body cannot be parsed as JSON (no blank success)', async () => {
+    // A truncated/garbage OK body must not return `{}` cast as a blank report.
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => { throw new Error('unexpected end of JSON'); } });
+    await expect(httpMarketClient().devImport({ configName: 'x' })).rejects.toThrow('response body was not valid JSON');
+  });
+});
+
+// activateDatabase shared the same two-path parse anti-pattern as devImport; the
+// STORY-036 fix was extended to it (same root cause, same file).
+describe('httpMarketClient.activateDatabase', () => {
+  it('POSTs /dev/databases/activate and returns the report', async () => {
+    const report = { activeKind: 'sqlite', activePath: '/d/dev.db', universe: 5 };
+    fetchMock.mockResolvedValue(jsonRes(report));
+    const out = await httpMarketClient().activateDatabase({ path: '/d/dev.db' });
+    expect(out).toEqual(report);
+    const [url, opts] = fetchMock.mock.calls[0];
+    expect(url).toBe('/dev/databases/activate');
+    expect(opts.method).toBe('POST');
+    expect(JSON.parse(opts.body)).toEqual({ path: '/d/dev.db' });
+  });
+
+  it('throws the service-provided error message on !res.ok', async () => {
+    fetchMock.mockResolvedValue(jsonRes({ error: 'no such db' }, { ok: false, status: 400 }));
+    await expect(httpMarketClient().activateDatabase({ path: '/nope' })).rejects.toThrow('no such db');
+  });
+
+  it('falls back to a status message when the error body is unparseable', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 500, json: async () => { throw new Error('no json'); } });
+    await expect(httpMarketClient().activateDatabase({ synthetic: true })).rejects.toThrow('activate failed: 500');
+  });
+
+  it('throws when a 2xx body cannot be parsed as JSON (no blank success)', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => { throw new Error('unexpected end of JSON'); } });
+    await expect(httpMarketClient().activateDatabase({ synthetic: true })).rejects.toThrow('response body was not valid JSON');
+  });
 });

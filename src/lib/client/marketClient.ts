@@ -207,9 +207,19 @@ export function httpMarketClient(): MarketClient {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const data = (await res.json().catch(() => ({}))) as { error?: string } & DevImportReport;
-      if (!res.ok) throw new Error(data.error || 'import failed: ' + res.status);
-      return data;
+      // Error path: swallow a parse failure so the service `error` (or a status
+      // fallback) still surfaces — a broken error body must not mask the failure.
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error || 'import failed: ' + res.status);
+      }
+      // Success path: a 2xx body that won't parse is a real failure, NOT an empty
+      // success — throw rather than returning `{}` cast as a blank report.
+      try {
+        return (await res.json()) as DevImportReport;
+      } catch {
+        throw new Error('import failed: response body was not valid JSON');
+      }
     },
 
     // Dev-only DB-selector (STORY-035). Same DEV_TOOLS gate as /dev/import: a 404
@@ -226,9 +236,18 @@ export function httpMarketClient(): MarketClient {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const data = (await res.json().catch(() => ({}))) as { error?: string } & ActivateDbReport;
-      if (!res.ok) throw new Error(data.error || 'activate failed: ' + res.status);
-      return data;
+      // Same two-path split as devImport (STORY-036): swallow a parse failure only
+      // on the error path so the service `error`/status still surfaces; on a 2xx a
+      // body that won't parse is a real failure, not an empty success.
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error || 'activate failed: ' + res.status);
+      }
+      try {
+        return (await res.json()) as ActivateDbReport;
+      } catch {
+        throw new Error('activate failed: response body was not valid JSON');
+      }
     },
   };
 }

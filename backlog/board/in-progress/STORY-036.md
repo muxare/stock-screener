@@ -6,10 +6,11 @@ capability: CAP-screen
 sad_refs: [SAD#4.3, SAD#6.1]
 target: ~
 estimate: ~
-attempts: 0
+attempts: 1
 prev_column: ~
 blocked_reason: ~
 reject_reason: ~
+base_commit: a1d1d37f93c4efc192146b005aec0a70a7ac4f60
 ---
 
 ## User Story
@@ -28,11 +29,11 @@ blank/garbage summary with no error. STORY-035 deliberately did NOT change this
 (its AC mandated identical transport behaviour); this story fixes the latent bug.
 
 ## Acceptance Criteria
-- [ ] `httpMarketClient.devImport` throws (rather than returning `{}`) when a 2xx
+- [x] `httpMarketClient.devImport` throws (rather than returning `{}`) when a 2xx
       response body cannot be parsed as JSON.
-- [ ] The existing error-path behaviour is unchanged: `!res.ok` still throws the
+- [x] The existing error-path behaviour is unchanged: `!res.ok` still throws the
       service-provided `error` message, falling back to `import failed: <status>`.
-- [ ] A test covers the malformed-2xx-body case.
+- [x] A test covers the malformed-2xx-body case.
 
 ## Out of scope
 - Any change to the screen/instrument/facts/backtest methods.
