@@ -7,10 +7,10 @@ sad_refs: [SAD#4.1, SAD#5.10, SAD#2.3]
 target: ~
 estimate: ~
 work_type: feature
-attempts: 0
+attempts: 1
 prev_column: ~
 blocked_reason: ~
-reject_reason: ~
+base_commit: 4c50ced107acc0052dc691c8b3b7878911b40d4b
 ---
 
 ## User Story
@@ -34,15 +34,15 @@ affects the other client calls (`screen`, `facts`, `backtest`); this story cover
 `instrument` and may generalise the helper if it stays within Touch scope.
 
 ## Acceptance Criteria
-- [ ] `marketClient.instrument` aborts and rejects after a bounded client-side
+- [x] `marketClient.instrument` aborts and rejects after a bounded client-side
       timeout when the service accepts the connection but never responds
       (e.g. via `AbortController` / `AbortSignal.timeout`).
-- [ ] A timed-out `/instrument` fetch surfaces through `ensureDisplayed` as
+- [x] A timed-out `/instrument` fetch surfaces through `ensureDisplayed` as
       `displayStatus[ticker] = 'error'` (the existing retryable error state), not a
       stuck `'loading'`.
-- [ ] `retryDisplayed` re-requests the timed-out name and resolves it on success
+- [x] `retryDisplayed` re-requests the timed-out name and resolves it on success
       (the timeout path is indistinguishable from the existing error path to the UI).
-- [ ] Tests cover a never-resolving `/instrument` fetch transitioning to `'error'`
+- [x] Tests cover a never-resolving `/instrument` fetch transitioning to `'error'`
       within the timeout and recovering on retry.
 
 ## Architectural Constraints (from SAD)
