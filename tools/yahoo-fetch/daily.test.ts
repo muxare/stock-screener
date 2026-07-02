@@ -160,6 +160,20 @@ describe('runDailyAppend — since the last stored bar', () => {
     expect(byTicker.get('MSFT')).toBe(period1Of('2024-01-02')); // MSFT's last bar
   });
 
+  it('clamps the window to asOf when a ticker\'s newest bar is already ahead of the run date (no inverted window)', async () => {
+    // Seed AAPL through 2024-01-05, then run with an EARLIER asOf (2024-01-03).
+    router = () => ({ status: 200, body: chartBody([{ date: '2024-01-05', close: 13, adjClose: 12 }]) });
+    await runDailyAppend({ tickers: ['AAPL'], asOf: new Date('2024-01-05T00:00:00Z'), dbPath, http: recordingHttp });
+
+    requestedUrls = [];
+    router = () => ({ status: 200, body: chartBody([{ date: '2024-01-03', close: 11, adjClose: 10 }]) });
+    await runDailyAppend({ tickers: ['AAPL'], asOf: new Date('2024-01-03T00:00:00Z'), dbPath, http: recordingHttp });
+
+    // lastBar (2024-01-05) is AFTER asOf (2024-01-03) → window anchors at asOf,
+    // never producing period1 > period2.
+    expect(period1In(requestedUrls[0])).toBe(period1Of('2024-01-03'));
+  });
+
   it('fetches only the run day for a ticker with no stored history (onboarding is backfill\'s job), never dropping it', async () => {
     // Fresh DB, AAPL unknown → window anchors at asOf, and the name still lands.
     router = () => ({ status: 200, body: chartBody([{ date: '2024-01-05', close: 13, adjClose: 12 }]) });
