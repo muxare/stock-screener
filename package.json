@@ -10,6 +10,7 @@
     "eod:import": "node tools/eod-import/index.ts",
     "yahoo:fetch": "node tools/yahoo-fetch/index.ts",
     "yahoo:backfill": "node tools/yahoo-fetch/backfill.ts",
+    "yahoo:daily": "node tools/yahoo-fetch/daily.ts",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",

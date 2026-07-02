@@ -38,7 +38,9 @@ export const DEFAULT_YAHOO_DB = resolve(import.meta.dirname, '..', '..', 'yahoo-
 // The importer config that maps the emitted CSV's shape (Company ticker column,
 // `iso` dates, ignored Dividends/Stock Splits) and points at the metadata side
 // file for name/sector resolution. Reused verbatim — not forked (SAD-003#5.2).
-const YAHOO_CONFIG = resolve(import.meta.dirname, '..', 'eod-import', 'config.yahoo.json');
+// Exported so the daily-append seam (STORY-052) reuses the SAME config path
+// rather than declaring its own (one config, one column mapping).
+export const YAHOO_CONFIG = resolve(import.meta.dirname, '..', 'eod-import', 'config.yahoo.json');
 
 // The CSV columns config.yahoo.json maps, in a stable header order. Names must
 // match `config.yahoo.json.columns`; the importer maps by name, not position.
@@ -58,6 +60,41 @@ export interface BackfillReport {
   failures: FetchFailure[]; // every failed ticker, never silently dropped (SAD-003#2.4)
   instruments: number; // instruments written by the importer
   bars: number; // bars written by the importer
+}
+
+// The outcome of the shared ingest tail: which names landed, which failed, and
+// how many rows the importer upserted.
+export interface ImportOutcome {
+  succeeded: string[]; // tickers that fetched at least one bar
+  failures: FetchFailure[]; // structured per-ticker failures (never a silent drop)
+  instruments: number; // instruments written/upserted by the importer
+  bars: number; // bars written/upserted by the importer
+}
+
+// The SHARED ingest tail (ADR-002): normalise fetched results → importer CSV →
+// the EXISTING importer's idempotent upsert. This is the ONE write path — both
+// the historical backfill (STORY-051) and the daily append (STORY-052) funnel
+// through it, so there is no second DB-writing path to keep in sync
+// (SAD-003#2.2, SAD-003#5.2). The CSV is intermediate (a temp file, never the
+// repo); `db.ts` is never called directly. Failed tickers contribute no rows —
+// they are reported here, not dropped (SAD-003#2.4).
+export function importResults(results: FetchResult[], dbPath: string, configPath: string): ImportOutcome {
+  const csv = toImporterCsv(results);
+  const failures = results.filter((r): r is Extract<FetchResult, { ok: false }> => !r.ok).map((r) => r.failure);
+  const succeeded = results.filter((r) => r.ok).map((r) => r.ticker);
+
+  const config = loadConfig(configPath);
+  const metadata = loadMetadata(config, configPath);
+
+  const workDir = mkdtempSync(join(tmpdir(), 'yahoo-import-'));
+  const csvPath = join(workDir, 'yahoo-export.csv');
+  try {
+    writeFileSync(csvPath, csv, 'utf8');
+    const report = runImport([csvPath], dbPath, config, metadata);
+    return { succeeded, failures, instruments: report.instruments, bars: report.bars };
+  } finally {
+    rmSync(workDir, { recursive: true, force: true });
+  }
 }
 
 // Normalise the fetcher's successful results into the importer's CSV input
@@ -111,33 +148,10 @@ export async function runBackfill(opts: BackfillOptions): Promise<BackfillReport
   const tickers = [...new Set(opts.tickers)];
   const results = await fetchTickers(tickers, opts.range, opts);
 
-  const csv = toImporterCsv(results);
-  const failures = results.filter((r): r is Extract<FetchResult, { ok: false }> => !r.ok).map((r) => r.failure);
-  const succeeded = results.filter((r) => r.ok).map((r) => r.ticker);
-
-  // Emit the CSV to a throwaway working file, then run the EXISTING importer over
-  // it with config.yahoo.json (which resolves name/sector via its metadata file →
-  // default precedence). The CSV is intermediate, so it lives in a temp dir, not
-  // the repo. We never touch db.ts directly (ADR-002).
-  const config = loadConfig(configPath);
-  const metadata = loadMetadata(config, configPath);
-
-  const workDir = mkdtempSync(join(tmpdir(), 'yahoo-backfill-'));
-  const csvPath = join(workDir, 'yahoo-export.csv');
-  try {
-    writeFileSync(csvPath, csv, 'utf8');
-    const report = runImport([csvPath], dbPath, config, metadata);
-    return {
-      dbPath,
-      requested: tickers.length,
-      succeeded,
-      failures,
-      instruments: report.instruments,
-      bars: report.bars,
-    };
-  } finally {
-    rmSync(workDir, { recursive: true, force: true });
-  }
+  // Funnel through the shared ingest tail — the ONE idempotent write path shared
+  // with the daily append (SAD-003#2.2 / ADR-002).
+  const outcome = importResults(results, dbPath, configPath);
+  return { dbPath, requested: tickers.length, ...outcome };
 }
 
 // ---------------------------------------------------------------------------
