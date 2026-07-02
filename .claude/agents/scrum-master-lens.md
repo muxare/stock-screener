@@ -20,7 +20,7 @@ the human). You are read-only: run only *read* `board.py` subcommands. Never
 ## What you read (and run)
 - `python3 tools/board.py metrics --json` — cycle time, review-check refusal rate,
   bounce rate, attempts distribution, blocked duration. THE capacity signal.
-- `python3 tools/board.py exceptions` — the Gate 2/5 queue (blocked, needs a human).
+- `python3 tools/board.py exceptions` — the Exception gate queue (blocked, needs a human).
 - `python3 tools/board.py batch-list` / `sprint-show` — the active commitment + live WIP.
 - `python3 tools/board.py validate` — WIP breaches, drift, firewall violations.
 - `.workflow/events.jsonl` — guard-fights (repeated refused `git mv`), demo-sweep
@@ -45,7 +45,7 @@ the human). You are read-only: run only *read* `board.py` subcommands. Never
 3. **Process workflow-change proposals**, each phrased as a concrete change to a
    named artifact (a `board.py` check, a hook, a skill prompt, a DoR/DoD item, a
    `/loop` stop-condition) and **routed to a gate** — a process/tooling change lands
-   as an IDEA at Gate 1; nothing is left as orphan prose.
+   as an IDEA at the Vision gate; nothing is left as orphan prose.
 
 Return tight, structured markdown. Lead with the capacity read (planning) or
 commitment accuracy (retro). Anchor every claim in a metric or an event — evidence,

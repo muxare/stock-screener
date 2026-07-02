@@ -2,7 +2,7 @@
 """Black-box tests for the board.py gates:
   Phase 1 — #1 hard review-check, #4 sanctioned check/set commands
   Phase 2 — #11 reject auto-demote
-  Phase 3 — #6 WIP limits, #7 batch=Gate 3, #8 exception queue
+  Phase 3 — #6 WIP limits, #7 batch=Commit gate, #8 exception queue
 
 Self-contained: builds a throwaway git repo + board in a tempdir, copies the
 real board.py + workflow_log.py into it, and drives the actual CLI via
@@ -293,7 +293,7 @@ def run():
         check("reject refused when not in review",
               r.returncode != 0 and "not review" in (r.stdout + r.stderr))
 
-        print("\n[#7] batch-new records a Gate-3 commitment (auto-numbered, active)")
+        print("\n[#7] batch-new records a Commit-gate commitment (auto-numbered, active)")
         r = repo.board("batch-new", "--capabilities", "CAP-x,CAP-y",
                        "--goal", "ship the slice", "--wip", "5")
         check("batch-new succeeds", r.returncode == 0)
@@ -368,7 +368,7 @@ def run():
         check("exceptions --json lists blocked stories", r.returncode == 0)
         import json as _json
         rows = {row["id"]: row for row in _json.loads(r.stdout)}
-        check("ADR/legal block classified as a human decision (Gate 2/5)",
+        check("ADR/legal block classified as a human decision (Exception gate)",
               rows.get("STORY-400", {}).get("kind") == "decision")
         check("ordinary block classified as a process block",
               rows.get("STORY-401", {}).get("kind") == "process")

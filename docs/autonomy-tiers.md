@@ -103,30 +103,30 @@ Use when CI and review-check gates are trusted and humans batch-review.
 ```bash
 python tools/board.py list --capability <id> --json
 python tools/board.py review-check STORY-NNN --base <commit>
-python tools/board.py reject STORY-NNN --reason "…"   # Gate-4 reject -> back to in-progress
-python tools/board.py batch-list                      # Gate 3: the committed batch + live WIP
+python tools/board.py reject STORY-NNN --reason "…"   # Acceptance-gate reject -> back to in-progress
+python tools/board.py batch-list                      # Commit gate: the committed batch + live WIP
 python tools/board.py batch-new --capabilities CAP-a,CAP-b --goal "…" [--wip N]
-python tools/board.py exceptions                      # Gate 2/5 queue: blocked work needing a human
+python tools/board.py exceptions                      # Exception gate queue: blocked work needing a human
 python tools/sync_board.py push --dry-run    # optional, after review in A3
 ```
 
-## Gate 3 (Commit) and the exception queue
+## Commit gate (Commit) and the exception queue
 
-The tiers above govern *how* a story is built; **Gate 3** governs *which* stories
+The tiers above govern *how* a story is built; **Commit gate** governs *which* stories
 a run is allowed to touch. The committed slice is an **active batch** — a.k.a. a
 **sprint** — a named set of capabilities plus committed stories and a `wip_limit`.
 The build loop should only `/build-toward` capabilities inside the active sprint,
 and the `wip_limit` caps how many stories sit `in-progress` (warned on `move`,
 flagged in `validate`). Anything that blocks lands in the **exception queue**
 (`board.py exceptions`), split into human-decision blocks (ADR / vendor / legal →
-Gate 2/5) and process blocks — so "in the loop on exceptions" means reading one
+Exception gate) and process blocks — so "in the loop on exceptions" means reading one
 queue, not watching the stream.
 
 **Sprint planning prepares this commitment.** Run `/sprint-plan` to convene a
 read-only team of lenses (Product-Owner, Scrum-Master, Dev-team, Claude-Code-leverage)
 that proposes a sprint goal, a capacity-bounded set of committed stories, an
 execution strategy, and preparation work that makes future sprints easier. The
-team *prepares*; **you commit at Gate 3** with `board.py sprint-plan-new` (this adds
+team *prepares*; **you commit at the Commit gate** with `board.py sprint-plan-new` (this adds
 no sixth gate). `board.py sprint-show` is the at-a-glance view of the active sprint.
 A **retrospective** at `sprint-close` (with the same team) is the planned next
 ceremony. See `docs/sprint-ceremonies.md`.

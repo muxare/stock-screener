@@ -14,8 +14,8 @@ proposals; the **human decides** which to land (`sprint-retro --accept/--reject`
 gate.** The four lenses are **read-only** — they run only *read* `board.py`
 subcommands and read files; they never `move`/`set`/`sprint-retro --accept` or edit
 anything. Every output must **land at a named gate or it isn't built** (accepted
-proposal → an IDEA at Gate 1, capture≠commit; in-scope techdebt → a candidate for
-Gate 3). No orphan reports.
+proposal → an IDEA at the Vision gate, capture≠commit; in-scope techdebt → a candidate for
+Commit gate). No orphan reports.
 
 ## Precondition
 The sprint must be **closed**. Check `python3 tools/board.py sprint-show`. If a
@@ -64,15 +64,15 @@ Present the synthesis as readable markdown, then emit the **exact commands** for
 human to run (do not run the accept/reject yourself):
 
 ```
-python3 tools/board.py sprint-retro --batch BATCH-NNN --accept P-1   # → spawns an IDEA (Gate 1)
+python3 tools/board.py sprint-retro --batch BATCH-NNN --accept P-1   # → spawns an IDEA (Vision gate)
 python3 tools/board.py sprint-retro --batch BATCH-NNN --reject P-2
 ```
 
 - An **accepted** proposal becomes an **IDEA** in the inbox (`born_from: RETRO-NNN`,
   `found_by: retro`) — a workflow change has no product `sad_refs`, so capture≠commit
-  forces it through **Gate 1**. Never author a story directly.
-- In-scope techdebt the team surfaced → a candidate for the next **Gate 3** sprint plan.
-- Anything blocked → the **Gate 2/5** exception queue.
+  forces it through **Vision gate**. Never author a story directly.
+- In-scope techdebt the team surfaced → a candidate for the next **Commit gate** sprint plan.
+- Anything blocked → the **Exception gate** exception queue.
 
 After the human accepts/rejects, `board.py validate` enforces that no accepted
 proposal is left dangling (every accepted one records its spawned IDEA), and

@@ -108,11 +108,14 @@ def main() -> None:
         sys.exit(0)
 
     root = _root()
+    status = _board(root, "status")
     sprint = _board(root, "sprint-show")
     in_prog = _in_progress(root)
 
     chunks = ["# Workflow re-grounding (disk is the source of truth)",
               "_Injected by the SessionStart hook so this fresh window resumes grounded._"]
+    if status:
+        chunks.append("## Where we are / next step\n```\n" + status + "\n```")
     if sprint:
         chunks.append("## Active sprint / WIP\n" + sprint)
     if in_prog:

@@ -38,11 +38,11 @@ Classify the discovery against the **SAD**, then route:
   `discovery_type: out-of-scope`) and writes `IDEA-NNN` to `backlog/ideas/`.
   It is **firewalled from the build loop** — `/build-toward` only picks
   `board/todo`, and `validate` blocks any story parented directly on an IDEA.
-  It cannot become work until a human promotes it at **Gate 1**
+  It cannot become work until a human promotes it at **Vision gate**
   (`/refine-idea IDEA-NNN PLAN-NNN` → SAD amendment/ADR).
 
 **When unsure which side of the fork you're on, capture it as an idea.** The
-firewall is the safe default: an idea wrongly parked is recoverable at Gate 1;
+firewall is the safe default: an idea wrongly parked is recoverable at the Vision gate;
 scope smuggled into a story is the failure mode this command exists to prevent.
 
 ## After capturing
@@ -51,5 +51,5 @@ scope smuggled into a story is the failure mode this command exists to prevent.
   new story's column. Both also surface on `board.py render` (board.md "Idea
   inbox") and the `render-html` **Idea inbox** tab.
 - **Where it lands at a gate:** an out-of-scope idea waits in the inbox for the
-  Product-Owner lens to triage at **Gate 1**; an in-scope story enters the normal
-  build flow at **Gate 3**. Either way you are done — do not build it now.
+  Product-Owner lens to triage at **Vision gate**; an in-scope story enters the normal
+  build flow at **Commit gate**. Either way you are done — do not build it now.

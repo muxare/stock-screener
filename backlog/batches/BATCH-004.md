@@ -30,7 +30,7 @@ A1; Wave1 parallel worktrees STORY-052/036/037, Wave2 STORY-054 after 036+037 me
 - idea:IDEA-009
 - idea:IDEA-010
 - idea:IDEA-011
-- note:close STORY-029 WON'T-DO at Gate 5
+- note:close STORY-029 WON'T-DO at the Exception gate
 - note:fix BATCH-003-plan invalid batch-id breaking validate
 
 ## Notes

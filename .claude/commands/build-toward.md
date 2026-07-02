@@ -12,11 +12,11 @@ fires on each story.
 first, fall back to target. The selector is generic on purpose — the
 vocabulary lives in the data, not this command.
 
-## Gate 3 — the active batch (commit before you build)
-The committed slice is recorded as a **batch** — the Gate-3 prioritisation
+## Commit gate — the active batch (commit before you build)
+The committed slice is recorded as a **batch** — the Commit gate prioritisation
 checkpoint. Before looping, read it: `python tools/board.py batch-list`.
 - The `<selector>` should name a capability **inside the active batch's
-  `capabilities`**. Building outside the committed batch is a Gate-3 decision —
+  `capabilities`**. Building outside the committed batch is a Commit gate decision —
   surface it to the human, don't widen scope yourself.
 - The active batch sets the **WIP limit** (`wip_limit`). `move in-progress`
   prints a WIP warning past the limit and `board.py validate` flags a breach —
@@ -48,7 +48,7 @@ order by parent/dependency, then id
 for story in stories:
     board.py move <id> in-progress          # refused if sad_refs empty; stamps attempts;
                                             # stamps base_commit=HEAD on FIRST entry only
-    if story has a reject_reason:           # bounced at Gate 4 — rework brief
+    if story has a reject_reason:           # bounced at the Acceptance gate — rework brief
         read it and address that feedback FIRST (it clears on next move review)
     -> invoke sad-grounding: read sad_refs sections, restate constraints
     implement within Touch scope only
@@ -145,7 +145,7 @@ The test is mechanical: *same cause* and *in Touch scope* are both yes → fix a
 document; any no → fan out. This keeps "obviously the same bug" from forcing a
 second round-trip while still stopping silent scope expansion.
 
-## Gate 4 — acceptance (human)
+## Acceptance gate — acceptance (human)
 A story that reaches `review` waits for the human. Two sanctioned outcomes:
 - **Accept:** `board.py move <id> done` (re-runs the gate; refused on problems).
 - **Reject:** `board.py reject <id> --reason "<rework brief>"` — bounces the
@@ -158,6 +158,6 @@ A story that reaches `review` waits for the human. Two sanctioned outcomes:
 Print: done / review / blocked per story, plus any flagged SAD conflicts that
 need a human decision (likely a new ADR in `SAD#8`). Then run
 `python tools/board.py exceptions` — every story you blocked lands in the
-**Gate 2/5 queue**, split into "needs a human decision" (ADR / vendor / legal)
+**Exception gate queue**, split into "needs a human decision" (ADR / vendor / legal)
 vs ordinary process blocks. That queue is the single surface the human (or the
 Scrum-Master lens) reads; you do not need to chase blocked items yourself.

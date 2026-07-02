@@ -15,11 +15,11 @@ Claude Code expert), synthesised here._
 
 ## 0. The idea in one paragraph
 
-A **sprint** is the existing **`batch`** (the Gate-3 commitment) wrapped in two
+A **sprint** is the existing **`batch`** (the Commit-gate commitment) wrapped in two
 ceremonies: **Planning** before it opens and a **Retrospective** at its close. It
 is **scope-boxed, not time-boxed** — `sprint-plan-new` opens it, `sprint-close`
 ends it, and a sprint lasts exactly one batch's worth of work, however long that
-takes. No new container, **no sixth gate**: planning is *prep for Gate 3* (the
+takes. No new container, **no sixth gate**: planning is *prep for Commit gate* (the
 human still commits) and retro is *prep for process change* (the human still
 decides). The load-bearing rule everywhere: **agents prepare and enforce; the
 human decides at the five gates.**
@@ -41,10 +41,10 @@ BATCH-001 stays valid (the new fields are additive and optional).
 | Scrum thing | This system | Status |
 |---|---|---|
 | Sprint backlog | the active batch's capabilities → committed stories | exists |
-| Sprint commitment | `sprint-plan-new` (= enriched `batch-new`), Gate 3 | **enriched** |
+| Sprint commitment | `sprint-plan-new` (= enriched `batch-new`), Commit gate | **enriched** |
 | Sprint goal | batch `## Goal` (now an outcome, not a task list) | **enriched** |
 | Sprint planning | the `/sprint-plan` ceremony → the `sprint-plan-new` call | **added** |
-| Sprint review/demo | Gate 4 acceptance per story | exists |
+| Sprint review/demo | Acceptance gate acceptance per story | exists |
 | Sprint retrospective | `/sprint-retro` ceremony at close | **added** (§5) |
 | Sprint close | `sprint-close` (= `batch-close`) | exists (alias) |
 
@@ -69,7 +69,7 @@ legacy `batch-new` still produces a valid file):
 the story (`feature | enabler | spike | techdebt | tooling`, default `feature`).
 Committed enablers ride the story path (build loop); forward groundwork rides the
 **firewalled** idea inbox (capture≠commit — it can't be built without a human at
-Gate 1). The retro→planning handoff is the literal loop by which each sprint makes
+Vision gate). The retro→planning handoff is the literal loop by which each sprint makes
 the next one cheaper.
 
 ---
@@ -77,7 +77,7 @@ the next one cheaper.
 ## 3. The planning team (`/sprint-plan`)
 
 Four **read-only** advisory subagents (`.claude/agents/`) fan out in parallel,
-then the command synthesises ONE proposed plan the human ratifies at Gate 3:
+then the command synthesises ONE proposed plan the human ratifies at the Commit gate:
 
 | Lens | Angle | Prepares |
 |---|---|---|
@@ -89,7 +89,7 @@ then the command synthesises ONE proposed plan the human ratifies at Gate 3:
 The command checks there is no active sprint, fans out the four, reconciles
 conflicts (e.g. PO's 6 stories vs SM's capacity of 3 → propose 3, note the
 deferred), and emits the exact `sprint-plan-new` command for the human to run and
-edit. **It does not run it** — that call is the Gate-3 commitment.
+edit. **It does not run it** — that call is the Commit-gate commitment.
 
 ---
 
@@ -97,7 +97,7 @@ edit. **It does not run it** — that call is the Gate-3 commitment.
 
 `tools/board.py`:
 - `sprint-plan-new --goal --capabilities --stories --prep --exec-strategy --wip --id`
-  — Gate-3 commit; enriches `cmd_batch_new` (single-active reused). `batch-new`
+  — Commit gate commit; enriches `cmd_batch_new` (single-active reused). `batch-new`
   stays as the legacy terse form.
 - `sprint-show [BATCH-NNN] [--json]` — goal + committed stories with their **live**
   board column + prep + WIP. The "are we on track for the goal" surface.
@@ -191,12 +191,12 @@ shipped: 4                 # committed stories that reached done within the wind
 |-----|---------------------------------|---------|----------|-----------|
 | P-1 | board.py done-gate              | tool    | accepted | IDEA-008  |
 | P-2 | STORY.template `## Touch scope` | file    | proposed | —         |
-| P-3 | Gate 4 acceptance checklist     | gate    | rejected | —         |
+| P-3 | Acceptance gate acceptance checklist     | gate    | rejected | —         |
 ```
 
 Proposal `status` ∈ {proposed, accepted, rejected}. An **accepted** proposal
 becomes an **IDEA** in the inbox (never a story directly — a workflow change has no
-product `sad_refs`, so capture≠commit forces it through Gate 1). The `result` cell
+product `sad_refs`, so capture≠commit forces it through Vision gate). The `result` cell
 records the spawned `IDEA-NNN`.
 
 ### 5.3 `board.py` surface to add (minimal, idiomatic)
@@ -270,7 +270,7 @@ STEP A (#16) build steps are spec'd in `docs/work-process-analysis.md` §10 "STE
 ## 6. Anti-patterns guarded
 
 - **No sixth gate** — every ceremony output maps to an existing gate (planning →
-  Gate 3; retro proposals → Gate 1 via the idea inbox, or Gate 3 as anchored debt).
+  Commit gate; retro proposals → Vision gate via the idea inbox, or Commit gate as anchored debt).
 - **No scope invention** — the PO lens orders existing anchored work only; every
   committed item (incl. enablers) needs `sad_refs`; DoR enforced at planning.
 - **No velocity-gaming** — the *goal verdict*, not story-count, is the sprint's
@@ -287,7 +287,7 @@ STEP A (#16) build steps are spec'd in `docs/work-process-analysis.md` §10 "STE
 ```bash
 python3 tools/board.py sprint-show                 # the active sprint at a glance
 /sprint-plan CAP-screen                            # convene the planning team (read-only)
-# review the proposal, then commit at Gate 3 (edit as you like):
+# review the proposal, then commit at the Commit gate (edit as you like):
 python3 tools/board.py sprint-plan-new \
   --goal "…" --capabilities CAP-screen --stories STORY-0xx,STORY-0yy \
   --prep "idea:IDEA-00n,note:…" --exec-strategy "…" --wip 3
@@ -299,7 +299,7 @@ python3 tools/board.py sprint-close BATCH-NNN
 python3 tools/board.py sprint-retro --batch BATCH-NNN          # scaffold RETRO-NNN (data)
 python3 tools/board.py metrics --sprint BATCH-NNN             # the frozen window snapshot
 # review the proposals, then land them at a gate:
-python3 tools/board.py sprint-retro --batch BATCH-NNN --accept P-1   # → spawns an IDEA (Gate 1)
+python3 tools/board.py sprint-retro --batch BATCH-NNN --accept P-1   # → spawns an IDEA (Vision gate)
 python3 tools/board.py sprint-retro --batch BATCH-NNN --reject P-2
 python3 tools/board.py idea-list                              # the firewalled inbox the retro fed
 ```
@@ -327,18 +327,18 @@ the one action loop is gated behind Phase 1 (which has landed)._
 All read-only; each lands its output at a named gate. Drive them with `/loop`
 (self-paced or on an interval) while you're in a session:
 
-- **SM health sweep → Gate 5/retro.** Flow & process health off the event log:
+- **SM health sweep → Exception gate/retro.** Flow & process health off the event log:
   ```
   /loop python3 tools/board.py metrics ; python3 tools/board.py exceptions ; python3 tools/board.py validate
   ```
   Surfaces WIP breaches, aging stories, the exception queue, and validate nudges.
   The Scrum-Master lens (via `/sprint-retro` at close) reads the same surfaces.
-- **PO batch-prep → Gate 3.** Convene the read-only planning team to propose the
-  next batch (it never commits — that's your Gate-3 call):
+- **PO batch-prep → Commit gate.** Convene the read-only planning team to propose the
+  next batch (it never commits — that's your Commit gate call):
   ```
   /loop /sprint-plan <capability-hint>
   ```
-- **Idea-inbox triage nudge → Gate 1.** Surface fresh + stale captures so the
+- **Idea-inbox triage nudge → Vision gate.** Surface fresh + stale captures so the
   inbox stays signal and nothing rots unpromoted:
   ```
   /loop python3 tools/board.py idea-list
@@ -353,7 +353,7 @@ back attention.
 The in-session `/loop` dies with the session. For a heartbeat that **survives
 across sessions**, schedule the SM health sweep as an overnight cron-style routine
 (via `/schedule`): a nightly digest of `metrics` + `exceptions` + `validate` so
-the morning starts with the board's state already summarised at Gate 5, no
+the morning starts with the board's state already summarised at the Exception gate, no
 watching the stream. This is the "the machine's standup" the event log always made
 possible — the routine just delivers it on a clock.
 
@@ -369,6 +369,6 @@ here"; the observation routine (§8.3) for the cross-session heartbeat.
 
 The standing risk of any loop is noise nobody reads. The guardrail is the same one
 that governs the lenses: **every loop's output must land at a named gate** (SM →
-Gate 5/retro; PO → Gate 3; triage → Gate 1; the action loop → Gate 4 acceptance).
+Exception gate/retro; PO → Commit gate; triage → Vision gate; the action loop → Acceptance gate acceptance).
 A loop that emits to no gate is dropped, not scheduled.
 

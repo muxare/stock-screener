@@ -119,10 +119,10 @@ flowchart TD
         SAD -->|"/sad-to-backlog<br/>(backlog-decomposer)"| BL["EPIC ▸ FEAT ▸ STORY<br/>backlog/board/todo"]
     end
 
-    %% ---------- Gates 1-3 ----------
-    G1{{"GATE 1 — Vision<br/>plan + non-goals approved"}}:::gate
-    G2{{"GATE 2 — Architecture<br/>SAD Approved + ADRs decided"}}:::gate
-    G3{{"GATE 3 — Commit<br/>batch-new: capabilities + WIP"}}:::gate
+    %% ---------- Vision / Architecture / Commit gates ----------
+    G1{{"Vision gate<br/>plan + non-goals approved"}}:::gate
+    G2{{"Architecture gate<br/>SAD Approved + ADRs decided"}}:::gate
+    G3{{"Commit gate<br/>batch-new: capabilities + WIP"}}:::gate
 
     PLAN -.-> G1
     SAD -.-> G2
@@ -144,9 +144,9 @@ flowchart TD
 
     G3 --> MV1
 
-    %% ---------- Gate 4 / 5 ----------
-    G4{{"GATE 4 — Acceptance<br/>human diff sign-off"}}:::gate
-    G5{{"GATE 5 — Exception<br/>blocked / SAD conflict"}}:::gate
+    %% ---------- Acceptance / Exception gates ----------
+    G4{{"Acceptance gate<br/>human diff sign-off"}}:::gate
+    G5{{"Exception gate<br/>blocked / SAD conflict"}}:::gate
     MV2 --> G4
     G4 -->|accept| DONE["board.py move done<br/>backlog/board/done"]
     G4 -->|"reject (board.py reject)"| MV1
@@ -186,15 +186,15 @@ flowchart TD
 | P2 | **POC → plan** | `/poc-to-plan` (poc-to-plan) | `poc/` artifact | `PLAN-NNN` (+ labelled production gaps) | skill prose | — |
 | P3 | **Plan → SAD** | `/plan-to-sad` (sad-author) | `PLAN-NNN` + `SAD.template.md` | `SAD-NNN` with anchors (SAD#3 caps, SAD#5 components, SAD#6 data, SAD#8 ADRs) | skill prose; anchors immutable | — |
 | P4 | **SAD → backlog** | `/sad-to-backlog` (backlog-decomposer) | **Approved** `SAD-NNN` | `EPIC ▸ FEAT ▸ STORY` in `board/todo`; coverage table | decomposer invariants + `board.py validate` (sad_refs, capability) | — |
-| P5 | **Commit a batch (Gate 3)** | `board.py batch-new` | capabilities + goal + `--wip` | active batch artifact; WIP limit | `board.py batch-list` / `validate` | — |
+| P5 | **Commit a batch (Commit gate)** | `board.py batch-new` | capabilities + goal + `--wip` | active batch artifact; WIP limit | `board.py batch-list` / `validate` | — |
 | P6 | **Start story** | `board.py move <id> in-progress` | story with non-empty `sad_refs` | story in `in-progress`; **base_commit stamped**; `attempts++` | board.py (refuses empty sad_refs); hook blocks manual `mv` | **#3** (logging) |
 | P7 | **Ground** | sad-grounding (in build loop) | story `sad_refs` + SAD text | restated binding constraints | skill prose | — |
 | P8 | **Implement + tick criteria** | edit + `board.py check --criterion` | Touch scope + SAD constraints | code + tests; `[x]` criteria | edit-guard blocks hand-flipping boxes | **#4**, **SF** |
 | P9 | **Code-review pass** | `/code-review` (mandatory loop step) | story diff vs `base_commit` | findings; out-of-scope fan-out stories | loop convention (not board-enforced) | — |
 | P10 | **Review-check gate** | `board.py review-check` + auto on `move review`/`done` | diff `base..HEAD` (Touch scope) | pass / refuse (lint, test, scope, test-gaming) | board.py gate; `--skip-review-check` override logged | **#1** |
 | P11 | **To review** | `board.py move <id> review` | passing gate | story in `review` (autonomous stop, A2) | board.py re-runs gate | **#1** |
-| P12 | **Accept / reject (Gate 4)** | `board.py move done` / `board.py reject` | human diff sign-off | `done`, or bounce → `in-progress` | board.py (refuses unchecked `[ ]`; re-runs gate) | — |
-| P13 | **Exception queue (Gate 2/5)** | `board.py move blocked --reason` / `exceptions` | blocked story + reason | exception queue entry; `prev_column` stamped | board.py | — |
+| P12 | **Accept / reject (Acceptance gate)** | `board.py move done` / `board.py reject` | human diff sign-off | `done`, or bounce → `in-progress` | board.py (refuses unchecked `[ ]`; re-runs gate) | — |
+| P13 | **Exception queue (Exception gate)** | `board.py move blocked --reason` / `exceptions` | blocked story + reason | exception queue entry; `prev_column` stamped | board.py | — |
 | P14 | **Render view** | `board.py render` (+ on `move`) | board folder state | generated `board.md` | board.py | **#2** |
 | P15 | **Validate / metrics** | `board.py validate` / `metrics` | board folders + `events.jsonl` | invariant report; retro metrics | board.py | **#3** |
 | P16 | **Sync (optional)** | `/sync-board push` (story-syncer) | `backlog/**` (source of truth) | Azure DevOps / GitHub work items (MCP) | skill; degrades gracefully | — |

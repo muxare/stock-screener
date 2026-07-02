@@ -28,17 +28,20 @@ Commands:
       from the matching template (closes F10, the manual-ID-assignment touch).
   check <id> [--criterion SUBSTR | --all] [--uncheck]  # tick acceptance criteria
   set <id> <field> <value>      # set an allowlisted frontmatter field (e.g. sad_refs)
-  reject <id> --reason TEXT     # Gate-4 reject: review -> in-progress, re-enters loop
+  reject <id> --reason TEXT     # Acceptance-gate reject: review -> in-progress, re-enters loop
   batch-new --capabilities CAP-a,CAP-b [--goal ...] [--wip N] [--id BATCH-NNN]
-      Gate 3: record the committed batch (capabilities + WIP limit); one active
+      Commit gate: record the committed batch (capabilities + WIP limit); one active
       batch at a time. The active batch's wip_limit caps in-progress.
   batch-close <id>              # close a batch once its commitment is complete
   batch-list [--json]           # batches + live WIP usage
+  status [--json]               # where am I on the workflow spine + the next
+      step: a named-stage strip (Vision→Architecture→Commit→Build→Acceptance→
+      Done) with a "you are here" marker, inferred live from board state.
   sprint-retro [--batch BATCH-NNN] [--accept P-N] [--reject P-N]
       Sprint STEP 2: retro a CLOSED sprint. No flags scaffold RETRO-NNN
       (committed-vs-shipped + a frozen windowed metrics snapshot + an empty
       proposal table). --accept flips a proposal to accepted AND spawns an IDEA
-      (Gate-1 landing, capture≠commit); --reject flips it to rejected.
+      (Vision-gate landing, capture≠commit); --reject flips it to rejected.
   idea-new [--title --born-from --found-by --why --discovery-type --id]
       Capture an out-of-scope discovery into the firewalled inbox (#16). The
       same writer backs sprint-retro --accept.
@@ -46,7 +49,7 @@ Commands:
   idea-archive [--days N] [--dry-run]
       Archive inbox ideas older than N days (default STALE_IDEA_DAYS) to
       backlog/ideas/archive/, keeping the live inbox high-signal (A5).
-  exceptions [--json]           # Gate 2/5 queue: blocked work split decision vs process
+  exceptions [--json]           # Exception gate queue: blocked work split decision vs process
   show <id>
   render            # write a human-readable board.md (pure read, not state)
   render-html       # write a self-contained backlog/index.html with three tabs:
@@ -116,7 +119,7 @@ ITEM_KINDS = {
     "sad":     (SAD_DIR,   "SAD",  PLAN_ID,  False),
 }
 
-# Gate 3: how many stories may sit in-progress at once when no active batch
+# Commit gate: how many stories may sit in-progress at once when no active batch
 # overrides it. The cap turns "fan debt out into the backlog" (F3) into a visible
 # signal — at the limit you must finish or explicitly defer, not silently widen WIP.
 DEFAULT_WIP_LIMIT = 3
@@ -125,12 +128,33 @@ DEFAULT_WIP_LIMIT = 3
 # and `validate` nudges. Keeps the inbox a signal, not a graveyard.
 STALE_IDEA_DAYS = 90
 # Exception queue (#8): a blocked_reason mentioning any of these reads as a
-# decision only a human can make (architecture / vendor / legal) → Gate 2/5,
+# decision only a human can make (architecture / vendor / legal) → Exception gate,
 # versus an ordinary process block an agent can clear itself.
 DECISION_SIGNAL = re.compile(
     r"\b(ADR|SAD#|vendor|legal|licen[sc]e|licensing|architecture|sign-?off)\b",
     re.I,
 )
+
+# ---------- workflow stages (the named gates + the build region) ----------
+# The spine every project travels, plus the human-decision gates along it. These
+# NAMES replace the old "Gate 1..5" numbering: the numbers implied one linear
+# 1→2→3→4→5 run, but the Acceptance gate fires once per story *inside* the loop
+# and the Exception gate is a side-channel reachable from anywhere — the sequence
+# the numbers implied never existed. Descriptive names double as the "what's the
+# next step" signal `board.py status` surfaces. Legend for old artifacts:
+#   Gate 1 → Vision · Gate 2 → Architecture · Gate 3 → Commit
+#   Gate 4 → Acceptance · Gate 5 → Exception
+STAGES = [
+    ("vision",       "Vision gate",       "plan + non-goals approved"),
+    ("architecture", "Architecture gate", "SAD approved + ADRs decided"),
+    ("commit",       "Commit gate",       "batch: capabilities + WIP limit"),
+    ("build",        "Build loop",        "implement → code-review → review-check"),
+    ("acceptance",   "Acceptance gate",   "human diff sign-off"),
+    ("done",         "Done",              "shipped"),
+]
+# The Exception gate is orthogonal to the strip (blocked / SAD-conflict, off to
+# the side), so it is surfaced separately rather than as a strip position.
+EXCEPTION_GATE = ("exception", "Exception gate", "blocked / SAD conflict")
 
 
 def _log(event, outcome="ok", message="", **fields):
@@ -223,7 +247,7 @@ def parse_list(value):
     return [p.strip() for p in v.split(",") if p.strip() and p.strip() not in SENTINELS]
 
 
-# ---------- batch (Gate 3) + WIP helpers ----------
+# ---------- batch (Commit gate) + WIP helpers ----------
 def all_batches():
     """Return (fm, body) for every BATCH-NNN.md, newest id last."""
     out = []
@@ -810,7 +834,7 @@ def cmd_move(args):
             sys.exit(f"refused: {msg}")
 
     # WIP signal (#6): starting work past the limit is allowed but SURFACED, not
-    # silent — the loop keeps moving while making overload visible at Gate 3. src
+    # silent — the loop keeps moving while making overload visible at the Commit gate. src
     # is never in-progress here (same-column moves are refused above), so the new
     # post-move count is current + 1.
     if dst == "in-progress":
@@ -818,7 +842,7 @@ def cmd_move(args):
         post = column_count("in-progress") + 1
         if post > limit:
             warn = (f"WIP at {post} in-progress (limit {limit}). Finish or defer "
-                    f"one, or raise the batch wip_limit at Gate 3.")
+                    f"one, or raise the batch wip_limit at the Commit gate.")
             print(f"⚠ {warn}")
             _log("move", outcome="warn", message=warn, story_id=args.id,
                  count=post, **{"from": src, "to": dst})
@@ -900,7 +924,7 @@ def cmd_move(args):
 
 
 def cmd_reject(args):
-    """Gate-4 reject: bounce a reviewed story back into the loop (Phase 2, #11).
+    """Acceptance-gate reject: bounce a reviewed story back into the loop (Phase 2, #11).
 
     The single sanctioned "no" at the acceptance gate. Returns the story to
     `in-progress` (so `/build-toward` re-picks it without a manual move) and
@@ -935,7 +959,7 @@ def cmd_reject(args):
 
 
 def cmd_batch_new(args):
-    """Gate 3: record a sprint plan — the capabilities + stories you commit to.
+    """Commit gate: record a sprint plan — the capabilities + stories you commit to.
 
     A batch IS the sprint container: a scope-boxed commitment (not a timebox).
     Beyond the capabilities and WIP limit, a sprint plan also names the specific
@@ -944,7 +968,7 @@ def cmd_batch_new(args):
     preparation/enabler work that makes FUTURE sprints cheaper. Only one batch is
     active at a time, so this is the single standing answer to "what are we
     building now". `sprint-plan-new` is the sprint-vocabulary alias; running this
-    command IS the human Gate-3 commitment (the planning team only prepared it).
+    command IS the human Commit-gate commitment (the planning team only prepared it).
     """
     caps = [c.strip() for c in (args.capabilities or "").split(",") if c.strip()]
     if not caps:
@@ -952,7 +976,7 @@ def cmd_batch_new(args):
     if active_batches():
         ids = ", ".join(fm.get("id", "?") for fm, _ in active_batches())
         _fatal(f"an active sprint already exists ({ids}); close it first "
-               f"(board.py sprint-close <id>) — Gate 3 is one commitment at a time",
+               f"(board.py sprint-close <id>) — the Commit gate is one commitment at a time",
                event="batch-new")
     existing = [int(re.search(r"BATCH-(\d+)", os.path.basename(p)).group(1))
                 for p in glob.glob(os.path.join(BATCHES, "BATCH-*.md"))
@@ -1008,7 +1032,7 @@ def cmd_batch_new(args):
 
 
 def cmd_batch_close(args):
-    """Close a batch — the Gate-3 commitment is complete, freeing the next one."""
+    """Close a batch — the Commit-gate commitment is complete, freeing the next one."""
     path = os.path.join(BATCHES, f"{args.id}.md")
     if not os.path.exists(path):
         _fatal(f"error: {args.id} not found in backlog/batches/", event="batch-close",
@@ -1033,7 +1057,7 @@ def cmd_batch_list(args):
         print(json.dumps(slim, indent=2))
         return
     if not batches:
-        print("(no batches — board.py batch-new --capabilities … to open Gate 3)")
+        print("(no batches — board.py batch-new --capabilities … to open the Commit gate)")
         return
     ip = column_count("in-progress")
     for fm, _ in batches:
@@ -1044,6 +1068,111 @@ def cmd_batch_list(args):
         if status == "active":
             line += f"  (in-progress now: {ip})"
         print(line)
+
+
+def _workflow_position():
+    """Infer where the project sits on the workflow spine from board state.
+
+    Read-only. Returns a dict: stage key, headline, next step, sprint one-liner,
+    detail lines, and the blocked count (Exception gate). Upstream authoring gates
+    (Vision, Architecture) are implicitly passed once a backlog exists on the
+    board — board.py only observes the live build region, so it reports from
+    Commit onward and points at the authoring commands when the board is empty.
+    """
+    by_col = {}
+    for s in all_stories():
+        by_col.setdefault(s["_column"], []).append(s.get("id"))
+    counts = {c: len(by_col.get(c, [])) for c in COLUMNS}
+    blocked = counts["blocked"]
+    fm, _ = active_batch()
+
+    if not fm:
+        if counts["todo"] or counts["in-progress"] or counts["review"]:
+            return {"stage": "commit", "sprint": "",
+                    "headline": "no sprint committed — stories are waiting on the board",
+                    "next": "commit a sprint: board.py sprint-plan-new --capabilities … "
+                            "(the Gate-free planning team prepares; this is your Commit)",
+                    "detail": [f"todo {counts['todo']} · in-progress "
+                               f"{counts['in-progress']} · review {counts['review']}"],
+                    "blocked": blocked}
+        return {"stage": "architecture", "sprint": "",
+                "headline": "no active sprint and no work on the board",
+                "next": "author upstream: /refine-idea → /plan-to-sad → "
+                        "/sad-to-backlog, then commit a sprint",
+                "detail": [], "blocked": blocked}
+
+    bid = fm.get("id", "?")
+    committed = committed_stories(fm)
+    cols = {s.get("id"): s["_column"] for s in all_stories()}
+    done = sum(1 for sid in committed if cols.get(sid) == "done")
+    ip, limit = counts["in-progress"], batch_wip_limit()
+    sprint = f"{bid} [active] · {done}/{len(committed)} committed done · WIP {ip}/{limit}"
+
+    review = sorted(by_col.get("review", []))
+    in_prog = sorted(by_col.get("in-progress", []))
+    committed_todo = sorted(sid for sid in committed if cols.get(sid) == "todo")
+
+    if review:
+        rid = review[0]
+        return {"stage": "acceptance", "sprint": sprint, "blocked": blocked,
+                "headline": f"{rid} is in review, awaiting your sign-off",
+                "next": f"review the diff → accept (board.py move {rid} done) "
+                        f"or bounce (board.py reject {rid} --reason …)",
+                "detail": [f"in review: {', '.join(review)}"] if len(review) > 1 else []}
+    if in_prog:
+        pid = in_prog[0]
+        return {"stage": "build", "sprint": sprint, "blocked": blocked,
+                "headline": f"{pid} is in progress (Build loop)",
+                "next": f"finish {pid} → board.py review-check {pid} → "
+                        f"board.py move {pid} review",
+                "detail": [f"in progress: {', '.join(in_prog)}"] if len(in_prog) > 1 else []}
+    if committed_todo:
+        sid = committed_todo[0]
+        return {"stage": "build", "sprint": sprint, "blocked": blocked,
+                "headline": "sprint committed, no story started yet (Build loop entry)",
+                "next": f"start a committed story: board.py move {sid} in-progress",
+                "detail": [f"committed & waiting: {', '.join(committed_todo)}"]}
+    if committed and done == len(committed):
+        return {"stage": "done", "sprint": sprint, "blocked": blocked,
+                "headline": f"all {done} committed stories are done — sprint complete",
+                "next": f"close it (board.py sprint-close {bid}) and plan the next "
+                        f"(board.py sprint-retro → sprint-plan-new)",
+                "detail": []}
+    return {"stage": "build", "sprint": sprint, "blocked": blocked,
+            "headline": "sprint active — no committed story is todo/in-progress/review",
+            "next": "check board.py sprint-show for drift, or commit more work",
+            "detail": []}
+
+
+def _render_stage_strip(here_key):
+    """One-line strip of stage names with the current stage marked ▶…◀."""
+    keys = [k for k, _, _ in STAGES]
+    idx = keys.index(here_key) if here_key in keys else -1
+    cells = [(f"▶{name}◀" if i == idx else name)
+             for i, (_, name, _) in enumerate(STAGES)]
+    return " → ".join(cells)
+
+
+def cmd_status(args):
+    """Where am I in the workflow, and what's the next step? A stage strip with a
+    'you are here' marker over the named gates, plus the concrete next command —
+    inferred live from board state. Read-only; touches nothing."""
+    pos = _workflow_position()
+    if getattr(args, "json", False):
+        print(json.dumps({k: v for k, v in pos.items()}, indent=2))
+        return
+    print("Workflow ▸ " + _render_stage_strip(pos["stage"]))
+    print(f"           (Exception gate handles blocked / SAD-conflict, off to the side)")
+    print()
+    print(f"You are here : {pos['headline']}")
+    if pos["sprint"]:
+        print(f"Sprint       : {pos['sprint']}")
+    for d in pos["detail"]:
+        print(f"               {d}")
+    print(f"Next step    : {pos['next']}")
+    if pos["blocked"]:
+        print(f"⚠ Exception  : {pos['blocked']} blocked — clear via board.py exceptions")
+    _log("status", stage=pos["stage"])
 
 
 def _sprint_goal(body):
@@ -1067,7 +1196,7 @@ def cmd_sprint_show(args):
     else:
         fm, body = active_batch()
         if not fm:
-            print("no active sprint (Gate 3 open) — "
+            print("no active sprint (Commit gate open) — "
                   "board.py sprint-plan-new … to open one")
             return
     cols = {s.get("id"): s["_column"] for s in all_stories()}
@@ -1117,10 +1246,10 @@ def cmd_sprint_show(args):
 
 
 def cmd_exceptions(args):
-    """Gate 2/5 queue (#8): everything stuck waiting on a human, in one place.
+    """Exception gate queue (#8): everything stuck waiting on a human, in one place.
 
     Blocked stories are split into the ones an agent cannot clear — architecture,
-    vendor, or legal decisions (Gate 2/5) — and ordinary process blocks. This is
+    vendor, or legal decisions (Exception gate) — and ordinary process blocks. This is
     the surface the Scrum-Master lens and `/loop` read to ping you, instead of you
     watching the stream.
     """
@@ -1132,7 +1261,7 @@ def cmd_exceptions(args):
         rows.append({
             "id": fm.get("id", "?"),
             "kind": kind,
-            "gate": "Gate 2/5" if kind == "decision" else "agent/SM",
+            "gate": "Exception gate" if kind == "decision" else "agent/SM",
             "reason": reason or "unspecified",
             "from": fm.get("prev_column", "?"),
             "attempts": fm.get("attempts", "0"),
@@ -1149,7 +1278,7 @@ def cmd_exceptions(args):
     print(f"EXCEPTION QUEUE — {len(rows)} blocked "
           f"({len(decisions)} need a human decision, {len(process)} process)\n")
     if decisions:
-        print("  ▼ NEEDS A HUMAN DECISION (Gate 2/5):")
+        print("  ▼ NEEDS A HUMAN DECISION (Exception gate):")
         for r in decisions:
             print(f"    {r['id']:<10} (from {r['from']}, attempts {r['attempts']})\n"
                   f"        {r['reason']}")
@@ -1268,7 +1397,7 @@ def _write_idea(title=None, born_from=None, why=None, found_by=None,
 
     Shared by `idea-new` and `sprint-retro --accept`, so a retro's accepted
     workflow-change proposal lands exactly like an in-flow discovery: in the
-    inbox, firewalled from the build loop until a human promotes it at Gate 1.
+    inbox, firewalled from the build loop until a human promotes it at the Vision gate.
     Returns the new IDEA id.
     """
     from datetime import datetime, timezone
@@ -1292,7 +1421,7 @@ def _write_idea(title=None, born_from=None, why=None, found_by=None,
     body = (f"\n# {new_id} — {title or '<short title>'}\n\n"
             f"{why or 'Free-form concept: problem sketch, who it is for, rough scope.'}\n\n"
             f"_Capture≠commit: firewalled from the build loop until a human "
-            f"promotes it through Gate 1 (refine → plan → SAD amendment/ADR)._\n")
+            f"promotes it through Vision gate (refine → plan → SAD amendment/ADR)._\n")
     out = os.path.join(IDEAS, f"{new_id}.md")
     with open(out, "w", encoding="utf-8") as f:
         f.write(dump_fm(fm, body))
@@ -1323,7 +1452,7 @@ def cmd_idea_list(args):
         print("(idea inbox empty)")
         return
     today = datetime.now(timezone.utc).date()
-    print(f"IDEA INBOX — {len(ideas)} (firewalled from the build loop; Gate 1 promotes)\n")
+    print(f"IDEA INBOX — {len(ideas)} (firewalled from the build loop; Vision gate promotes)\n")
     for fm in ideas:
         days = idea_age_days(fm, today)
         age = f"{days}d" if days is not None else "?"
@@ -1485,7 +1614,7 @@ def cmd_show(args):
 def cmd_render(args):
     out = ["# Kanban Board", "_generated view — the folder structure is the source of truth_\n"]
 
-    # Gate 3 header: the active sprint commitment + live WIP usage (#6, #7).
+    # Commit-gate header: the active sprint commitment + live WIP usage (#6, #7).
     fm_b, bbody = active_batch()
     ip = column_count("in-progress")
     limit = batch_wip_limit()
@@ -1508,10 +1637,10 @@ def cmd_render(args):
             out.append("> Prep: " + " · ".join(f"{i} ({k})" for k, i in prep))
         out.append("")
     else:
-        out.append(f"**Active sprint:** none (Gate 3 open) · WIP {ip}/{limit}{wip_flag}\n")
+        out.append(f"**Active sprint:** none (Commit gate open) · WIP {ip}/{limit}{wip_flag}\n")
 
     # Retro banner (STEP 2): if the most-recently-closed sprint has a retro, show
-    # it with the count of still-open proposals (the retro→Gate-1 handoff surface).
+    # it with the count of still-open proposals (the retro→Vision gate handoff surface).
     lc_fm, _ = latest_closed_batch()
     if lc_fm:
         rs = [(rf, rb) for rf, rb in all_retros()
@@ -1543,14 +1672,14 @@ def cmd_render(args):
             out.append(line)
 
     # Idea inbox (#16 return-edge): the firewalled funnel, rendered apart from the
-    # board columns precisely because it is NOT buildable work — Gate 1 promotes an
+    # board columns precisely because it is NOT buildable work — Vision gate promotes an
     # idea before it can become a story. Surfaces provenance + staleness so the PO
     # lens / triage loop can read board.md alone (A8).
     from datetime import datetime, timezone
     ideas = all_ideas()
     today = datetime.now(timezone.utc).date()
     out.append(f"\n## Idea inbox ({len(ideas)})\n")
-    out.append("_Firewalled from the build loop — capture≠commit; Gate 1 promotes._\n")
+    out.append("_Firewalled from the build loop — capture≠commit; Vision gate promotes._\n")
     if not ideas:
         out.append("- (empty)")
     for fm in ideas:
@@ -1749,7 +1878,7 @@ def build_board_model():
             })
 
     # Retro chip (STEP 2): the retro of the most-recently-closed sprint, with its
-    # count of still-open proposals — the retro→Gate-1 handoff surface.
+    # count of still-open proposals — the retro→Vision gate handoff surface.
     retro = None
     lc_fm, _ = latest_closed_batch()
     if lc_fm:
@@ -1947,7 +2076,7 @@ function renderBoard(){
     banner+=`<div class="chip"><b>Batch</b> ${esc(DATA.batch.id)}`;
     DATA.batch.capabilities.forEach(c=>banner+=` <span class="chip cap">${esc(c)}</span>`);
     banner+='</div>';
-  } else banner+='<div class="chip"><b>Batch</b> none (Gate 3 open)</div>';
+  } else banner+='<div class="chip"><b>Batch</b> none (Commit gate open)</div>';
   if(DATA.retro){
     banner+=`<div class="chip"><b>Retro</b> ${esc(DATA.retro.id)} (${esc(DATA.retro.batch)}) · ${DATA.retro.open} open</div>`;
   }
@@ -2077,7 +2206,7 @@ function renderInbox(){
   let html=`<div class="banner">
     <div class="chip"><b>Inbox</b> ${ideas.length} idea(s)</div>
     <div class="chip ${ideas.filter(i=>i.stale).length?'warn':''}"><b>Stale</b> ${ideas.filter(i=>i.stale).length}</div>
-    <div class="chip"><span class="muted">capture≠commit · firewalled from the build loop · Gate 1 promotes</span></div>
+    <div class="chip"><span class="muted">capture≠commit · firewalled from the build loop · Vision gate promotes</span></div>
   </div>`;
   if(!ideas.length){
     html+='<div class="empty">Idea inbox is empty. Capture an out-of-scope discovery with <code>board.py idea-new</code> or <code>/capture-idea</code>.</div>';
@@ -2179,7 +2308,7 @@ def cmd_validate(args):
     if sad_id and not os.path.exists(sad_file_path(sad_id)):
         problems.append(f"{sad_id}: SAD file not found in backlog/sad/")
 
-    # Gate 3 + WIP (#6, #7): at most one active batch, and in-progress within cap.
+    # Commit gate + WIP (#6, #7): at most one active batch, and in-progress within cap.
     batches = all_batches()
     actives = active_batches()
     for fm, _ in batches:
@@ -2192,14 +2321,14 @@ def cmd_validate(args):
         ids = ", ".join(fm.get("id", "?") for fm, _ in actives)
         problems.append(
             f"{len(actives)} active batches ({ids}); only one may be active "
-            f"— close the others (Gate 3 is a single commitment)"
+            f"— close the others (the Commit gate is a single commitment)"
         )
     ip = column_count("in-progress")
     limit = batch_wip_limit()
     if ip > limit:
         problems.append(
             f"WIP breach: {ip} stories in-progress (limit {limit}) — finish or "
-            f"defer one, or raise the active batch's wip_limit (Gate 3)"
+            f"defer one, or raise the active batch's wip_limit (Commit gate)"
         )
 
     # Retrospectives (STEP 2): each retro must point at a real batch, carry valid
@@ -2233,7 +2362,7 @@ def cmd_validate(args):
             warnings.append(f"batch {rbatch} has {len(rids)} retros "
                             f"({', '.join(rids)}) — expected one")
 
-    # Sprint commitment (Gate 3): the active sprint's committed stories must be
+    # Sprint commitment (Commit gate): the active sprint's committed stories must be
     # real & traceable, and its preparation work must respect capture≠commit —
     # forward-groundwork ideas may NOT already sit on the board, or they have
     # smuggled into the build loop the firewall exists to keep them out of.
@@ -2332,7 +2461,7 @@ def cmd_validate(args):
         # not a convention.
         if IDEA_ID.match(parent):
             problems.append(f"{sid}: parent {parent} is an IDEA — ideas are "
-                            f"firewalled from the build loop (Gate 1 promotes them)")
+                            f"firewalled from the build loop (Vision gate promotes them)")
         elif parent and parent not in SENTINELS and parent != "FEAT-000":
             if FEAT_ID.match(parent) and not feature_exists(parent):
                 problems.append(f"{sid}: orphan story — parent {parent} not found")
@@ -2407,12 +2536,12 @@ def cmd_validate(args):
         if not info:
             continue
         anchors, caps, _oos, status = info
-        # Gate 2 (#10): a non-Approved SAD is decomposed/built at your own risk.
+        # Architecture gate (#10): a non-Approved SAD is decomposed/built at your own risk.
         # Surfaced as a warning, not a hard block, so continuous validate stays
         # green while a Draft SAD is being worked.
         if status and status != "Approved":
             warnings.append(f"governing SAD {tsid} is '{status}', not Approved "
-                            f"(Gate 2: architecture not signed off)")
+                            f"(Architecture gate: architecture not signed off)")
         covered = covered_by_sad.get(tsid, set())
         if stories and caps:
             for cap in sorted(caps):
@@ -2912,7 +3041,7 @@ def _retro_body(committed, shipped, carried, unplanned, m):
 
 
 def _retro_decide(args, accept, reject):
-    """Flip one proposal's status in place; on accept, spawn the IDEA (Gate-1)."""
+    """Flip one proposal's status in place; on accept, spawn the IDEA (Vision gate)."""
     retros = all_retros()
     if not retros:
         _fatal("no retro to update (run `sprint-retro` to scaffold one first)",
@@ -2965,7 +3094,7 @@ def cmd_sprint_retro(args):
     No flags scaffold `RETRO-NNN` from the closing batch: a committed-vs-shipped
     delta + a frozen windowed metrics snapshot + an empty proposal table for the
     ceremony to fill. `--accept P-N` flips a proposal to accepted and spawns an
-    IDEA (the accepted workflow change lands at Gate 1, capture≠commit); `--reject
+    IDEA (the accepted workflow change lands at the Vision gate, capture≠commit); `--reject
     P-N` flips it to rejected. Refuses to retro an ACTIVE sprint — close it first.
     """
     accept = getattr(args, "accept", None)
@@ -3023,7 +3152,7 @@ def cmd_sprint_retro(args):
     print(f"created {rid} for {bid}: committed {len(committed)}, shipped "
           f"{len(shipped)} (carried {len(carried)}, unplanned {len(unplanned)})")
     print(f"  edit {os.path.relpath(out, ROOT)} — fill Observations + proposals, "
-          f"then `sprint-retro --accept P-N` to land them at Gate 1")
+          f"then `sprint-retro --accept P-N` to land them at the Vision gate")
     _log("sprint-retro", message=rid, batch_id=bid,
          count=len(committed), shipped=len(shipped))
 
@@ -3090,14 +3219,14 @@ def main():
     rj.add_argument("--reason", required=True, help="rework brief read by the loop on re-entry")
     rj.set_defaults(fn=cmd_reject)
 
-    bn = sub.add_parser("batch-new", help="Gate 3: commit a batch of capabilities")
+    bn = sub.add_parser("batch-new", help="Commit gate: commit a batch of capabilities")
     bn.add_argument("--capabilities", required=True, help="comma-separated CAP ids")
     bn.add_argument("--goal", help="one-line batch goal")
     bn.add_argument("--wip", type=int, help=f"in-progress WIP limit (default {DEFAULT_WIP_LIMIT})")
     bn.add_argument("--id", help="BATCH-NNN (default: auto-numbered)")
     bn.set_defaults(fn=cmd_batch_new)
 
-    bc = sub.add_parser("batch-close", help="close a batch (Gate-3 commitment done)")
+    bc = sub.add_parser("batch-close", help="close a batch (Commit-gate commitment done)")
     bc.add_argument("id")
     bc.set_defaults(fn=cmd_batch_close)
 
@@ -3105,11 +3234,11 @@ def main():
     bl.add_argument("--json", action="store_true")
     bl.set_defaults(fn=cmd_batch_list)
 
-    # Sprint vocabulary (Gate 3): a sprint IS a batch + its planning/retro
-    # ceremonies. `sprint-plan-new` is the human Gate-3 commit that ratifies the
+    # Sprint vocabulary (Commit gate): a sprint IS a batch + its planning/retro
+    # ceremonies. `sprint-plan-new` is the human Commit-gate commit that ratifies the
     # plan the /sprint-plan agent team prepared.
     spn = sub.add_parser("sprint-plan-new",
-                         help="Gate 3: commit a sprint plan (enriched batch)")
+                         help="Commit gate: commit a sprint plan (enriched batch)")
     spn.add_argument("--capabilities", required=True, help="comma-separated CAP ids")
     spn.add_argument("--goal", help="one-line falsifiable sprint goal (outcome, not a task list)")
     spn.add_argument("--stories", help="comma-separated STORY ids committed to the sprint")
@@ -3119,6 +3248,11 @@ def main():
     spn.add_argument("--wip", type=int, help=f"in-progress WIP limit (default {DEFAULT_WIP_LIMIT})")
     spn.add_argument("--id", help="BATCH-NNN (default: auto-numbered)")
     spn.set_defaults(fn=cmd_batch_new)
+
+    stt = sub.add_parser("status",
+                         help="where am I in the workflow + the next step")
+    stt.add_argument("--json", action="store_true")
+    stt.set_defaults(fn=cmd_status)
 
     ss = sub.add_parser("sprint-show",
                         help="detailed view of a sprint (active by default): goal, "
@@ -3137,11 +3271,11 @@ def main():
                               "(scaffold, or --accept/--reject a proposal)")
     scr.add_argument("--batch", help="BATCH-NNN to retro (default: latest closed)")
     scr.add_argument("--accept", metavar="P-N",
-                     help="flip a proposal to accepted AND spawn an IDEA (Gate 1)")
+                     help="flip a proposal to accepted AND spawn an IDEA (Vision gate)")
     scr.add_argument("--reject", metavar="P-N", help="flip a proposal to rejected")
     scr.set_defaults(fn=cmd_sprint_retro)
 
-    ex = sub.add_parser("exceptions", help="Gate 2/5 queue: blocked work needing a human")
+    ex = sub.add_parser("exceptions", help="Exception gate queue: blocked work needing a human")
     ex.add_argument("--json", action="store_true")
     ex.set_defaults(fn=cmd_exceptions)
 

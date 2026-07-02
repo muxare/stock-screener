@@ -346,13 +346,13 @@ yours-to-ignore. Five human gates:
 
 ```mermaid
 flowchart LR
-    G1{{"GATE 1\nVision\nPlan approved"}}:::g --> AUTOA["agents:\nplan → SAD draft"]
-    AUTOA --> G2{{"GATE 2\nArchitecture\nSAD: Reviewed→Approved\n+ ADR decisions"}}:::g
+    G1{{"Vision gate\nPlan approved"}}:::g --> AUTOA["agents:\nplan → SAD draft"]
+    AUTOA --> G2{{"Architecture gate\nSAD: Reviewed→Approved\n+ ADR decisions"}}:::g
     G2 --> AUTOB["agents:\ndecompose → backlog\n(coverage-checked)"]
-    AUTOB --> G3{{"GATE 3\nCommit\npick capabilities\n+ WIP limit for this batch"}}:::g
+    AUTOB --> G3{{"Commit gate\npick capabilities\n+ WIP limit for this batch"}}:::g
     G3 --> AUTOC["agents:\nbuild loop per story\nground→code→HARD review-check"]
-    AUTOC --> G4{{"GATE 4\nAcceptance\nreview → done\n(demo/diff sign-off)"}}:::g
-    AUTOC -. exception .-> G5{{"GATE 5\nException\nblocked / SAD-conflict\nonly"}}:::g
+    AUTOC --> G4{{"Acceptance gate\nreview → done\n(demo/diff sign-off)"}}:::g
+    AUTOC -. exception .-> G5{{"Exception gate\nblocked / SAD-conflict\nonly"}}:::g
     G5 -.-> G2
     G4 --> DONE["increment shipped"]
 
@@ -368,7 +368,7 @@ flowchart LR
 | **5 — Exception** | Resolve a block or SAD conflict | Needs human judgement by definition | ◐ happens, but not surfaced — _add a queue_ |
 
 **Everything between the gates becomes genuinely hands-off** — but only safely so once
-the quality gate is real (otherwise stepping back just means defects reach Gate 4 and
+the quality gate is real (otherwise stepping back just means defects reach Acceptance gate and
 bounce, as STORY-018 shows).
 
 ### 7.1 The change list (`add / change / remove`)
@@ -398,9 +398,9 @@ bounce, as STORY-018 shows).
    pass" loophole), capability valid. Run it at `move in-progress`. Tightens **F8**.
 6. **WIP limits per column in `board.py validate`** (e.g. max N `in-progress`). This
    turns the "fan out debt into the backlog" reflex (**F3**) into a visible signal —
-   when WIP is full you're forced to finish or explicitly decide to defer, at Gate 3,
+   when WIP is full you're forced to finish or explicitly decide to defer, at the Commit gate,
    not silently.
-7. **A "batch / sprint" concept as Gate 3.** Not timeboxes — a named set of capabilities
+7. **A "batch / sprint" concept as Commit gate.** Not timeboxes — a named set of capabilities
    you commit `/build-toward` to, recorded as an artifact. This is your prioritisation
    checkpoint; between batches the agents just work the list.
 8. **An exception queue + notification for Gates 2/5.** Surface blocked stories and
@@ -413,7 +413,7 @@ bounce, as STORY-018 shows).
 10. **Mechanise decomposer invariants in `board.py validate`** — capability coverage
     (every `SAD#3` cap has ≥1 story or explicit deferral) and the `SAD#1.2` out-of-scope
     check; block decompose/validate on a non-`Approved` SAD. Closes **F8**.
-11. **Auto-demote on reject:** when you bounce a story at Gate 4, have it return to
+11. **Auto-demote on reject:** when you bounce a story at the Acceptance gate, have it return to
     `in-progress` so `/build-toward` re-picks it without a manual move. Closes **F9**.
 
 **REMOVE (delete sources of manual touch / false signal):**
@@ -433,7 +433,7 @@ bounce, as STORY-018 shows).
 flowchart TD
     P1["PHASE 1 — Trust the loop\n#1 hard review-check gate\n#3 code-review in loop\n#4 guard Write/Edit"] --> P2
     P2["PHASE 2 — Step out of the flow\n#2 default A2\n#11 auto-demote on reject\n#13 drop per-commit confirm"] --> P3
-    P3["PHASE 3 — Make gates explicit\n#7 batch=Gate 3\n#8 exception queue\n#6 WIP limits"] --> P4
+    P3["PHASE 3 — Make gates explicit\n#7 batch=Commit gate\n#8 exception queue\n#6 WIP limits"] --> P4
     P4["PHASE 4 — Close the loop\n#9 retro metrics\n#5,#10 readiness+coverage invariants\n#12,#14,#15 cleanups"]
 ```
 
@@ -460,7 +460,7 @@ flowchart LR
         INBOX["backlog/ideas inbox\nauto-captured + provenance"]
     end
 
-    INBOX -->|"GATE 1\nhuman triage"| PLAN["plan → SAD → backlog"]
+    INBOX -->|"Vision gate\nhuman triage"| PLAN["plan → SAD → backlog"]
     PLAN --> BUILD["build loop\nground→code→HARD review-check"]
     BUILD --> DONE["done"]
 
@@ -470,9 +470,9 @@ flowchart LR
     PO["PRODUCT OWNER lens (agent)\nvalue · scope · priority"]:::lens
     SM["SCRUM MASTER lens (agent)\nflow · process · health"]:::lens
     PO -. triages .-> INBOX
-    PO -. "proposes batch → GATE 3" .-> PLAN
+    PO -. "proposes batch → Commit gate" .-> PLAN
     SM -. watches events.jsonl .-> BUILD
-    SM -. "exception queue → GATE 5" .-> DONE
+    SM -. "exception queue → Exception gate" .-> DONE
 
     CLOCK(["/loop + scheduled routines\n= the clock"]):::clock
     CLOCK -. drives .-> PO
@@ -502,7 +502,7 @@ human can fire from anywhere, writing `IDEA-NNN` to the inbox **with provenance*
 from which story, found by whom, why it's out of scope). Crucial design rules:
 
 - **Capture ≠ commit.** The inbox is **firewalled from the build loop** — an idea is not
-  a story and cannot be built until a human promotes it through Gate 1 → plan → a SAD
+  a story and cannot be built until a human promotes it through Vision gate → plan → a SAD
   amendment/ADR. This is what keeps "capture from anywhere" from becoming "scope creep
   from anywhere."
 - **Distinguish the two discovery types explicitly.** _In-scope_ discovery (anchored to
@@ -528,13 +528,13 @@ they do **not** decide:
 | Angle | flow & process — _how_ the work moves | value & scope — _what_ is worth moving |
 | Reads | `events.jsonl` + board folders | backlog vs SAD + plan success-metrics + idea inbox |
 | Detects | WIP breaches, stalled/aging stories, climbing `attempts`, blocked items, guard-fights (F5), review-check refusal patterns, demo-sweep pollution (F7) | capability-coverage gaps (F8/#10), SAD drift, out-of-scope creep, stale ideas |
-| Produces | the **retro/health digest** (#9) and the **exception queue** (#8) that pings you at Gate 5 | a **proposed next batch** (prioritised, anchored) for Gate 3, and **idea-inbox triage** recommendations for Gate 1 |
+| Produces | the **retro/health digest** (#9) and the **exception queue** (#8) that pings you at the Exception gate | a **proposed next batch** (prioritised, anchored) for Commit gate, and **idea-inbox triage** recommendations for Vision gate |
 | Delegability | **High** — the SM job is mostly rules; delegate it almost entirely | **Prep only** — the PO _prepares_ the decision; you still own prioritisation (it's product strategy) |
 
 The framing that makes this safe and useful: **agents prepare and enforce; the human
 decides at the gates.** These roles add **no sixth gate** — they make the existing five
-_cheaper_. The PO lens turns Gate 3 from "stare at nine todo stories" into "approve or
-adjust this proposed batch." The SM lens turns Gate 5 from "watch the stream for trouble"
+_cheaper_. The PO lens turns Commit gate from "stare at nine todo stories" into "approve or
+adjust this proposed batch." The SM lens turns Exception gate from "watch the stream for trouble"
 into "respond to a surfaced exception." The standing risk — two agents emitting reports
 nobody reads — is avoided by the rule that **every SM/PO output must land at a gate or it
 isn't built**. The PO lens proposes ordering of _existing anchored work_ and triages the
@@ -554,7 +554,7 @@ without standing up meetings. Three uses, two risk classes:
 | Loop | Class | Safe to add | Notes |
 |---|---|---|---|
 | SM health sweep + PO batch-prep | **observation** | **now** | reads state, emits to a gate; cannot harm flow. The natural home for #6/#8/#9. |
-| Idea-inbox triage nudge | **observation** | **now** | surfaces fresh ideas at a cadence for Gate 1. |
+| Idea-inbox triage nudge | **observation** | **now** | surfaces fresh ideas at a cadence for Vision gate. |
 | `/loop /build-toward <batch>` until dry | **action** | **only after Phase 1** | scales output **and defects**; safe only once `review-check` is a hard gate (#1) and review is in-loop (#3). Must carry the **WIP/batch bound (#6) as its stop condition** or it churns. |
 
 So the sequencing already in §7.2 still holds: **observation loops can light up
@@ -618,11 +618,11 @@ the board; they prepare decisions that land at a gate._
 ### 10.0 Guiding invariants (carry into every step)
 
 - **Capture ≠ commit.** An idea is not a story and cannot reach the build loop without a
-  human at Gate 1. The inbox is firewalled from `backlog/board/`.
+  human at the Vision gate. The inbox is firewalled from `backlog/board/`.
 - **Agents prepare and enforce; the human decides at the gates.** No SM/PO output is
   self-acting, and the meta-layer adds **no sixth gate** — it makes the existing five
   cheaper.
-- **Every lens output must land at a named gate** (SM → Gate 5/retro; PO → Gate 1/3) or
+- **Every lens output must land at a named gate** (SM → Exception gate / retro; PO → Vision or Commit gate) or
   it isn't built. No orphan reports.
 - **The PO lens never invents scope** — it orders existing anchored work and triages the
   inbox; it cannot author stories.
@@ -699,20 +699,20 @@ _Review gate: stop here. Confirm the inbox shape and firewall before building th
 ### STEP B — #17 SM + PO lens agents
 
 **Goal:** two horizontal, advisory agents that retire the four-hats picture (§5) by
-preparing the Gate 2/3/4/5 decisions you still own. Form: **`.claude/agents/*.md` +
+preparing the Architecture / Commit / Acceptance / Exception gate decisions you still own. Form: **`.claude/agents/*.md` +
 thin `/`-commands** (no `.claude/agents/` dir exists yet — create it).
 
 9. **B1 — Scrum-Master lens** — `.claude/agents/scrum-master-lens.md` + `/sm-health`
    command. Reads `events.jsonl` + board folders; runs `board.py metrics` and
    `board.py exceptions`; emits the **health digest** + **exception queue** that land at
-   Gate 5/retro. Detects: WIP breaches, aging/stalled stories, climbing `attempts`,
+   Exception gate/retro. Detects: WIP breaches, aging/stalled stories, climbing `attempts`,
    guard-fights (F5), review-check refusal patterns, demo-sweep pollution (F7).
    **High delegability** — the job is mostly rules; the agent assembles and explains, it
    does not decide.
 10. **B2 — Product-Owner lens** — `.claude/agents/product-owner-lens.md` + `/po-batch`
     command. Reads backlog-vs-SAD coverage + plan success-metrics + `idea-list`; produces
     a **prioritised, anchored proposed next batch** whose landing point is
-    `board.py batch-new` (Gate 3), plus **idea-triage recommendations** for Gate 1.
+    `board.py batch-new` (Commit gate), plus **idea-triage recommendations** for Vision gate.
     **Prep only** — it proposes ordering of *existing anchored work* and triages the
     inbox; it must never author a story or invent scope.
 11. **B3 — Guardrail wiring.** Both agent prompts state the invariant explicitly:

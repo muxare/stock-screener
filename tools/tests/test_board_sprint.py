@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Black-box tests for the sprint (Gate-3) ceremony layer in board.py:
+"""Black-box tests for the sprint (Commit gate) ceremony layer in board.py:
   - sprint-plan-new enriches the batch (goal + committed stories + execution
     strategy + preparation/enablers) and stays single-active
   - legacy batch-new is still valid (additive fields)
@@ -37,7 +37,7 @@ def run():
         # SAD with the capabilities the sprint commits to.
         repo.write_sad(caps=("CAP-x", "CAP-y"), status="Approved")
 
-        print("\n[sprint-plan-new] enriches the batch (the Gate-3 commitment)")
+        print("\n[sprint-plan-new] enriches the batch (the Commit-gate commitment)")
         repo.write_story("STORY-200", "todo")  # capability CAP-x (harness default)
         r = repo.board("sprint-plan-new", "--capabilities", "CAP-x",
                        "--goal", "Ship a trustworthy screener",
@@ -184,7 +184,7 @@ def run():
         print("\n[sprint-retro] proposal lifecycle: accept spawns IDEA, reject flips")
         with open(rpath, "a", encoding="utf-8") as f:
             f.write("| P-1 | board.py done-gate | tool | proposed | — |\n")
-            f.write("| P-2 | Gate 4 checklist | gate | proposed | — |\n")
+            f.write("| P-2 | Acceptance-gate checklist | gate | proposed | — |\n")
         r = repo.board("sprint-retro", "--batch", "BATCH-020", "--accept", "P-1")
         check("accept P-1 succeeds", r.returncode == 0)
         rtext = open(rpath, encoding="utf-8").read()

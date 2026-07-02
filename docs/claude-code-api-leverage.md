@@ -173,7 +173,7 @@ These are LLM-light, narrow, deterministic-output tasks better served by a direc
 
 | Candidate | Today | Outsource to | Why |
 |---|---|---|---|
-| **Idea-inbox triage** (`idea-list` → in-scope vs out-of-scope, dedup, "promote/archive?") | PO lens, full agent | one structured-output call over `idea-list --json` | Classification, not reasoning. Cheap, repeatable, feeds Gate 1. |
+| **Idea-inbox triage** (`idea-list` → in-scope vs out-of-scope, dedup, "promote/archive?") | PO lens, full agent | one structured-output call over `idea-list --json` | Classification, not reasoning. Cheap, repeatable, feeds Vision gate. |
 | **Metrics → prose digest** (`metrics --json` → readable health note) | agent reads JSON | Haiku one-shot | Pure summarisation of numbers the SM lens already computed. |
 | **Semantic `sad_refs` check** (does the story text actually match the cited anchor, beyond the textual match `validate` does) | not done | per-story structured call, or a **Batch** job over all stories | Catches anchors that resolve textually but drifted in meaning — strengthens F8. |
 

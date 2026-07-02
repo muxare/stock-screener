@@ -55,8 +55,8 @@ idea inbox (`idea:ID`), never auto-built.
 - **Tooling friction**: where the agents fought the machine (guard re-trips, slow
   feedback, missing automation), evidence-anchored.
 - **Tooling workflow-change proposals**, each a concrete change to a skill / hook /
-  agent / `board.py`, routed to a gate (a new tool → IDEA at Gate 1; or a `tooling`
-  enabler for the next sprint at Gate 3).
+  agent / `board.py`, routed to a gate (a new tool → IDEA at the Vision gate; or a `tooling`
+  enabler for the next sprint at the Commit gate).
 
 Return tight, structured markdown. Lead with the execution strategy (planning) or
 tooling friction (retro). End by naming the gate your output feeds.

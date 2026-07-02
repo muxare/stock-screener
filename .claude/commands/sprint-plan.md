@@ -1,14 +1,14 @@
 ---
-description: Convene the planning team (PO + Scrum-Master + Dev-team + Claude-Code-leverage lenses) to prepare a proposed sprint plan for the human Gate-3 commitment. Usage: /sprint-plan [capability-hint]
+description: Convene the planning team (PO + Scrum-Master + Dev-team + Claude-Code-leverage lenses) to prepare a proposed sprint plan for the human Commit-gate commitment. Usage: /sprint-plan [capability-hint]
 ---
 
 # /sprint-plan [capability-hint]
 
-Run **Sprint Planning** — a ceremony that prepares the Gate-3 commitment. A
+Run **Sprint Planning** — a ceremony that prepares the Commit-gate commitment. A
 "sprint" here IS the existing **batch** (`tools/board.py`) plus this planning
 ritual and a retrospective at close; it is **scope-boxed, not time-boxed** (it
 ends when `sprint-close` is run). This command **prepares**; it does not commit.
-**The human commits at Gate 3** by running `board.py sprint-plan-new`.
+**The human commits at the Commit gate** by running `board.py sprint-plan-new`.
 
 ## Invariant (do not break)
 **Agents prepare; the human decides at the gate. This adds NO sixth gate.** The
@@ -18,7 +18,7 @@ edit anything. Planning that auto-committed a batch would BE a sixth gate — it
 must not. Nothing here mutates the board.
 
 ## Precondition
-There must be **no active sprint** (Gate 3 is one commitment at a time). Check
+There must be **no active sprint** (the Commit gate is one commitment at a time). Check
 `python3 tools/board.py sprint-show`. If one is active, the prior sprint must be
 closed (and ideally retro'd) first — surface that to the human and stop.
 
@@ -54,11 +54,11 @@ note the 3 deferred). The proposal must contain:
   reviewer fan-out, tier.
 - **Preparation / enablers** — enabler/spike/techdebt/tooling that makes future
   sprints easier. Mark each: `story:ID` (a committed, SAD-anchored enabler — also in
-  the committed stories) · `idea:ID` (firewalled groundwork awaiting Gate-1 triage)
+  the committed stories) · `idea:ID` (firewalled groundwork awaiting Vision gate triage)
   · `note:text` (a bare thought, no id). Respect **capture≠commit**: groundwork that
   needs new architecture is an IDEA, not a story.
 
-Present the proposal as readable markdown, then emit the **exact Gate-3 command**
+Present the proposal as readable markdown, then emit the **exact Commit gate command**
 for the human to run (and edit) — do not run it yourself:
 
 ```
@@ -73,10 +73,10 @@ python3 tools/board.py sprint-plan-new \
 
 ## Where it lands (no orphan output)
 Everything maps to an existing gate:
-- The goal, committed scope, WIP → **Gate 3** (`sprint-plan-new`, human runs it).
-- Any out-of-scope discovery the team surfaced → an **IDEA** for **Gate 1** triage
+- The goal, committed scope, WIP → **Commit gate** (`sprint-plan-new`, human runs it).
+- Any out-of-scope discovery the team surfaced → an **IDEA** for **Vision gate** triage
   (capture≠commit), never a story you invent here.
-- Anything blocked the SM surfaced → the **Gate 2/5** exception queue.
+- Anything blocked the SM surfaced → the **Exception gate** exception queue.
 
 After the human commits, `board.py sprint-show` and `board.md` show the active
 sprint (goal + committed stories' live columns + prep). The build loop runs via

@@ -1,7 +1,7 @@
 ---
 id: BATCH-000
 type: batch
-status: active            # active | closed — only ONE active at a time (Gate 3 = one sprint)
+status: active            # active | closed — only ONE active at a time (Commit gate = one sprint)
 created: <YYYY-MM-DD>      # stamped by board.py sprint-plan-new / batch-new
 wip_limit: 3              # max stories in-progress at once while this sprint is active
 capabilities: [CAP-x]     # SAD#3 capabilities committed to this sprint — the build slice
@@ -27,7 +27,7 @@ stories: [STORY-000]      # OPTIONAL — the specific stories committed this spr
 ## Preparation / enablers
 <work that makes FUTURE sprints easier — enabler/spike/techdebt/tooling. One per line:
    - story:STORY-00x — a committed, SAD-anchored enabler (also in `stories:`)
-   - idea:IDEA-00n   — firewalled groundwork awaiting Gate-1 triage (capture≠commit)
+   - idea:IDEA-00n   — firewalled groundwork awaiting Vision gate triage (capture≠commit)
    - note:<thought>  — a bare planning thought, no id (inert)>
 
 ## Notes
