@@ -5,6 +5,7 @@
 // banner is set on failure, and `displayed[]` caches by ticker (one fetch/name).
 
 import { describe, it, expect, vi } from 'vitest';
+import { afterEach } from 'vitest';
 import { create } from 'zustand';
 import { makeScreenerState, type ScreenerState } from './store';
 import type { MarketClient, ScreenResp } from './lib/client/marketClient';
@@ -158,5 +159,38 @@ describe('ensureDisplayed caching', () => {
 
     expect(instrument).toHaveBeenCalledTimes(1);
     expect(store.getState().displayed['NOPE']).toBeUndefined();
+  });
+});
+
+// STORY-037: init() must not probe the DEV_TOOLS-gated dev surfaces in a
+// production build. Both `/dev/import/options` (probeDevImport) and
+// `/dev/databases` (probeDatabases) 404 in prod by design, so knocking on them
+// on every load is a guaranteed-fail round-trip. The probes are gated behind the
+// build-time `import.meta.env.DEV` flag; here we drive both sides of that gate.
+describe('init dev-probe gate (STORY-037)', () => {
+  afterEach(() => { vi.unstubAllEnvs(); });
+
+  it('does NOT probe the dev-only surfaces in a production build', () => {
+    vi.stubEnv('DEV', false);
+    const devImportOptions = vi.fn(async () => null);
+    const databases = vi.fn(async () => null);
+    const store = makeStore(fakeClient({ devImportOptions, databases }));
+
+    store.getState().init();
+
+    expect(devImportOptions).not.toHaveBeenCalled();
+    expect(databases).not.toHaveBeenCalled();
+  });
+
+  it('still probes both dev-only surfaces in a dev build', () => {
+    vi.stubEnv('DEV', true);
+    const devImportOptions = vi.fn(async () => null);
+    const databases = vi.fn(async () => null);
+    const store = makeStore(fakeClient({ devImportOptions, databases }));
+
+    store.getState().init();
+
+    expect(devImportOptions).toHaveBeenCalledTimes(1);
+    expect(databases).toHaveBeenCalledTimes(1);
   });
 });

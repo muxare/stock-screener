@@ -590,11 +590,19 @@ export function makeScreenerState(client: MarketClient = httpMarketClient()): St
       // sample name for the indicator-builder preview (SAD#2.5: displayed-name
       // compute only).
       void get().bootstrap();
-      // Probe the dev-only import surface (STORY-031). Hidden unless DEV_TOOLS is
-      // on server-side; a failure here is silent (the button just never shows).
-      void get().probeDevImport();
-      // Probe the dev-only DB-selector (STORY-035). Same gate; hidden otherwise.
-      void get().probeDatabases();
+      // Probe the dev-only tooling surfaces only in dev builds (STORY-037). Both
+      // endpoints are DEV_TOOLS-gated server-side and 404 in production, so in a
+      // prod build the probe is a guaranteed-to-fail round-trip on every load.
+      // `import.meta.env.DEV` is a build-time constant, so these calls are dead-code
+      // eliminated from the production bundle entirely. The server-side gate stays;
+      // this only stops the client from knocking on a door that's never open.
+      if (import.meta.env.DEV) {
+        // Probe the dev-only import surface (STORY-031). Hidden unless DEV_TOOLS is
+        // on server-side; a failure here is silent (the button just never shows).
+        void get().probeDevImport();
+        // Probe the dev-only DB-selector (STORY-035). Same gate; hidden otherwise.
+        void get().probeDatabases();
+      }
     },
 
     // Fetch the universe-wide facts (size, sectors) and a single sample name.

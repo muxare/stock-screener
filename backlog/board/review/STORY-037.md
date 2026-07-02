@@ -6,10 +6,10 @@ capability: CAP-screen
 sad_refs: [SAD#4.3, SAD#1.2]
 target: ~
 estimate: ~
-attempts: 0
+attempts: 1
 prev_column: ~
 blocked_reason: ~
-reject_reason: ~
+base_commit: d0cc9cab0fae884509639f4be8cf11b0186ad3b0
 ---
 
 ## User Story
@@ -26,10 +26,10 @@ every load. The probe should be gated behind a build-time dev flag (e.g.
 tooling actually exists.
 
 ## Acceptance Criteria
-- [ ] `probeDevImport()` is not invoked from `init()` in production builds (gate
+- [x] `probeDevImport()` is not invoked from `init()` in production builds (gate
       on `import.meta.env.DEV` or equivalent build-time flag).
-- [ ] Dev builds still probe and surface the dev-import UI exactly as today.
-- [ ] No change to the `MarketClient` seam.
+- [x] Dev builds still probe and surface the dev-import UI exactly as today.
+- [x] No change to the `MarketClient` seam.
 
 ## Out of scope
 - Removing the server-side DEV_TOOLS gate (the 404 stays correct server-side).
