@@ -1,7 +1,7 @@
 ---
 id: BATCH-004
 type: batch
-status: active
+status: closed
 created: 2026-06-30
 wip_limit: 3
 capabilities: [CAP-eod-ingest, CAP-screen]
