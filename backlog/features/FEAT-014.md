@@ -25,6 +25,6 @@ EPIC-005
 - `CAP-relational` (SAD-002#3.5) — comparison and `cross_up`/`cross_down` boolean nodes.
 
 ## Notes
-- Create stories via `python tools/board.py new --capability <id> --parent FEAT-014`.
+- Create stories via `python workflow/tools/board.py new --capability <id> --parent FEAT-014`.
 - Build order: algebraic + relational node kinds land before / alongside lowering,
   since lowering targets them. All three gate on the fidelity harness (FEAT-016).

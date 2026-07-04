@@ -19,4 +19,4 @@ EPIC-004
 - `CAP-detail` (SAD#3.10) — chart accessibility.
 
 ## Notes
-- Create stories via `python3 tools/board.py new --capability <id> --parent FEAT-012`.
+- Create stories via `python3 workflow/tools/board.py new --capability <id> --parent FEAT-012`.

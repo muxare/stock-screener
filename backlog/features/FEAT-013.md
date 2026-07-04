@@ -24,5 +24,5 @@ EPIC-005
   a bounded, correctly-invalidated per-(instrument, node) cache.
 
 ## Notes
-- Create stories via `python tools/board.py new --capability <id> --parent FEAT-013`.
+- Create stories via `python workflow/tools/board.py new --capability <id> --parent FEAT-013`.
 - Build order: CAP-dag-model lands first; CAP-dag-eval depends on it.

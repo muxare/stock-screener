@@ -23,4 +23,4 @@ EPIC-006
 Stories use `parent: FEAT-019` and the `CAP-eod-coverage` capability id.
 
 ## Notes
-- Create stories via `python tools/board.py new --capability <id> --parent FEAT-019`.
+- Create stories via `python workflow/tools/board.py new --capability <id> --parent FEAT-019`.

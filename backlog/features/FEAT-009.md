@@ -20,4 +20,4 @@ EPIC-003
 - `CAP-backtest` (SAD#3.11) — full-universe backtest path.
 
 ## Notes
-- Create stories via `python3 tools/board.py new --capability <id> --parent FEAT-009`.
+- Create stories via `python3 workflow/tools/board.py new --capability <id> --parent FEAT-009`.

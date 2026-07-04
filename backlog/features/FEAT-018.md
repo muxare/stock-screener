@@ -24,4 +24,4 @@ EPIC-006
 Stories use `parent: FEAT-018` and one of the capability ids above.
 
 ## Notes
-- Create stories via `python tools/board.py new --capability <id> --parent FEAT-018`.
+- Create stories via `python workflow/tools/board.py new --capability <id> --parent FEAT-018`.

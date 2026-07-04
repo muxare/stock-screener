@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/hooks/guard_board_mutation.py\""
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/workflow/hooks/guard_board_mutation.py\""
           }
         ]
       },
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/hooks/allow_localhost_curl.py\""
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/workflow/hooks/allow_localhost_curl.py\""
           }
         ]
       },
@@ -24,7 +24,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/hooks/log_backlog_interaction.py\""
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/workflow/hooks/log_backlog_interaction.py\""
           }
         ]
       }
@@ -34,7 +34,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/hooks/log_backlog_interaction.py\""
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/workflow/hooks/log_backlog_interaction.py\""
           }
         ]
       }
@@ -44,7 +44,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/hooks/session_ground.py\""
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/workflow/hooks/session_ground.py\""
           }
         ]
       }

@@ -18,4 +18,4 @@ EPIC-002
 - `CAP-compare` (SAD#3.12)
 
 ## Notes
-- Create stories via `python3 tools/board.py new --capability <id> --parent FEAT-006`.
+- Create stories via `python3 workflow/tools/board.py new --capability <id> --parent FEAT-006`.

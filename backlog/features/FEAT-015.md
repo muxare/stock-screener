@@ -21,6 +21,6 @@ EPIC-005
   bar-for-bar over the fixtures.
 
 ## Notes
-- Create stories via `python tools/board.py new --capability <id> --parent FEAT-015`.
+- Create stories via `python workflow/tools/board.py new --capability <id> --parent FEAT-015`.
 - Depends on the node model (FEAT-013) and the relational/algebraic kinds (FEAT-014);
   gates on the fidelity harness (FEAT-016).

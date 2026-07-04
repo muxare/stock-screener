@@ -24,7 +24,7 @@ EPIC-005
   golden-master fixtures.
 
 ## Notes
-- Create stories via `python tools/board.py new --capability <id> --parent FEAT-016`.
+- Create stories via `python workflow/tools/board.py new --capability <id> --parent FEAT-016`.
 - The fidelity harness is cross-cutting (SAD-002#7): every lowering/evaluation
   story in EPIC-005 runs it. Stand it up early against the *old* engine so parity
   is provable as each piece lands.

@@ -23,4 +23,4 @@ EPIC-001
 - `CAP-rank` (SAD#3.8)
 
 ## Notes
-- Create stories via `python3 tools/board.py new --capability <id> --parent FEAT-001`.
+- Create stories via `python3 workflow/tools/board.py new --capability <id> --parent FEAT-001`.

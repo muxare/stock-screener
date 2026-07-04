@@ -38,9 +38,9 @@ shipped: 5
 
 | id  | target (gate/file/tool) | type | status | result |
 |-----|-------------------------|------|--------|--------|
-| P-1 | `tools/hooks/` SessionStart re-grounding hook (fires `sad-grounding`) | hook | accepted | IDEA-009 |
-| P-2 | `tools/board.py sprint-plan-new` precondition/`note:` handling | tool | accepted | IDEA-010 |
-| P-3 | `tools/board.py validate` companion-file id matcher | tool | accepted | IDEA-011 |
+| P-1 | `workflow/hooks/` SessionStart re-grounding hook (fires `sad-grounding`) | hook | accepted | IDEA-009 |
+| P-2 | `workflow/tools/board.py sprint-plan-new` precondition/`note:` handling | tool | accepted | IDEA-010 |
+| P-3 | `workflow/tools/board.py validate` companion-file id matcher | tool | accepted | IDEA-011 |
 
 ## Carry-forward to next sprint plan
 Explicit handoff for the next `/sprint-plan` (Gate 3). These are not equal-priority

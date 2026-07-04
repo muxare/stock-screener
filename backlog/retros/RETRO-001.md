@@ -56,7 +56,7 @@ Unplanned (5) ≈ committed (6): the sprint boundary did not contain scope. Repo
   interleaved `chore(board)` commits and a sibling proxy-fix (`6680c00`) land inside the
   range, flagging in-scope stories as scope violations. STORY-021/027/028 each needed a
   manual override with per-story diff re-verification. Documented as Friction #1 in
-  `docs/workflow-friction-review.md`. → **P-2** (target: `board.py review-check`, scope the
+  `workflow/docs/workflow-friction-review.md`. → **P-2** (target: `board.py review-check`, scope the
   diff to Touch-scope paths / ignore `backlog/**` + `.workflow/**`).
 - **Code-before-story drove the 40% review-check refusal and the demo-sweep flag.** STORY-035
   continued building during its review window (13.6h cycle, 10× median), shipping two extra

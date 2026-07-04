@@ -20,4 +20,4 @@ EPIC-004
   serves indicators (CAP-indicators) and screens (CAP-screens).
 
 ## Notes
-- Create stories via `python3 tools/board.py new --capability <id> --parent FEAT-010`.
+- Create stories via `python3 workflow/tools/board.py new --capability <id> --parent FEAT-010`.

@@ -19,4 +19,4 @@ EPIC-003
 - `CAP-screen` (SAD#3.1) — the data the engine screens over.
 
 ## Notes
-- Create stories via `python3 tools/board.py new --capability <id> --parent FEAT-008`.
+- Create stories via `python3 workflow/tools/board.py new --capability <id> --parent FEAT-008`.

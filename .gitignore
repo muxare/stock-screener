@@ -25,10 +25,12 @@ dev-market.db
 .claude/settings.local.json
 
 # Workflow generated artifacts (regenerable views / local telemetry — not source of truth)
-board.md
+backlog/board.md
 backlog/index.html
-.workflow/events.jsonl
-.workflow/review-*.json
+backlog/.workflow/events.jsonl
+backlog/.workflow/review-*.json
+# Local-first sync state (regenerable; not source of truth)
+backlog/.sync/
 
 # Python (tools/, hooks, tests)
 __pycache__/

@@ -173,7 +173,7 @@ out-of-scope discoveries were already captured as IDEA-005/006.
 ## 11. Gate-3 command (the human runs this to commit; the ceremony did not)
 
 ```
-python3 tools/board.py sprint-plan-new \
+python3 workflow/tools/board.py sprint-plan-new \
   --goal "Operator runs a one-command historical backfill fetching real Yahoo EOD bars into the existing SQLite DB via the unmodified importer; MARKETDATA_DB points the screener at real data with no engine/handler/port change" \
   --capabilities CAP-eod-fetch,CAP-eod-ingest,CAP-eod-coverage \
   --stories STORY-050,STORY-051,STORY-053,STORY-022,STORY-033 \

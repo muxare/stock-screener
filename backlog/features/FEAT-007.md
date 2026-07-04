@@ -19,4 +19,4 @@ EPIC-002
   FEAT-009.
 
 ## Notes
-- Create stories via `python3 tools/board.py new --capability <id> --parent FEAT-007`.
+- Create stories via `python3 workflow/tools/board.py new --capability <id> --parent FEAT-007`.

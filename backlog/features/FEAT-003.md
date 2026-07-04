@@ -19,4 +19,4 @@ EPIC-001
 - `CAP-pcf` (SAD#3.5)
 
 ## Notes
-- Create stories via `python3 tools/board.py new --capability <id> --parent FEAT-003`.
+- Create stories via `python3 workflow/tools/board.py new --capability <id> --parent FEAT-003`.

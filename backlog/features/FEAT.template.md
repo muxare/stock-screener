@@ -17,4 +17,4 @@ EPIC-000
 - `<cap-id>` (SAD#3.x) — stories use `parent: FEAT-000` and this capability id.
 
 ## Notes
-- Create stories via `python tools/board.py new --capability <id> --parent FEAT-000`.
+- Create stories via `python workflow/tools/board.py new --capability <id> --parent FEAT-000`.

@@ -20,4 +20,4 @@ EPIC-002
 - `CAP-search` (SAD#3.13)
 
 ## Notes
-- Create stories via `python3 tools/board.py new --capability <id> --parent FEAT-004`.
+- Create stories via `python3 workflow/tools/board.py new --capability <id> --parent FEAT-004`.

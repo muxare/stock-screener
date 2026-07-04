@@ -19,4 +19,4 @@ EPIC-001
 - `CAP-presets` (SAD#3.2)
 
 ## Notes
-- Create stories via `python3 tools/board.py new --capability <id> --parent FEAT-002`.
+- Create stories via `python3 workflow/tools/board.py new --capability <id> --parent FEAT-002`.

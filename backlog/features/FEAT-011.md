@@ -19,4 +19,4 @@ EPIC-004
 - `CAP-screen` (SAD#3.1) — the engine under test and the path under budget.
 
 ## Notes
-- Create stories via `python3 tools/board.py new --capability <id> --parent FEAT-011`.
+- Create stories via `python3 workflow/tools/board.py new --capability <id> --parent FEAT-011`.

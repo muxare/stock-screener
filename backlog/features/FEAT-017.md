@@ -23,5 +23,5 @@ EPIC-005
   independently of any single rule.
 
 ## Notes
-- Create stories via `python tools/board.py new --capability <id> --parent FEAT-017`.
+- Create stories via `python workflow/tools/board.py new --capability <id> --parent FEAT-017`.
 - Depends on the evaluator (FEAT-013). Must add NO server code (SAD-002#1.2).
