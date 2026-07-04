@@ -223,13 +223,33 @@ All 5 hooks use `$CLAUDE_PROJECT_DIR/tools/hooks/*.py` (lines 9, 18, 27, 37, 47)
 > localhost). A literal column move was **deliberately skipped** — all batches are closed, so it would
 > mean opening a sprint purely to test; the full mutation path (guard → `board.py` → logging) is already
 > exercised, so no extra signal.
-- Optional subtree-split: **executed** — `git subtree split --prefix=workflow` → local branch
-  `engine-subtree-split`; pushed to sad-wf as a **new branch** (non-destructive). See "Subtree-split
-  result" below.
+- Optional subtree-split: **executed locally** — `git subtree split --prefix=workflow` →
+  branch `engine-subtree-split-v2` (README-inclusive). The **push to sad-wf is blocked by the
+  local `block-dangerous-git.sh` safety hook** (`git push` denied), so it's a hand-off, not
+  auto-run. See "Subtree-split result" below.
   - **Wrinkle (still real, deferred to a merge design pass):** sad-wf ships `.claude/` at *its* root,
     but our `workflow/` holds `commands/skills/agents` (not under `.claude/`). The split tree is
-    therefore *not* structurally mergeable into sad-wf `main` as-is — the branch is parked in sad-wf
-    for a later remap, **not** merged. See below.
+    therefore *not* structurally mergeable into sad-wf `main` as-is — it should be parked in sad-wf
+    on a **new branch** for a later remap, **never** merged straight to `main`.
+
+#### Subtree-split result (2026-07-04)
+- **Local split branch:** `engine-subtree-split-v2` at the repo root (an earlier `engine-subtree-split`
+  predates the README and can be deleted). Top-level tree = `README.md agents commands docs hooks
+  skills tools` — i.e. `workflow/`'s contents hoisted to root, no prefix. Verified with `git ls-tree`.
+- **History depth = 2 commits.** A plain `--prefix` split does **not** follow the Phase-2/3 git-mv
+  renames (pre-consolidation history lived under `tools/`, `docs/`, `.claude/`), so the split captures
+  the engine as-of-consolidation only. Full-history rejoin would need a rename-following filter — out
+  of scope; the current split is sufficient to seed/refresh sad-wf.
+- **Added `workflow/README.md`** (engine front door) — the split exposed that the target structure
+  named it but Phases 1–3 never created it.
+- **Push (hand-off — blocked by safety hook):** run from a shell that allows `git push`:
+  ```
+  git push /Users/mikaelaxelsson/source/repos/sad-wf \
+    engine-subtree-split-v2:refs/heads/engine-from-stock-screener
+  ```
+  This creates a **new** branch in sad-wf (`engine-from-stock-screener`); it does **not** touch
+  sad-wf's `main` or its (currently dirty) working tree. Merging that branch into sad-wf `main`
+  is the separate `.claude/`-remap design pass noted in the wrinkle above.
 
 ---
 
