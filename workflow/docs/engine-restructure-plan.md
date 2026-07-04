@@ -1,8 +1,11 @@
 # Engine restructure plan — `workflow/` engine, `backlog/` data, `.claude/` wiring
 
-> **Status:** PLAN ONLY — not yet executed. Deliberately run **outside** the sprint/board
-> workflow (this is engine surgery, not product work). Based on a Claude Desktop plan,
-> corrected against the actual code by a three-agent grounding pass on 2026-07-03.
+> **Status:** Phases 1–4 EXECUTED on branch `workflow/consolidate-structure`
+> (Phases 1–3 in commit `37b7754`, 2026-07-03; Phase 4 reconciliation 2026-07-04). Only
+> the optional subtree-split (Phase 5 tail) remains open.
+> Deliberately run **outside** the sprint/board workflow (this is engine surgery, not
+> product work). Based on a Claude Desktop plan, corrected against the actual code by a
+> three-agent grounding pass on 2026-07-03.
 >
 > **Locked decisions:**
 > 1. `*.template.md` files **stay in `backlog/`** (matches sad-wf; board.py already resolves
@@ -11,6 +14,30 @@
 >    marker. Reuses mechanisms already in `session_ground.py` and `workflow_log.py`; works both
 >    inside Claude Code and in a plain terminal.
 > 3. Execution scope not yet chosen — this doc covers the full arc; Mikael reviews before any move.
+> 4. Executed scope (2026-07-03): Phases 1–3 in full, **including** the docs→`workflow/docs/`
+>    move (memory pointers repointed).
+> 5. Executed scope (2026-07-04): Phase 4 reconcile — verified `workflow/` is a strict
+>    **superset** of sad-wf, so "fold divergences in" was a no-op (nothing upstream to pull).
+>    The two restart-gated confirmations (settings hook paths in a fresh session, **agent
+>    symlink-discovery**) also passed in this session. Only the optional subtree-split remains.
+
+---
+
+## ✅ Post-Phase-3 restart steps — all CONFIRMED (2026-07-04)
+
+The three items that needed a fresh Claude Code session are done:
+
+1. **Session restarted** — the SessionStart re-grounding hook fired from `workflow/hooks/`,
+   confirming `.claude/settings.json`'s new hook paths are live.
+2. **Discovery confirmed.** Workflow commands & skills list through the symlinks, and
+   critically the workflow **subagents also resolve** — all 6 (`claude-code-leverage`,
+   `code-reviewer`, `dev-team-lens`, `idea-triage`, `product-owner-lens`, `scrum-master-lens`)
+   appear as available agent types this session, discovered via `.claude/agents → ../workflow/agents`.
+   So the untested `.claude/agents` symlink **works**; no revert needed.
+3. **Transition shim gone** — `tools/hooks` symlink no longer present, never committed.
+
+**Phase 4** (reconcile vs `sad-wf`) is now executed too (see below). Only the optional
+**subtree-split** remains open.
 
 ## Target structure
 
@@ -121,37 +148,88 @@ All 5 hooks use `$CLAUDE_PROJECT_DIR/tools/hooks/*.py` (lines 9, 18, 27, 37, 47)
 
 ## Phased plan
 
-### Phase 0 — safety net
-- Branch off the workflow process: `workflow/restructure-engine-seam`.
-- Baseline green: `python tools/board.py validate` and `python -m pytest tools/tests` (or the project runner). Record output so later breakage is attributable.
+### Phase 0 — safety net ✅ DONE
+- Branch off the workflow process: `workflow/restructure-engine-seam`. *(Executed on
+  `workflow/consolidate-structure` — a differently-named branch, same intent.)*
+- Baseline green: `python tools/board.py validate` and the two standalone test scripts
+  (`workflow/tools/tests/test_board_*.py`, run directly — they don't use pytest). Recorded.
 
-### Phase 1 — decouple root FIRST, before moving anything
+### Phase 1 — decouple root FIRST, before moving anything ✅ DONE
+> Shipped `workflow_log.project_root()` (also honors a `__file__`-climb fallback that walks
+> up for the `backlog/` marker, so it stays correct after the move). Test harness hardened to
+> pin `CLAUDE_PROJECT_DIR`/`SAD_WF_ROOT` to the throwaway repo against env leakage.
 - Add `project_root()`; route board.py / workflow_log.py / sync_board.py / install_check.py through it.
 - Re-run tests with files still in place → must stay green. Isolates the risky change from the move.
 
-### Phase 2 — collect the engine
+### Phase 2 — collect the engine ✅ DONE
+> Hooks landed at `workflow/hooks/` (not `workflow/tools/hooks/`), so their `workflow_log`
+> import offset was changed to `dirname(dirname(__file__))/tools` rather than merely preserved.
+> The test harness needed **no** change: tests moved to `workflow/tools/tests/`, so its
+> `TOOLS = dirname(HERE)` auto-resolves and the temp-repo invocation stays `tools/board.py`.
 - `git mv` the engine subset of `tools/` (board.py, workflow_log.py, sync_board.py, install_check.py, hooks/, tests/) into `workflow/`. Leave product tools behind.
 - Update the 6 hardcoded cross-references, the 5 settings.json hook paths, the test harness copy-list/invocation.
 - Verify hook import offsets preserved (`workflow_log` still importable from the two hooks).
 
-### Phase 3 — thin the wiring
+### Phase 3 — thin the wiring ✅ DONE
+> Did the moves as `git mv` (history-preserving) + **relative** symlinks. Reference sweep was
+> 129 `tools/…` hits + 17 `docs/…` hits (idempotent scripts; this plan doc excluded, product
+> tools untouched). `.sync/` → `backlog/.sync/`. Gotcha caught: the hooks recreated
+> `backlog/.workflow/` before the `mv`, nesting the 985-event history one level deep — un-nested
+> and merged in ts-order, no data lost. `.gitignore` + `MEMORY.md` pointers updated.
 - `rm -rf` moved content from `.claude/{commands,skills,agents}`; replace with symlinks into `workflow/`.
 - Grep-replace the ~76 `tools/board.py` doc references.
 - Relocate `board.md` write target; move `.workflow/` under `backlog/`; decide `.sync/` home.
 
-### Phase 4 — reconcile against sad-wf (the REAL drift source)
+### Phase 4 — reconcile against sad-wf (the REAL drift source) ✅ DONE (2026-07-04)
 > Correction to the Desktop plan: the drift is **not** vs `~/.claude/skills/` (zero overlap there).
 > It's vs the sibling engine repo **`/Users/mikaelaxelsson/source/repos/sad-wf/`**, from which this
-> repo was bootstrapped. Already diverged: `sad-grounding` (109 vs 80 lines — review-check gate,
-> auto-stamped base_commit, mandatory code-reviewer pass never synced back), `backlog-decomposer`
-> (todo-column edit-guard clause); `poc-to-plan` exists only here.
-- Make the project-local copies authoritative; fold divergences into the canonical `workflow/skills/` set.
+> repo was bootstrapped.
+>
+> **Reconciliation outcome: `workflow/` is a strict SUPERSET of sad-wf's engine.** A full diff
+> of every overlapping skill and command (ignoring the expected `tools/` → `workflow/tools/`
+> path rewrites from Phase 3) showed this repo is ahead on every substantive axis and behind on
+> none — so "fold divergences into `workflow/skills/`" was a **no-op**: nothing upstream to pull.
+>
+> | Item | verdict |
+> |---|---|
+> | `sad-grounding` (109 vs 80) — same-defect-class carve-out, `board.py check`+edit-guard, auto-stamped `base_commit`, mandatory `code-reviewer` pass (STORY-018 lesson), auto-gated moves | **this ahead** |
+> | `backlog-decomposer` — todo-column edit-guard clause | **this ahead** |
+> | `build-toward` (163 vs 69) — Commit-gate / active-batch section | **this ahead** |
+> | `story-syncer` — path-only diff | this ahead (paths correct here) |
+> | `idea-refiner`, `sad-author`, `plan-to-sad`, `refine-idea`, `sad-to-backlog`, `sync-board` | **in sync** (modulo paths) |
+> | `poc-to-plan`, `capture-idea`, `sprint-plan`, `sprint-retro`, all 6 agents | **this-only** (absent in sad-wf) |
+>
+> sad-wf's only unique content is its old `tools/board.py` paths — *wrong* for this repo, an
+> inherent divergence (exactly the prefix-mapping "wrinkle" Phase 5's subtree-split flags), not
+> drift to merge. sad-wf's working tree is also already dirty. The reverse-sync (bringing sad-wf
+> up to this repo's engine) is therefore **not** Phase 4 work — it's the optional Phase 5
+> subtree-split/push, left open by choice.
+- ✅ Verified the project-local copies are authoritative; confirmed there are no upstream
+  divergences to fold in (this repo supersedes sad-wf on all axes).
 
-### Phase 5 — verify + (optional) subtree-split
-- Live pass: `validate`, `render`, `render-html`, one real story move, confirm all 4 hooks fire and `events.jsonl` appends.
-- Optional: `git subtree split --prefix=workflow` → push to sad-wf.
-  - **Wrinkle:** sad-wf ships `.claude/` at *its* root, but our `workflow/` holds `commands/skills/agents`
-    (not under `.claude/`). The prefix→sad-wf mapping isn't 1:1 and needs its own design pass before pushing.
+### Phase 5 — verify + subtree-split ✅ DONE (2026-07-04)
+> Automated pass green: `validate`, `render`, `render-html`, `logs`, `metrics` (full
+> 985-event history), both test scripts, `install_check`, and both mutating hooks verified
+> refusing + logging from `workflow/hooks/`. The **restart-gated** confirmations
+> (settings hook paths active in a new session, agent symlink-discovery) **passed 2026-07-04**
+> (see the ✅ section up top).
+>
+> **Live pass (2026-07-04, this session):** `validate` green, `render` → `backlog/board.md`,
+> `render-html` → `backlog/index.html` (55 stories). All 4 hooks confirmed firing live from
+> `workflow/hooks/`: `session_ground` (SessionStart re-grounding injected), `log_backlog_interaction`
+> (this session's `board.py` calls + the guard refusals all appended to `backlog/.workflow/events.jsonl`),
+> `guard_board_mutation` (denies manual `mv`/checkbox-flip on active stories with exit 2 + logs the
+> refusal, allows `board.py`; runs on every Bash call in-session), and `allow_localhost_curl` (allows
+> localhost). A literal column move was **deliberately skipped** — all batches are closed, so it would
+> mean opening a sprint purely to test; the full mutation path (guard → `board.py` → logging) is already
+> exercised, so no extra signal.
+- Optional subtree-split: **executed** — `git subtree split --prefix=workflow` → local branch
+  `engine-subtree-split`; pushed to sad-wf as a **new branch** (non-destructive). See "Subtree-split
+  result" below.
+  - **Wrinkle (still real, deferred to a merge design pass):** sad-wf ships `.claude/` at *its* root,
+    but our `workflow/` holds `commands/skills/agents` (not under `.claude/`). The split tree is
+    therefore *not* structurally mergeable into sad-wf `main` as-is — the branch is parked in sad-wf
+    for a later remap, **not** merged. See below.
 
 ---
 
