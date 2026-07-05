@@ -5,6 +5,16 @@
 // (SAD#8.4 / ADR-004). The synthetic data generator lives behind the
 // MarketDataProvider port in ./data (ADR-007); it is NOT part of the engine.
 
+import {
+  evaluate as dagEvaluate,
+  type Bars as DagBars,
+  type Kernels as DagKernels,
+  type EvalStats as DagEvalStats,
+  type Node as DagNode,
+  type NodeParams,
+  type RawSourceKind,
+} from './dag';
+
 // ---------- shared types ----------
 export type IndicatorType = 'ema' | 'sma' | 'rsi' | 'macd' | 'stochrsi';
 
@@ -122,6 +132,9 @@ export interface Stock {
   ensureEma: (w: number | string) => void;
   // caches attached lazily by the indicator/backtest engines
   _indCache?: Record<string, (number | null)[]>;
+  // per-(instrument, node-identity) DAG evaluator memo cache (SAD-002#6.3);
+  // derived/ephemeral, keyed by node identity, rebuildable from bars + nodes.
+  _dagCache?: Map<string, readonly (number | null)[]>;
   _rsiBT?: number[];
   _pcfEma?: Record<string, number[]>;
   _pcfAvgv?: Record<string, (number | null)[]>;
@@ -1234,8 +1247,60 @@ export function rankLabel(rule: RankRule): string {
   return `${rule.dir === 'top' ? 'Top' : 'Bottom'} ${rule.pct}% ${f}${rule.scope === 'sector' ? ' / sector' : ''}`;
 }
 
-// ---------- computation-DAG node model (SAD-002#5.1) ----------
-// The explicit dependency model (STORY-039, CAP-dag-model) lives in a co-located,
-// dependency-free pure module; the engine re-exports it as its front door. Namespaced
-// to avoid any collision with the legacy indicator surface above.
-export * as dag from './dag/node';
+// ---------- computation-DAG engine core (SAD-002#5.1/#5.2) ----------
+// The explicit dependency model (STORY-039, CAP-dag-model) and its topological
+// memoising evaluator (STORY-040, CAP-dag-eval) live in a co-located,
+// dependency-free pure module; the engine re-exports it as its front door.
+// Namespaced to avoid any collision with the legacy indicator surface above.
+export * as dag from './dag';
+
+// The concrete evaluator kernels: per-node-kind compute functions that REUSE the
+// existing indicator math above so the evaluator's outputs are bar-for-bar
+// identical to the old `indSeries` path (SAD-002#5.2). Only raw sources (L0) and
+// the single-input aggregations (L1: ema/sma/rsi) are wired here — that is all
+// STORY-040 (the evaluation *machinery*) needs to prove topological order, dedup,
+// pruning, invalidation, boundedness, and no-latency-regression. The composite,
+// algebraic, and relational kernels arrive with lowering (STORY-043) and the
+// operator stories (STORY-041/042); until then the evaluator reports them as
+// reserved rather than guessing (dag/eval.ts).
+//
+// These kernels take numeric (L0/L1) inputs — deeper composition, where an input
+// series can carry warm-up `null`s, rides in with the lowering layer (STORY-043).
+const RAW_SOURCE: Record<RawSourceKind, (b: DagBars) => number[]> = {
+  open:   (b) => b.o as number[],
+  high:   (b) => b.h as number[],
+  low:    (b) => b.l as number[],
+  close:  (b) => b.c as number[],
+  volume: (b) => b.v as number[],
+  hl2:    (b) => b.c.map((_, i) => (b.h[i] + b.l[i]) / 2),
+  hlc3:   (b) => b.c.map((_, i) => (b.h[i] + b.l[i] + b.c[i]) / 3),
+};
+
+const nums = (s: readonly (number | null)[]): number[] => s as number[];
+const mut = (s: readonly (number | null)[]): (number | null)[] => s as (number | null)[];
+const period = (p: NodeParams): number => +(p.period as number);
+
+export const DAG_KERNELS: DagKernels = {
+  open:   (_i, _p, b) => RAW_SOURCE.open(b),
+  high:   (_i, _p, b) => RAW_SOURCE.high(b),
+  low:    (_i, _p, b) => RAW_SOURCE.low(b),
+  close:  (_i, _p, b) => RAW_SOURCE.close(b),
+  volume: (_i, _p, b) => RAW_SOURCE.volume(b),
+  hl2:    (_i, _p, b) => RAW_SOURCE.hl2(b),
+  hlc3:   (_i, _p, b) => RAW_SOURCE.hlc3(b),
+  ema:    (i, p) => ema(nums(i[0]), period(p)),
+  sma:    (i, p) => sma(mut(i[0]), period(p)),
+  rsi:    (i, p) => rsi(nums(i[0]), period(p)),
+};
+
+/**
+ * Evaluate a DAG node over a stock's bars, memoising into a per-instrument cache
+ * attached to the stock like `_indCache` (SAD-002#6.3). The cache is derived and
+ * ephemeral — rebuildable from bars + nodes — and keyed by node identity, so it
+ * cannot go stale and stays bounded by the DAG size, never the bar or universe
+ * count (SAD-002#2.7).
+ */
+export function evalDagNode(stock: Stock, node: DagNode, stats?: DagEvalStats): (number | null)[] {
+  const cache = (stock._dagCache ??= new Map()) as Map<string, readonly (number | null)[]>;
+  return dagEvaluate(node, stock.full as DagBars, DAG_KERNELS, cache, stats) as (number | null)[];
+}

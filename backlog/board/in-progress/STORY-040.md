@@ -6,10 +6,11 @@ capability: CAP-dag-eval
 sad_refs: [SAD-002#5.2, SAD-002#6.3, SAD-002#2.4, SAD-002#2.7, SAD-002#2.5]
 target: ~
 estimate: ~
-attempts: 0
+attempts: 1
 prev_column: ~
 blocked_reason: ~
 reject_reason: ~
+base_commit: acd361f4e0518d7449b21f501253f9698ef24710
 ---
 
 ## User Story
@@ -26,25 +27,25 @@ compute core; lowering (STORY-043) and the compat shims (STORY-045) route throug
 it. Parity is proven by the harness (STORY-046).
 
 ## Acceptance Criteria
-- [ ] Given an instrument's bars and a target node, the evaluator computes the
+- [x] Given an instrument's bars and a target node, the evaluator computes the
       node and its transitive inputs in **topological order**, bottom-up
       (SAD-002#5.2).
-- [ ] Each (instrument, node-identity) is memoised and computed **once**; a node
+- [x] Each (instrument, node-identity) is memoised and computed **once**; a node
       shared by multiple targets is not recomputed per referencing target
       (SAD-002#2.4). A node-evaluation counter demonstrates this over a fixture.
-- [ ] Evaluation is **pruned** to reachable nodes only: a catalogued-but-
+- [x] Evaluation is **pruned** to reachable nodes only: a catalogued-but-
       unreferenced node records **zero** evaluations (SAD-002#2.4).
-- [ ] The cache is keyed by node identity (SAD-002#6.3); adding a new node after a
+- [x] The cache is keyed by node identity (SAD-002#6.3); adding a new node after a
       first evaluation returns a correct, **non-stale** series, and a changed node
       (new identity) yields a new key (SAD-002#2.7).
-- [ ] The cache is bounded — it does not grow unbounded across a large
+- [x] The cache is bounded — it does not grow unbounded across a large
       (multi-hundred-instrument) fixture universe (SAD-002#2.7).
-- [ ] The cache is derived/ephemeral, never a source of truth; it is rebuildable
+- [x] The cache is derived/ephemeral, never a source of truth; it is rebuildable
       from bars + nodes (SAD-002#6.3).
-- [ ] No latency regression: evaluating the fixture universe through the evaluator
+- [x] No latency regression: evaluating the fixture universe through the evaluator
       is within the SAD-001#2.3 budget and ≤ the old path within tolerance
       (SAD-002#2.5); a benchmark demonstrates it.
-- [ ] Engine purity preserved: evaluator takes bars in, returns values out, no I/O
+- [x] Engine purity preserved: evaluator takes bars in, returns values out, no I/O
       (SAD-002#2.2).
 
 ## Architectural Constraints (from SAD)
