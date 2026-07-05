@@ -76,19 +76,23 @@ the next one cheaper.
 
 ## 3. The planning team (`/sprint-plan`)
 
-Four **read-only** advisory subagents (`.claude/agents/`) fan out in parallel,
-then the command synthesises ONE proposed plan the human ratifies at the Commit gate:
+Four **read-only** advisory subagents (`.claude/agents/`) run in **three waves** —
+PO + dev-team sense the work in parallel (blind to each other), the scrum-master then
+builds the parallelization map on their output, and claude-code-leverage designs the
+mechanics on the SM's map — then the command synthesises ONE proposed plan the human
+ratifies at the Commit gate:
 
 | Lens | Angle | Prepares |
 |---|---|---|
-| **product-owner-lens** | value & scope | draft sprint goal + value-ordered anchored todos + DoR pass; **never invents scope** |
-| **scrum-master-lens** | flow & capacity | last sprint's metrics → realistic WIP + story count; blocks/aging |
+| **product-owner-lens** | vision · value & scope | long plan (roadmap across epics/features + ladder-up check) + short plan (draft sprint goal + value-ordered anchored todos + DoR pass); **never invents scope** |
+| **scrum-master-lens** | parallelization & flow | parallelization map (parallel lanes vs serialized spine) + split-for-parallelism recommendations + WIP as a safe-parallelism ceiling; blocks/aging |
 | **dev-team-lens** | engineering reality | feasibility, sizing, sequencing/parallelism, rework risk, enabler nominations |
 | **claude-code-leverage** | agent-team leverage | execution strategy + prep work via CC primitives (skills/hooks/agents/scaffolding) |
 
-The command checks there is no active sprint, fans out the four, reconciles
-conflicts (e.g. PO's 6 stories vs SM's capacity of 3 → propose 3, note the
-deferred), and emits the exact `sprint-plan-new` command for the human to run and
+The command checks there is no active sprint, runs the four in three waves
+(PO + dev-team → scrum-master → claude-code-leverage), reconciles conflicts (e.g. PO's
+6 stories vs SM's safe-parallelism ceiling of 3 → propose 3, note the deferred), and
+emits the exact `sprint-plan-new` command for the human to run and
 edit. **It does not run it** — that call is the Commit-gate commitment.
 
 ---

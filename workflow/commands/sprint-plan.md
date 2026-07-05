@@ -22,36 +22,55 @@ There must be **no active sprint** (the Commit gate is one commitment at a time)
 `python3 workflow/tools/board.py sprint-show`. If one is active, the prior sprint must be
 closed (and ideally retro'd) first — surface that to the human and stop.
 
-## The team (fan out in parallel)
-Spawn these four advisory subagents **concurrently** (one message, parallel
-Agent calls) — they are independent lenses and must not see each other's output:
+## The team (staged — sense first, then plan)
+The lenses run in **three waves**, not all at once, so each planner has the full
+picture the earlier waves produced. All stay **read-only**; none mutates anything.
 
-1. **product-owner-lens** — drafts the sprint goal + value-orders existing
-   SAD-anchored todos; runs a Definition-of-Ready pass. (value & scope)
-2. **scrum-master-lens** — last sprint's metrics → a realistic WIP + story count;
-   surfaces blocks/aging. (flow & capacity)
-3. **dev-team-lens** — feasibility, sizing, sequencing/parallelism, rework risk,
-   and enabler/spike nominations grounded in the SAD + code. (engineering reality)
-4. **claude-code-leverage** — the execution strategy (which stories run as parallel
-   agents in worktrees vs serialized; reviewer fan-out; tier) **and** preparation
-   work — new skills/subagents/hooks/scaffolding — that makes future sprints faster.
+**Wave 1 — sense the work (parallel, blind to each other).** Spawn these two
+concurrently (one message, parallel Agent calls); they are independent perspectives
+and must NOT see each other's output — the independence is the point:
 
-Pass each the `[capability-hint]` (if given) as the area of focus, and the current
-board/metrics context. They read the board themselves; don't pre-digest it for them.
+1. **product-owner-lens** — owns the product vision on two horizons: a long plan
+   (roadmap across epics/features + a ladder-up check that the goal advances a real
+   epic) and a short plan (draft sprint goal + value-ordered anchored todos + DoR
+   pass). (vision · value & scope)
+2. **dev-team-lens** — feasibility, sizing, the coupling/dependency read (which
+   stories share files and so can't run in parallel), rework risk, and enabler/spike
+   nominations grounded in the SAD + code + tech-health register. (engineering reality)
+
+**Wave 2 — plan the parallelism.** When Wave 1 returns, pass **both** outputs to:
+
+3. **scrum-master-lens** — with the PO's priorities and the dev-team's coupling read
+   in hand, it builds the parallelization map: which todos run as concurrent worktree
+   agents vs a serialized spine, split-for-parallelism recommendations, and WIP as a
+   safe-parallelism ceiling. It builds **on** the coupling read rather than re-deriving
+   it, but still verifies the critical overlaps against the real Touch scopes.
+   (parallelization & flow)
+
+**Wave 3 — design the machine.** Pass the SM's parallelization map (plus Wave 1) to:
+
+4. **claude-code-leverage** — turns the parallelization map into execution mechanics
+   (worktree assignment, reviewer fan-out, tier, SDK/Batch for bulk lanes) **and**
+   preparation work — new skills/subagents/hooks/scaffolding — that makes future
+   sprints faster.
+
+Pass each the `[capability-hint]` (if given) as the area of focus. Each still reads
+the board itself for raw state — the waves share the earlier lenses' *analysis*, not
+a pre-digested board.
 
 ## Synthesize ONE proposed sprint plan
 Gather the four outputs and reconcile them into a single proposal. Resolve
-conflicts explicitly (e.g. PO wants 6 stories, SM's capacity says 3 → propose 3,
-note the 3 deferred). The proposal must contain:
+conflicts explicitly (e.g. PO wants 6 stories, SM's safe-parallelism ceiling is 3
+→ propose 3, note the 3 deferred). The proposal must contain:
 
 - **Sprint goal** — one falsifiable, capability-anchored outcome sentence (from PO,
   goal-first). Not a task list.
 - **Committed capabilities** — the SAD#3 caps the goal needs.
 - **Committed stories** — the value-ordered, capacity-bounded, Ready set (story ids).
   Every one must already be a traceable todo story; **never invent a story**.
-- **WIP limit** — the SM's recommended cap.
-- **Execution strategy** — the CC-leverage plan: parallel groups vs serialized,
-  reviewer fan-out, tier.
+- **WIP limit** — the SM's safe-parallelism ceiling.
+- **Execution strategy** — the SM's parallelization map (lanes / spine / merge order)
+  turned into CC-leverage mechanics: worktree assignment, reviewer fan-out, tier.
 - **Preparation / enablers** — enabler/spike/techdebt/tooling that makes future
   sprints easier. Mark each: `story:ID` (a committed, SAD-anchored enabler — also in
   the committed stories) · `idea:ID` (firewalled groundwork awaiting Vision gate triage)

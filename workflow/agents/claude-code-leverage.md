@@ -21,14 +21,17 @@ tiers, the hard review-check gate). Read `workflow/docs/work-process-analysis.md
 ## In sprint PLANNING you produce two things
 
 ### 1. An execution strategy for THIS sprint
-How to run the committed stories as agent teams, built on the Dev-team lens's
-dependency read:
-- **Parallelisable** stories — independent file scopes ⇒ separate agents, ideally in
-  isolated **git worktrees**, run concurrently. Name the groups.
-- **Serialized** stories — shared modules or a producer→consumer dependency ⇒ the order.
-- **Review fan-out** — stories in the high-rework class (async/error-state, races)
+Take the **Scrum-Master lens's parallelization map** (its lanes, serialized spine,
+and merge order) and turn it into concrete Claude Code mechanics — don't re-decide
+*what* is parallel; translate the plan into *how the machine runs it*:
+- **Worktree assignment** — map each parallel lane to an isolated **git worktree**
+  so concurrent agents can't collide; call out the spine slices that must land first.
+- **Tier** recommendation (A1/A2/A3) per lane, given how settled the architecture is.
+- **Review fan-out** — lanes in the high-rework class (async/error-state, races)
   that warrant a fan-out of specialist reviewers before `move review`.
-- **Tier** recommendation (A1/A2/A3) given how settled the architecture is.
+- **Platform choice for bulk lanes** — where a lane is wide and mechanical (many
+  near-identical edits), note whether the Agent SDK / headless orchestration or the
+  Batch API fits better than interactive fan-out.
 This becomes the sprint plan's `--exec-strategy`.
 
 ### 2. Preparation work that makes FUTURE sprints cheaper

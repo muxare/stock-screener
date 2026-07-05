@@ -35,11 +35,12 @@ calls) — independent lenses, each with the retro-focused half of its prompt
 committed-vs-shipped:
 
 1. **product-owner-lens** — the **goal verdict** (MET / PARTIAL / MISSED, evidence-
-   anchored) + an **investment check** (did planned enabler/prep work ship, or did
-   features crowd it out?). (value & scope)
-2. **scrum-master-lens** — **commitment accuracy** (committed N, shipped M, bounced,
-   deferred; trend vs last sprint — *reported, never rewarded*) + flow friction from
-   the metrics/events. (flow & process)
+   anchored) + a **vision-progress note** (did the sprint advance its parent epic's
+   goal / a SAD#1 metric?) + an **investment check** (did planned enabler/prep work
+   ship, or did features crowd it out?). (vision · value & scope)
+2. **scrum-master-lens** — **parallelism outcomes** (planned lanes vs how many ran
+   concurrently, collisions/bounces at integration, whether the WIP ceiling held) +
+   splitting-heuristic friction from the metrics/events. (parallelization & flow)
 3. **dev-team-lens** — engineering friction: which stories bounced and why, rework
    hotspots, where review-check was overridden, enabler debt. (engineering reality)
 4. **claude-code-leverage** — tooling/agent-team friction: guard-fights, scaffolding
