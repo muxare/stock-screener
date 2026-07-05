@@ -6,10 +6,10 @@ capability: CAP-dag-fidelity
 sad_refs: [SAD-002#5.5, SAD-002#2.1, SAD-002#2.2]
 target: ~
 estimate: ~
-attempts: 0
+attempts: 1
 prev_column: ~
 blocked_reason: ~
-reject_reason: ~
+base_commit: 82b2669fbf0b694b12b9e0c441f6c972a3b94d3b
 ---
 
 ## User Story
@@ -27,18 +27,18 @@ the existing synthetic fixture universe (`SAD-001#8.7` / ADR-007 — see
 lands.
 
 ## Acceptance Criteria
-- [ ] A test harness runs the old engine and the new engine over the golden-master
+- [x] A test harness runs the old engine and the new engine over the golden-master
       fixture universe and asserts **bar-for-bar** equality on the **raw series**
       (not rounded/printed values) (SAD-002#5.5, SAD-002#2.1).
-- [ ] Coverage includes **every** indicator type, **every** `PRESETS` entry, and
+- [x] Coverage includes **every** indicator type, **every** `PRESETS` entry, and
       the PCF example (SAD-002#3.8, SAD-002#2.1).
-- [ ] Full-series parity is checked — no sampling of a subset of bars
+- [x] Full-series parity is checked — no sampling of a subset of bars
       (SAD-002#5.5).
-- [ ] Any divergence **fails CI** (the harness runs under `vitest run`) — it is a
+- [x] Any divergence **fails CI** (the harness runs under `vitest run`) — it is a
       gate, not a target (SAD-002#2.1).
-- [ ] The old engine path remains available as the differential reference until
+- [x] The old engine path remains available as the differential reference until
       parity is locked (SAD-002#8.2).
-- [ ] The harness is driven from the synthetic adapter fixtures read-only and adds
+- [x] The harness is driven from the synthetic adapter fixtures read-only and adds
       no I/O to the engine (SAD-002#2.2).
 
 ## Architectural Constraints (from SAD)
