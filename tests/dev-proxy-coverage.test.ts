@@ -41,6 +41,12 @@ function walk(dir: string): string[] {
 // The first path segment of every same-origin `fetch('/seg…')` literal in the
 // app source. Derived FROM SOURCE (not a hard-coded list), so a newly added
 // client fetch is picked up automatically — the anti-drift property (AC#2).
+//
+// LIMITATION: this matches only a fetch whose first argument is a literal
+// beginning with `/` — the pattern every current app fetch uses. An INDIRECTED
+// fetch (`fetch(apiUrl('/x'))`, `` fetch(`${BASE}/x`) ``, or a computed path)
+// would evade this static scan; if a future endpoint is added that way, promote
+// this to an AST-based scan or add its segment to the check deliberately.
 function clientFetchedSegments(): Set<string> {
   const segs = new Set<string>();
   const re = /fetch\(\s*[`'"]\/([a-zA-Z][\w-]*)/g;
