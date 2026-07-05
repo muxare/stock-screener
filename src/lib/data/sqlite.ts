@@ -53,23 +53,35 @@ export function sqliteProvider(dbPath: string): MarketDataProvider {
     );
   }
 
-  // Fail fast on a valid SQLite file that is not a STORY-031 market-data DB,
-  // instead of crashing later with an opaque "no such table" at the first query.
-  const tables = db
-    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('instrument', 'bar')")
-    .all() as unknown as { name: string }[];
-  if (tables.length < 2) {
-    throw new Error(
-      `sqliteProvider: "${dbPath}" is not a STORY-031 market-data DB ` +
-        `(missing the instrument/bar tables).`,
-    );
-  }
+  // From here the DB handle is open: any construction failure (bad schema, a
+  // prepare error) must release it before throwing, or a caller that catches the
+  // error still leaks the read handle — the very defect this lifecycle closes.
+  let selInstruments: ReturnType<DatabaseSync['prepare']>;
+  let selAllBars: ReturnType<DatabaseSync['prepare']>;
+  let selInstrument: ReturnType<DatabaseSync['prepare']>;
+  let selInstrumentBars: ReturnType<DatabaseSync['prepare']>;
+  try {
+    // Fail fast on a valid SQLite file that is not a STORY-031 market-data DB,
+    // instead of crashing later with an opaque "no such table" at the first query.
+    const tables = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('instrument', 'bar')")
+      .all() as unknown as { name: string }[];
+    if (tables.length < 2) {
+      throw new Error(
+        `sqliteProvider: "${dbPath}" is not a STORY-031 market-data DB ` +
+          `(missing the instrument/bar tables).`,
+      );
+    }
 
-  // Prepared once, reused per call (SAD#2.5 hot path) — no per-request recompile.
-  const selInstruments = db.prepare('SELECT ticker, name, sector FROM instrument ORDER BY ticker');
-  const selAllBars = db.prepare('SELECT ticker, date, o, h, l, c, v FROM bar ORDER BY ticker, date');
-  const selInstrument = db.prepare('SELECT ticker, name, sector FROM instrument WHERE ticker = ?');
-  const selInstrumentBars = db.prepare('SELECT date, o, h, l, c, v FROM bar WHERE ticker = ? ORDER BY date');
+    // Prepared once, reused per call (SAD#2.5 hot path) — no per-request recompile.
+    selInstruments = db.prepare('SELECT ticker, name, sector FROM instrument ORDER BY ticker');
+    selAllBars = db.prepare('SELECT ticker, date, o, h, l, c, v FROM bar ORDER BY ticker, date');
+    selInstrument = db.prepare('SELECT ticker, name, sector FROM instrument WHERE ticker = ?');
+    selInstrumentBars = db.prepare('SELECT date, o, h, l, c, v FROM bar WHERE ticker = ? ORDER BY date');
+  } catch (e) {
+    db.close(); // release the handle before surfacing the construction error
+    throw e;
+  }
 
   return {
     getUniverse(): InstrumentBars[] {

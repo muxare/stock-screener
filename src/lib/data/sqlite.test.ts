@@ -208,6 +208,18 @@ describe('provider lifecycle — close() (STORY-034)', () => {
     expect(p2.getUniverse().map((i) => i.ticker)).toContain('NEW');
   });
 
+  it('releases the handle when construction fails on a bad schema (no leaked reader)', () => {
+    const wrong = join(dir, 'wrong-schema-leak.db');
+    const bad = new DatabaseSync(wrong);
+    bad.exec('CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT);');
+    bad.close();
+    expect(() => sqliteProvider(wrong)).toThrow(/not a STORY-031/);
+    // The failed constructor closed its handle: the file is reopenable and writable.
+    const reopened = new DatabaseSync(wrong);
+    expect(() => reopened.exec('CREATE TABLE more (id INTEGER);')).not.toThrow();
+    reopened.close();
+  });
+
   it('synthetic adapter exposes no close() — an optional lifecycle, a no-op when absent', () => {
     const synth = track(providerFromEnv({} as NodeJS.ProcessEnv)); // synthetic
     expect(synth.close).toBeUndefined();
