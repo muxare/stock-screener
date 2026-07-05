@@ -1271,11 +1271,15 @@ const RAW_SOURCE: Record<RawSourceKind, (b: DagBars) => number[]> = {
   high:   (b) => b.h as number[],
   low:    (b) => b.l as number[],
   close:  (b) => b.c as number[],
-  volume: (b) => b.v as number[],
+  volume: (b) => (b.v ?? []) as number[], // guard: OHLC volume is optional
   hl2:    (b) => b.c.map((_, i) => (b.h[i] + b.l[i]) / 2),
   hlc3:   (b) => b.c.map((_, i) => (b.h[i] + b.l[i] + b.c[i]) / 3),
 };
 
+// Kernels receive input series as read-only (the evaluator memoises and shares
+// each series across every consumer). The existing ema/sma/rsi math never mutates
+// its input, so these casts are inert today; any future kernel that mutates must
+// copy first (`.slice()`) rather than write through a shared, cached series.
 const nums = (s: readonly (number | null)[]): number[] => s as number[];
 const mut = (s: readonly (number | null)[]): (number | null)[] => s as (number | null)[];
 const period = (p: NodeParams): number => +(p.period as number);
@@ -1302,5 +1306,6 @@ export const DAG_KERNELS: DagKernels = {
  */
 export function evalDagNode(stock: Stock, node: DagNode, stats?: DagEvalStats): (number | null)[] {
   const cache = (stock._dagCache ??= new Map()) as Map<string, readonly (number | null)[]>;
-  return dagEvaluate(node, stock.full as DagBars, DAG_KERNELS, cache, stats) as (number | null)[];
+  // `full` (OHLC) satisfies the evaluator's `Bars` contract structurally.
+  return dagEvaluate(node, stock.full, DAG_KERNELS, cache, stats) as (number | null)[];
 }

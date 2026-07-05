@@ -35,7 +35,9 @@ export interface Bars {
   readonly h: readonly number[];
   readonly l: readonly number[];
   readonly c: readonly number[];
-  readonly v: readonly number[];
+  // Optional to mirror the engine's `OHLC` (volume is not always present); the
+  // volume raw-source kernel guards against its absence rather than assuming it.
+  readonly v?: readonly number[];
 }
 
 /**
