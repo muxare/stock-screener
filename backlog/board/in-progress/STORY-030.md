@@ -6,10 +6,11 @@ capability: CAP-screen
 sad_refs: [SAD#4.1, SAD#4.2, SAD#5.9]
 target: ~
 estimate: ~
-attempts: 0
+attempts: 1
 prev_column: ~
 blocked_reason: ~
 reject_reason: ~
+base_commit: cac4d7076e2606469539239eae4241667e755843
 ---
 
 ## User Story
@@ -29,14 +30,14 @@ patched reactively (commit `fix(dev): proxy /facts and /metrics`); this story
 makes the gap impossible to reintroduce.
 
 ## Acceptance Criteria
-- [ ] A test enumerates the same-origin paths the client store fetches (the
+- [x] A test enumerates the same-origin paths the client store fetches (the
       `fetch('/…')` literals in `src/store.ts`: `/screen`, `/backtest`,
       `/instrument`, `/facts`, `/metrics`) and asserts each has a matching entry
       in the `vite.config.ts` dev `server.proxy` map.
-- [ ] The test fails if a new client-fetched same-origin path is added to the
+- [x] The test fails if a new client-fetched same-origin path is added to the
       store without a corresponding proxy entry (i.e. it is derived from the
       store, not a hard-coded duplicate list that drifts).
-- [ ] Removing any current proxy entry makes the test red (proven once during
+- [x] Removing any current proxy entry makes the test red (proven once during
       implementation).
 
 ## Architectural Constraints (from SAD)
