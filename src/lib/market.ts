@@ -1233,3 +1233,9 @@ export function rankLabel(rule: RankRule): string {
   const f = RANK_FIELDS[rule.field] || rule.field;
   return `${rule.dir === 'top' ? 'Top' : 'Bottom'} ${rule.pct}% ${f}${rule.scope === 'sector' ? ' / sector' : ''}`;
 }
+
+// ---------- computation-DAG node model (SAD-002#5.1) ----------
+// The explicit dependency model (STORY-039, CAP-dag-model) lives in a co-located,
+// dependency-free pure module; the engine re-exports it as its front door. Namespaced
+// to avoid any collision with the legacy indicator surface above.
+export * as dag from './dag/node';

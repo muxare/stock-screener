@@ -6,10 +6,10 @@ capability: CAP-dag-model
 sad_refs: [SAD-002#5.1, SAD-002#6.1, SAD-002#6.2, SAD-002#2.6, SAD-002#2.2]
 target: ~
 estimate: ~
-attempts: 0
+attempts: 1
 prev_column: ~
 blocked_reason: ~
-reject_reason: ~
+base_commit: 710374c3b016011573a6499344c42902cfddaada
 ---
 
 ## User Story
@@ -26,21 +26,21 @@ inputs, and identity is a pure structural signature generalising today's
 `defSig`.
 
 ## Acceptance Criteria
-- [ ] A node type exists as plain, serialisable data: `{ kind, inputs: NodeRef[],
+- [x] A node type exists as plain, serialisable data: `{ kind, inputs: NodeRef[],
       params }` per SAD-002#6.1 — no closures/functions stored in a node.
-- [ ] The node-kind taxonomy of SAD-002#6.2 is represented: raw-source (L0),
+- [x] The node-kind taxonomy of SAD-002#6.2 is represented: raw-source (L0),
       aggregation, composite, algebraic, relational/boolean, pattern.
-- [ ] `level` is a **derived** property (raw sources = 0; every other node =
+- [x] `level` is a **derived** property (raw sources = 0; every other node =
       `1 + max(level of inputs)`), never hand-assigned (SAD-002#2.6).
-- [ ] A test asserts known node shapes resolve to expected levels (e.g. `ema`=1,
+- [x] A test asserts known node shapes resolve to expected levels (e.g. `ema`=1,
       `macd`=2, `relVol`=2) per SAD-002#2.6.
-- [ ] Graph construction is asserted **acyclic**; attempting to build a cycle is
+- [x] Graph construction is asserted **acyclic**; attempting to build a cycle is
       rejected (SAD-002#6.1).
-- [ ] Node identity is a pure **structural signature** over `(kind, params, input
+- [x] Node identity is a pure **structural signature** over `(kind, params, input
       identities)`: equal nodes share a key; any change to kind/params/inputs
       yields a different key (SAD-002#6.1). Identity is instrument-independent.
-- [ ] Nodes are immutable after construction (SAD-002#5.1 "avoid mutating nodes").
-- [ ] The module stays pure/isomorphic: no import from React/DOM/Node, no
+- [x] Nodes are immutable after construction (SAD-002#5.1 "avoid mutating nodes").
+- [x] The module stays pure/isomorphic: no import from React/DOM/Node, no
       `fetch`, no global state, no "today" (SAD-002#2.2).
 
 ## Architectural Constraints (from SAD)
