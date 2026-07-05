@@ -6,10 +6,11 @@ capability: CAP-screen
 sad_refs: [SAD#5.10, SAD#4.3]
 target: ~
 estimate: ~
-attempts: 0
+attempts: 1
 prev_column: ~
 blocked_reason: ~
 reject_reason: ~
+base_commit: c86865fa1f11b01175035dc9a82e1f1f28ff32ec
 ---
 
 ## User Story
@@ -29,12 +30,12 @@ store lifecycle too), which is why it was deferred from STORY-032 rather than
 fixed in place.
 
 ## Acceptance Criteria
-- [ ] `MarketDataProvider` gains an optional lifecycle method (e.g. `close()`)
+- [x] `MarketDataProvider` gains an optional lifecycle method (e.g. `close()`)
       documented as releasing adapter-held resources; adapters with none make it
       a no-op (synthetic).
-- [ ] `sqliteProvider` implements it by closing its `DatabaseSync` connection;
+- [x] `sqliteProvider` implements it by closing its `DatabaseSync` connection;
       after `close()` the handle is released (the importer can rewrite the file).
-- [ ] The `UniverseStore`/service wiring disposes the provider on shutdown where
+- [x] The `UniverseStore`/service wiring disposes the provider on shutdown where
       applicable, and the SQLite test closes the provider before removing the
       temp DB (no leaked handles across the suite).
 

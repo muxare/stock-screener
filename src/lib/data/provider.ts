@@ -29,4 +29,14 @@ export interface MarketDataProvider {
    * identical to the same name in `getUniverse()`.
    */
   getInstrument(ticker: string): InstrumentBars | null;
+
+  /**
+   * Release any resources the adapter holds (e.g. an open database handle), after
+   * which the provider must not be used again. **Optional**: an adapter that holds
+   * no resources (the synthetic generator) omits it, and callers treat its absence
+   * as a no-op — `provider.close?.()`. Releasing the handle is what lets the EOD
+   * importer overwrite the backing DB file while the service is running, and lets
+   * tests delete a temp DB without a leaked connection (SAD#4.3 / SAD#5.10).
+   */
+  close?(): void;
 }

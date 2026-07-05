@@ -116,5 +116,12 @@ export function sqliteProvider(dbPath: string): MarketDataProvider {
         dates: barRows.map((r) => r.date),
       };
     },
+
+    // Release the read-only connection (SAD#5.10 lifecycle). After this the read
+    // handle is dropped, so the importer can overwrite the DB file (STORY-031) and
+    // tests can delete a temp DB without leaking it; any further call throws.
+    close(): void {
+      db.close();
+    },
   };
 }

@@ -134,6 +134,10 @@ export interface UniverseStore {
   // The descriptor of the dataset currently being served. Drives the dev
   // DB-selector's "active" marker (STORY-035). Defaults to the boot source.
   source(): DatasetSource;
+  // Dispose the active provider (release its handle) on shutdown (SAD#5.10
+  // lifecycle). A no-op for adapters that hold no resources (synthetic). After
+  // this the store must not be used again.
+  close(): void;
 }
 
 export function createUniverseStore(
@@ -152,12 +156,21 @@ export function createUniverseStore(
       return active.getInstrument(ticker);
     },
     reload(next?: MarketDataProvider, source?: DatasetSource): void {
-      if (next) active = next;
+      // Swapping providers: release the outgoing one's handle so re-importing to
+      // the same DB path isn't blocked by our own open read connection (STORY-031
+      // / SAD#4.3). Guard against closing a provider we're keeping.
+      if (next && next !== active) {
+        active.close?.();
+        active = next;
+      }
       if (source) activeSource = source;
       cached = null;
     },
     source(): DatasetSource {
       return activeSource;
+    },
+    close(): void {
+      active.close?.();
     },
   };
 }

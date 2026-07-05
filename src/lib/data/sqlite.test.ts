@@ -15,7 +15,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { EodDatabase } from '../../../tools/eod-import/db.ts';
 import type { ParsedBar } from '../../../tools/eod-import/parse.ts';
 import { sqliteProvider } from './sqlite.ts';
-import { providerFromEnv, rememberDevDb } from '../../../server/universe.ts';
+import type { MarketDataProvider } from './provider.ts';
+import { providerFromEnv, rememberDevDb, createUniverseStore } from '../../../server/universe.ts';
 import { buildUniverse } from '../market.ts';
 
 // AAPL bars are deliberately written OUT of chronological order to prove the
@@ -33,6 +34,13 @@ const MSFT_BARS: ParsedBar[] = [
 let dir: string;
 let dbPath: string;
 
+// Track every provider a test opens so afterEach can close it BEFORE deleting the
+// temp DB — no leaked read handle across the suite (STORY-034, AC#3). Adapters
+// that hold no resources (synthetic) expose no close(); `?.()` makes it a no-op.
+const opened: MarketDataProvider[] = [];
+const track = <T extends MarketDataProvider>(p: T): T => { opened.push(p); return p; };
+const open = (path: string): MarketDataProvider => track(sqliteProvider(path));
+
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'sqlite-provider-'));
   dbPath = join(dir, 'market.db');
@@ -47,11 +55,15 @@ beforeEach(() => {
   db.close();
 });
 
-afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+afterEach(() => {
+  for (const p of opened) p.close?.(); // release handles before the DB file is removed
+  opened.length = 0;
+  rmSync(dir, { recursive: true, force: true });
+});
 
 describe('sqliteProvider', () => {
   it('implements the MarketDataProvider port, reading a STORY-031 DB', () => {
-    const p = sqliteProvider(dbPath);
+    const p = open(dbPath);
     const universe = p.getUniverse();
     expect(universe.map((i) => i.ticker)).toEqual(['AAPL', 'MSFT']);
     const aapl = universe.find((i) => i.ticker === 'AAPL')!;
@@ -61,14 +73,14 @@ describe('sqliteProvider', () => {
   });
 
   it('reads synchronously — results are plain values, not Promises', () => {
-    const p = sqliteProvider(dbPath);
+    const p = open(dbPath);
     expect(p.getUniverse()).toBeInstanceOf(Array);
     expect(p.getInstrument('AAPL')).not.toBeInstanceOf(Promise);
     expect(p.getInstrument('AAPL')!.bars).toBeInstanceOf(Array);
   });
 
   it('returns bars in chronological order as Bar{o,h,l,c,v} with no date field', () => {
-    const p = sqliteProvider(dbPath);
+    const p = open(dbPath);
     const aapl = p.getInstrument('AAPL')!;
     // closes ascend by date even though rows were inserted out of order
     expect(aapl.bars.map((b) => b.c)).toEqual([1.5, 2.5, 3.2]);
@@ -77,7 +89,7 @@ describe('sqliteProvider', () => {
   });
 
   it('returns calendar dates as a parallel array aligned with the chronological bars', () => {
-    const p = sqliteProvider(dbPath);
+    const p = open(dbPath);
     const aapl = p.getInstrument('AAPL')!;
     // dates ascend with the bars (the chart labels its axis from these), and the
     // array is the same length as `bars` so the two stay index-aligned.
@@ -89,7 +101,7 @@ describe('sqliteProvider', () => {
   });
 
   it('getInstrument returns metadata + bars, or null for an unknown ticker', () => {
-    const p = sqliteProvider(dbPath);
+    const p = open(dbPath);
     const msft = p.getInstrument('MSFT');
     expect(msft).not.toBeNull();
     expect(msft!.name).toBe('Microsoft Corp.');
@@ -98,14 +110,14 @@ describe('sqliteProvider', () => {
   });
 
   it("getInstrument bars are identical to that name's bars in getUniverse", () => {
-    const p = sqliteProvider(dbPath);
+    const p = open(dbPath);
     const fromUniverse = p.getUniverse().find((i) => i.ticker === 'AAPL')!;
     const fromInstrument = p.getInstrument('AAPL')!;
     expect(fromInstrument).toEqual(fromUniverse);
   });
 
   it('applies NO adjustment — bars equal the importer-stored values verbatim', () => {
-    const p = sqliteProvider(dbPath);
+    const p = open(dbPath);
     const aapl = p.getInstrument('AAPL')!;
     const expected = [...AAPL_BARS]
       .sort((a, b) => a.date.localeCompare(b.date))
@@ -128,7 +140,7 @@ describe('sqliteProvider', () => {
   });
 
   it('feeds the engine through the port — buildUniverse consumes its output', () => {
-    const p = sqliteProvider(dbPath);
+    const p = open(dbPath);
     const stocks = buildUniverse(p.getUniverse());
     expect(stocks.map((s) => s.ticker)).toEqual(['AAPL', 'MSFT']);
     expect(stocks[0].price).toBe(3.2); // last (latest) close
@@ -137,12 +149,12 @@ describe('sqliteProvider', () => {
 
 describe('providerFromEnv (service seam)', () => {
   it('selects the SQLite adapter when MARKETDATA_DB is set', () => {
-    const p = providerFromEnv({ MARKETDATA_DB: dbPath } as NodeJS.ProcessEnv);
+    const p = track(providerFromEnv({ MARKETDATA_DB: dbPath } as NodeJS.ProcessEnv));
     expect(p.getUniverse().map((i) => i.ticker)).toEqual(['AAPL', 'MSFT']);
   });
 
   it('falls back to the synthetic adapter when MARKETDATA_DB is unset', () => {
-    const p = providerFromEnv({} as NodeJS.ProcessEnv);
+    const p = track(providerFromEnv({} as NodeJS.ProcessEnv));
     // the synthetic universe is the 44-name mulberry32 fixture, not our 2 names
     expect(p.getUniverse().length).toBeGreaterThan(2);
     expect(p.getInstrument('AAPL')).not.toBeNull();
@@ -153,21 +165,91 @@ describe('providerFromEnv (service seam)', () => {
   it('boots from the persisted dev dataset when DEV_TOOLS is on and a pointer exists', () => {
     const pointer = join(dir, '.dev-active-db');
     rememberDevDb(dbPath, pointer);
-    const p = providerFromEnv({ DEV_TOOLS: '1' } as NodeJS.ProcessEnv, pointer);
+    const p = track(providerFromEnv({ DEV_TOOLS: '1' } as NodeJS.ProcessEnv, pointer));
     expect(p.getUniverse().map((i) => i.ticker)).toEqual(['AAPL', 'MSFT']);
   });
 
   it('ignores the pointer when DEV_TOOLS is off (no silent prod downgrade)', () => {
     const pointer = join(dir, '.dev-active-db');
     rememberDevDb(dbPath, pointer);
-    const p = providerFromEnv({} as NodeJS.ProcessEnv, pointer);
+    const p = track(providerFromEnv({} as NodeJS.ProcessEnv, pointer));
     expect(p.getUniverse().length).toBeGreaterThan(2); // synthetic, not our 2 names
   });
 
   it('falls back to synthetic when the pointer references a deleted DB', () => {
     const pointer = join(dir, '.dev-active-db');
     rememberDevDb(join(dir, 'gone.db'), pointer);
-    const p = providerFromEnv({ DEV_TOOLS: '1' } as NodeJS.ProcessEnv, pointer);
+    const p = track(providerFromEnv({ DEV_TOOLS: '1' } as NodeJS.ProcessEnv, pointer));
     expect(p.getUniverse().length).toBeGreaterThan(2);
+  });
+});
+
+describe('provider lifecycle — close() (STORY-034)', () => {
+  it('sqliteProvider.close() releases the connection; the provider must not be used after', () => {
+    const p = sqliteProvider(dbPath); // NOT tracked: this test owns its close()
+    expect(p.getUniverse()).toHaveLength(2);
+    p.close!();
+    // The read handle is released: any further query throws (connection closed).
+    expect(() => p.getUniverse()).toThrow();
+  });
+
+  it('after close() the DB file can be rewritten (the importer is no longer blocked)', () => {
+    const p = sqliteProvider(dbPath);
+    p.close!();
+    // Overwrite the same path with a fresh importer DB — succeeds because our read
+    // handle is gone. This is the STORY-031 re-import scenario the lifecycle enables.
+    const rebuilt = new EodDatabase(dbPath);
+    rebuilt.write([{ ticker: 'NEW', name: 'New Co.', sector: 'Test' }],
+      [{ ticker: 'NEW', date: '2024-01-01', o: 1, h: 1, l: 1, c: 1, v: 1 }]);
+    rebuilt.close();
+    // The write went through (our read handle was released, nothing blocked it)
+    // and the new data is readable through a fresh provider.
+    const p2 = open(dbPath);
+    expect(p2.getUniverse().map((i) => i.ticker)).toContain('NEW');
+  });
+
+  it('synthetic adapter exposes no close() — an optional lifecycle, a no-op when absent', () => {
+    const synth = track(providerFromEnv({} as NodeJS.ProcessEnv)); // synthetic
+    expect(synth.close).toBeUndefined();
+    expect(() => synth.close?.()).not.toThrow(); // callers guard with ?.()
+  });
+});
+
+describe('UniverseStore lifecycle — disposal (STORY-034)', () => {
+  // A minimal fake provider with a close counter — exercises the store's disposal
+  // wiring without opening a real DB.
+  const fakeProvider = (onClose: () => void): MarketDataProvider => ({
+    getUniverse: () => [],
+    getInstrument: () => null,
+    close: onClose,
+  });
+
+  it('reload() closes the outgoing provider, releasing its handle', () => {
+    let closed = 0;
+    const store = createUniverseStore(fakeProvider(() => { closed++; }), { kind: 'synthetic' });
+    store.reload(fakeProvider(() => {})); // swap in a new provider
+    expect(closed).toBe(1); // the previous provider was disposed
+  });
+
+  it('reload() with no provider (cache drop only) does not close the active provider', () => {
+    let closed = 0;
+    const store = createUniverseStore(fakeProvider(() => { closed++; }), { kind: 'synthetic' });
+    store.reload(); // just invalidate the warm cache
+    expect(closed).toBe(0);
+  });
+
+  it('close() disposes the active provider', () => {
+    let closed = 0;
+    const store = createUniverseStore(fakeProvider(() => { closed++; }), { kind: 'synthetic' });
+    store.close();
+    expect(closed).toBe(1);
+  });
+
+  it('close() is a no-op for a provider without a lifecycle (synthetic)', () => {
+    const store = createUniverseStore(
+      { getUniverse: () => [], getInstrument: () => null }, // no close()
+      { kind: 'synthetic' },
+    );
+    expect(() => store.close()).not.toThrow();
   });
 });
