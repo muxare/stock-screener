@@ -4,5 +4,5 @@
 // together form the engine's explicit dependency model. Both are pure,
 // dependency-free, and isomorphic (SAD-002#2.2); the engine re-exports this
 // barrel as `dag`.
-export * from './node';
-export * from './eval';
+export * from './node.ts';
+export * from './eval.ts';

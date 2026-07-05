@@ -21,7 +21,7 @@
 // attaches to the instrument like today's `_indCache` (SAD-002#6.3) — derived and
 // ephemeral, never a source of truth.
 
-import { nodeKey, type Node, type NodeKind, type NodeParams } from './node';
+import { nodeKey, type Node, type NodeKind, type NodeParams } from './node.ts';
 
 /** A computed series, one value per bar. `null` marks an undefined/warm-up bar. */
 export type Series = readonly (number | null)[];

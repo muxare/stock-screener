@@ -13,7 +13,7 @@ import {
   type Node as DagNode,
   type NodeParams,
   type RawSourceKind,
-} from './dag';
+} from './dag/index.ts';
 
 // ---------- shared types ----------
 export type IndicatorType = 'ema' | 'sma' | 'rsi' | 'macd' | 'stochrsi';
@@ -1252,7 +1252,7 @@ export function rankLabel(rule: RankRule): string {
 // memoising evaluator (STORY-040, CAP-dag-eval) live in a co-located,
 // dependency-free pure module; the engine re-exports it as its front door.
 // Namespaced to avoid any collision with the legacy indicator surface above.
-export * as dag from './dag';
+export * as dag from './dag/index.ts';
 
 // The concrete evaluator kernels: per-node-kind compute functions that REUSE the
 // existing indicator math above so the evaluator's outputs are bar-for-bar

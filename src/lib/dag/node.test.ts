@@ -8,7 +8,7 @@ import nodeSource from './node.ts?raw'; // Vite `?raw`: the module's own source,
 import {
   node, source, level, nodeKey, family, assertAcyclic,
   type Node, type NodeKind,
-} from './node';
+} from './node.ts';
 
 // Shared fixtures: the exact shapes SAD-002#2.6 pins levels for.
 function emaOf(src: Node, period: number): Node {

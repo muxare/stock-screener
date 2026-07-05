@@ -6,8 +6,8 @@
 
 import { describe, it, expect } from 'vitest';
 import evalSource from './eval.ts?raw'; // Vite `?raw`: the evaluator's own source, for the purity guard.
-import { node, source, nodeKey } from './node';
-import { evaluate, evaluateAll, newStats, countFor, type Bars } from './eval';
+import { node, source, nodeKey } from './node.ts';
+import { evaluate, evaluateAll, newStats, countFor, type Bars } from './eval.ts';
 import {
   buildUniverse, indSeries, evalDagNode, DAG_KERNELS, ema,
   type Stock, type IndicatorDef,
