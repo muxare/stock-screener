@@ -36,7 +36,17 @@ over the Ready backlog. Every recommendation is justified by whether it raises i
 
 1. **product-owner-lens** — the **currency read**: stale / duplicated / superseded
    PBIs, ones that no longer ladder up to a live epic/feature, and value gaps missing
-   a PBI. Nominates *retire* and *create* (SAD-anchored) candidates. (value & scope)
+   a PBI. Nominates *retire* and *create* (SAD-anchored) candidates. **Reads the
+   firewalled IDEA inbox** (`board.py idea-list --json`) read-only, for three things:
+   (a) **dedup** — never nominate a *create* for scope already captured as an IDEA;
+   (b) **consolidate** — cluster similar/duplicate inbox ideas (by content + `born_from`
+   provenance) and recommend **merges** or **supersedes** so the inbox stays
+   high-signal rather than a pile of near-dupes (e.g. two ideas for the same recurring
+   friction → one); (c) **ripeness** — flag any inbox IDEA now SAD-anchorable as a
+   *promote* candidate for the Vision gate. All three are **recommendations only** —
+   the human applies them (promotion at the Vision gate; a merge by capturing the
+   consolidated idea via `idea-new` and archiving the sources via `idea-archive`).
+   Refine never mutates the inbox and never authors a story from an idea. (value & scope)
 2. **dev-team-lens** — the **coupling read**: which PBIs share hot files (false lanes
    ⇒ *combine* candidates), which are one unit of work masquerading as two, and the
    **disjoint-file split seams** for serial blobs. Grounded in real Touch scopes +
@@ -62,16 +72,24 @@ the **exact `board.py` commands the human runs** — do not run them:
 | move    | target               | command (human runs)                                            |
 |---------|----------------------|-----------------------------------------------------------------|
 | split   | STORY-0xx            | (hand to backlog-decomposer) → STORY-0xx-a / -b on disjoint seam |
-| combine | STORY-0yy, STORY-0zz | board.py combine STORY-0yy STORY-0zz --into STORY-0yy            |
+| combine | STORY-0zz → STORY-0yy| board.py combine STORY-0zz --into STORY-0yy                      |
 | create  | (new, CAP-foo)       | board.py new --capability CAP-foo --parent FEAT-0nn              |
-| fanout  | FEAT-0nn             | board.py set FEAT-0nn fanout true   (after the disjointness proof)|
-| retire  | STORY-029            | (blocked on IDEA-003 terminal column)                           |
+| fanout  | FEAT-0nn             | board.py fanout FEAT-0nn --children STORY-a,STORY-b [--spine …]  |
+| retire  | STORY-029            | board.py retire STORY-029 --reason "…"                           |
+| promote | IDEA-0nn             | (Vision gate — human triages) board.py new … then set sad_refs   |
+| merge   | IDEA-005, IDEA-008   | (inbox hygiene) board.py idea-new <consolidated> + archive sources|
 ```
 
 ## Where it lands (no orphan output)
 - SAD-anchored **create / split / combine** → **board mutations the human applies**.
 - A verified **fan-out FEAT** → the **build loop** (`/fanout FEAT-0nn`).
-- **Retire** → a terminal-column move (blocked until **IDEA-003** lands).
+- **Retire** → a terminal-column move (`board.py retire`).
+- **Ripe IDEA** → a *promote* recommendation to the **Vision gate** (the human
+  triages it into a story); refine never authors the create itself.
+- **Similar IDEAs** → a *consolidation* recommendation — the human merges them
+  (capture the union via `idea-new`, archive the sources). Pure **inbox hygiene**,
+  **no gate**: merging ideas never promotes or commits scope, so — like
+  `idea-archive` — it doesn't route through Vision.
 - Any un-anchorable scope or new theme → an **IDEA** at the **Vision gate**
   (`board.py idea-new`), never a story invented here.
 

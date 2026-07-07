@@ -88,6 +88,15 @@ judge which PBIs should exist, not which to commit.
 - **A currency read** — which todo PBIs are stale, duplicated, superseded, or no
   longer ladder up to a live epic/feature (roadmap drift). Nominate them as **retire**
   candidates (a recommendation; retire itself is a board move the human runs).
+- **An idea-inbox pass** — read the firewalled inbox (`board.py idea-list`) read-only
+  and use it three ways: **dedup** (never nominate a *create* for scope already sitting
+  as an IDEA); **consolidate** (cluster similar/duplicate ideas by content + `born_from`
+  and recommend a **merge** or **supersede**, so the inbox stays high-signal — e.g. two
+  ideas for the same recurring friction → one); and **ripeness** (flag any IDEA now
+  SAD-anchorable as a *promote* candidate for the Vision gate). All three are
+  **recommendations** — the human applies them (promotion at Vision; a merge by
+  capturing the union via `idea-new` + archiving the sources). You never mutate the
+  inbox or author a story from an idea; consolidation is **inbox hygiene**, not a gate.
 - **Value-gap create nominations** — user value with no PBI under a live capability;
   each *create* must be SAD-anchorable (else it's an IDEA at the Vision gate, never a
   story you author).

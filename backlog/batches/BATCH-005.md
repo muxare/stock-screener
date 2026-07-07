@@ -1,7 +1,7 @@
 ---
 id: BATCH-005
 type: batch
-status: active
+status: closed
 created: 2026-07-05
 wip_limit: 4
 capabilities: [CAP-dag-model, CAP-dag-eval, CAP-dag-fidelity, CAP-screen]

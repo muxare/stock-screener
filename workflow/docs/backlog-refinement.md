@@ -1,10 +1,13 @@
 # Backlog refinement & consolidation — the `/refine` ceremony
 
-_Status: **PROPOSED** (design, not landed). Routes to the **Vision gate** as an
-IDEA (a process/tooling change has no product `sad_refs`, so capture≠commit forces
-it through Vision — see `workflow/CLAUDE.md` §"The gates"). Nothing here mutates
-the board; it is a design artifact in the lineage of
-`workflow/docs/sprint-ceremonies.md` and `work-process-analysis.md`._
+_Status: **PROTOTYPED** — captured at the Vision gate as **IDEA-016** (a process/
+tooling change has no product `sad_refs`, so capture≠commit routes it through Vision
+— see `workflow/CLAUDE.md` §"The gates"). The tooling (`combine`, `fanout`, `retire`
++ the terminal `retired` column, and the `/refine` · `/fanout` commands) is
+implemented and tested (`workflow/tools/tests/test_board_refine.py`); the human still
+ratifies promotion of IDEA-016 at the Vision gate before it is adopted as process. A
+design artifact in the lineage of `workflow/docs/sprint-ceremonies.md` and
+`work-process-analysis.md`._
 
 _Builds on: the four read-only lenses (`workflow/agents/`), the Scrum-Master lens's
 **parallelization map** and **split-for-parallelism** heuristics, the
@@ -93,14 +96,15 @@ makes wide, safe fan-out possible instead of merge thrash.
 |---|---|---|---|
 | **Create** | a missing PBI under an existing capability | `new --capability … --parent FEAT-…` | none — but must be SAD-anchored, else route to Vision as an IDEA |
 | **Split** | cut a serial blob on a **disjoint-file seam** to raise the parallel fraction | `backlog-decomposer` skill (human-run) | none — refinement is the natural trigger for it |
-| **Combine** | merge two PBIs that are one unit of value / always co-edit the same files (a *negative* parallelism signal — keep coupled work in one story) | **no verb** | add `board.py combine <src…> --into <id>` (or `--new`) that folds AC + Touch scope + `sad_refs`, preserves provenance, and logs an event |
-| **Retire** | drop a stale / won't-do / superseded PBI | **no verb / no column** | depends on **IDEA-003** (a terminal `retired`/`won't-do` column) — still unbuilt; RETRO-002 has STORY-029 parked WON'T-DO waiting on it. **Retire is blocked until IDEA-003 lands.** |
+| **Combine** | merge two PBIs that are one unit of value / always co-edit the same files (a *negative* parallelism signal — keep coupled work in one story) | **`board.py combine <src…> --into <id>`** (shipped) — folds AC + Touch scope + `sad_refs`, stamps `combined_from`/`combined_into`, retires the sources | none |
+| **Retire** | drop a stale / won't-do / superseded PBI | **`board.py retire <id> --reason`** (shipped) + the terminal `retired` column (a minimal realization of **IDEA-003**) | none — revisit the column's metrics/revive semantics with the human |
 
-So refinement ships in two waves: **Wave 1** (create + split + combine) needs only
-a `combine` verb; **Wave 2** (retire) waits on IDEA-003. Note the asymmetry with
-splitting: **combine is the anti-parallelism move** — two stories that always touch
-the same hot file are a false lane, and merging them removes a collision the SM lens
-would otherwise have to serialize.
+Both waves have now landed (`combine`, `fanout`, `retire` + the terminal `retired`
+column). Note the asymmetry with splitting: **combine is the anti-parallelism move**
+— two stories that always touch the same hot file are a false lane, and merging them
+removes a collision the SM lens would otherwise have to serialize. The `retired`
+column is deliberately minimal (revive → todo only, excluded from shipped metrics);
+its exact semantics are the one open piece flagged for human sign-off (§10).
 
 ---
 
@@ -115,7 +119,17 @@ structure so the roster stays familiar.
    narrow, don't refuse.
 2. **product-owner-lens** — **currency pass**: which PBIs are stale, duplicated,
    superseded, or no longer ladder up to a live epic/feature; which value is missing
-   a PBI. Nominates *create* (SAD-anchored) and *retire* candidates. Never authors.
+   a PBI. Nominates *create* (SAD-anchored) and *retire* candidates. **Reads the
+   firewalled IDEA inbox** (`idea-list`) read-only for three things — *dedup* (never
+   re-create scope already captured as an IDEA), *consolidate* (cluster similar/
+   duplicate ideas by content + `born_from` and recommend a **merge** so the inbox
+   stays high-signal — e.g. two ideas for the same recurring friction → one), and
+   *ripeness* (flag an IDEA now SAD-anchorable as a *promote* candidate for Vision).
+   All three are recommendations. Consolidation is **inbox hygiene** (no gate),
+   applied by the human via `idea-new` on the union + `idea-archive` of the sources —
+   it complements the age-based `idea-archive` with a *semantic* pass, so recurring
+   frictions (RETRO-001/002's IDEA-005 + IDEA-008 kind) don't pile up as near-dupes.
+   Never authors: promotion is a human Vision-gate act, not a create refine makes.
 3. **dev-team-lens** — **coupling read**: which PBIs share hot files (schema,
    routing, config, shared types) and so are false lanes; which are one unit of work
    masquerading as two. Nominates *combine* and *split* seams, grounded in the real
@@ -133,16 +147,20 @@ structure so the roster stays familiar.
 | move    | target              | command (human runs)                                           |
 |---------|---------------------|----------------------------------------------------------------|
 | split   | STORY-0xx           | (backlog-decomposer) → STORY-0xx-a / -b on a disjoint-file seam |
-| combine | STORY-0yy, STORY-0zz| board.py combine STORY-0yy STORY-0zz --into STORY-0yy           |
+| combine | STORY-0zz → STORY-0yy| board.py combine STORY-0zz --into STORY-0yy                    |
 | create  | (new, CAP-foo)      | board.py new --capability CAP-foo --parent FEAT-0nn             |
-| fanout  | FEAT-0nn            | board.py set FEAT-0nn fanout true   (after disjointness proof)  |
-| retire  | STORY-029           | (blocked on IDEA-003 terminal column)                          |
+| fanout  | FEAT-0nn            | board.py fanout FEAT-0nn --children STORY-a,STORY-b [--spine …] |
+| retire  | STORY-029           | board.py retire STORY-029 --reason "…"                          |
+| promote | IDEA-0nn            | (Vision gate — human triages) board.py new … then set sad_refs  |
+| merge   | IDEA-005, IDEA-008  | (inbox hygiene) board.py idea-new <consolidated> + archive sources|
 ```
 
 Everything routes to a gate: SAD-anchored creates/splits/combines are **board
-mutations the human applies**; anything needing new architecture or a new theme is
-an **IDEA at the Vision gate** (capture≠commit); a `fanout` FEAT feeds the **build
-loop**.
+mutations the human applies**; a **ripe IDEA** is a *promote* recommendation the
+human triages at the **Vision gate**; a **duplicate-IDEA merge** is *inbox hygiene*
+the human applies with existing tooling (**no gate** — merging ideas never promotes
+or commits scope); anything needing new architecture or a new theme is an **IDEA at
+the Vision gate** (capture≠commit); a `fanout` FEAT feeds the **build loop**.
 
 ---
 
@@ -217,26 +235,30 @@ rather than a merge-conflict generator.
 
 ## 7. Tooling surface to add (minimal, idiomatic)
 
-- **`board.py combine <src…> --into <id>` (`--new` variant)** — fold AC + Touch
-  scope + `sad_refs` of the sources into the target, stamp provenance
-  (`combined_from:`), retire the sources (needs IDEA-003) or park them, log a
-  `combine` event. `validate`: the target's `sad_refs` must cover the union.
-- **`board.py set <FEAT> fanout true|false`** — reuses the existing `set` verb;
-  extend `SETTABLE_FIELDS` for the FEAT kind with `fanout`, `fanout_children`,
-  `fanout_verified`, `fanout_spine`, `fanout_wip`.
-- **`validate` additions** — a `fanout: true` FEAT must (a) have ≥2 children, (b)
-  have **pairwise-disjoint child Touch scopes** (else `problem: false lane set`), (c)
-  carry a **current** `fanout_verified` (else `nudge: re-verify`); editing a child's
-  Touch scope clears the stamp.
-- **`/refine` command** (`workflow/commands/refine.md`) — convenes PO + dev-team +
-  SM read-only, emits the change-set table. No new gate.
-- **`/fanout` command** (`workflow/commands/fanout.md`) — the §6.3 orchestrator.
-- **(Wave 2, blocked) IDEA-003** — the terminal `retired`/`won't-do` column that
-  *retire* and `combine`'s source-parking both need.
+- **`board.py combine <src…> --into <id>`** (shipped) — folds AC + Touch scope +
+  `sad_refs` of the sources into the target, stamps `combined_from`/`combined_into`,
+  and retires the sources to the terminal column. Only todo/blocked sources may be
+  folded (active work is never silently combined away).
+- **`board.py fanout <FEAT> --children … [--spine …] [--wip N]` (`--clear`)**
+  (shipped) — a **dedicated verb**, not `set` (which only edits stories): it verifies
+  the children's Touch scopes are pairwise-disjoint, then stamps `fanout`,
+  `fanout_children`, `fanout_verified`, `fanout_scope_hash`, `fanout_spine`,
+  `fanout_wip` on the FEAT.
+- **`validate` additions** (shipped) — a `fanout: true` FEAT must (a) have ≥2
+  children, (b) have **pairwise-disjoint child Touch scopes** (else a `problem`), (c)
+  carry a `fanout_verified` stamp; a child Touch-scope change flips
+  `fanout_scope_hash`, so a stale proof surfaces as a `warning`.
+- **`board.py retire <id> --reason`** + the terminal **`retired`** column (shipped)
+  — the minimal realization of **IDEA-003**: reachable from any active/blocked
+  column, excluded from shipped metrics, revivable only to `todo`.
+- **`/refine` and `/fanout` commands** (`workflow/commands/`) — the read-only
+  ceremony (PO + dev-team + SM, emits the change-set table) and the §6.3 fan-out
+  orchestrator. No new gate.
 
-Tests extend `workflow/tools/tests/test_board_sprint.py`: `combine` folds AC/scope
-and logs provenance; a `fanout` FEAT with overlapping child Touch scopes fails
-`validate`; editing a child's Touch scope clears `fanout_verified`.
+Tests live in `workflow/tools/tests/test_board_refine.py` (combine folds AC/scope +
+provenance; overlapping `fanout` children fail `validate`; a child Touch-scope edit
+makes the proof stale; retire is terminal + revivable), alongside the unchanged
+`test_board_gates.py` and `test_board_sprint.py`.
 
 ---
 
@@ -260,15 +282,16 @@ and logs provenance; a `fanout` FEAT with overlapping child Touch scopes fails
 
 ---
 
-## 9. Try it (once landed)
+## 9. Try it
 
 ```bash
 python3 workflow/tools/board.py sprint-show          # prefer no active sprint
 /refine CAP-screen                                   # convene PO + dev-team + SM (read-only)
 # review the change-set, then apply it yourself (capture≠commit):
-python3 workflow/tools/board.py combine STORY-0yy STORY-0zz --into STORY-0yy
+python3 workflow/tools/board.py combine STORY-0zz --into STORY-0yy    # fold zz into yy, retire zz
+python3 workflow/tools/board.py retire STORY-0xx --reason "superseded"
 python3 workflow/tools/board.py new --capability CAP-screen --parent FEAT-0nn
-python3 workflow/tools/board.py set FEAT-0nn fanout true          # after the SM disjointness proof
+python3 workflow/tools/board.py fanout FEAT-0nn --children STORY-a,STORY-b   # stamps the disjointness proof
 python3 workflow/tools/board.py validate                          # proves the lane set is disjoint
 # then run the parallel parent:
 /fanout FEAT-0nn A2                                  # one isolated-worktree agent per child
@@ -278,11 +301,25 @@ python3 workflow/tools/board.py validate                          # proves the l
 
 ## 10. Open questions (for Vision-gate triage)
 
-1. **Combine semantics** — fold-into-existing vs. always-new-id? (Provenance is
-   cleaner with a new id; churn is lower folding into the survivor.)
-2. **Cross-feature lane sets** — when a disjoint set spans features, do we relax the
-   "children under one FEAT" rule, or introduce the `PARALLEL-NNN` object then?
-3. **Proof freshness** — should `fanout_verified` expire on a clock as well as on
+_Prototype decisions taken (revisit at triage): combine **folds into the surviving
+id** (`--into`); children stay **under one FEAT**; the proof is invalidated by
+**Touch-scope edits only** (no clock TTL); retire lands in a **terminal `retired`
+column** (revive → todo only, excluded from shipped metrics)._
+
+1. **Retire / `retired`-column semantics** — is "revive → todo only" and "excluded
+   from shipped metrics" right, or should retired work be reportable / un-retirable
+   to its prior column? (This is the deferred **IDEA-003** design — the piece most
+   worth a human eye.)
+2. **Cross-feature lane sets** — when a disjoint set spans features, relax the
+   "children under one FEAT" rule, or introduce a `PARALLEL-NNN` object then?
+3. **Proof freshness** — should `fanout_verified` also expire on a clock, not just on
    Touch-scope edits, given the backlog moves under it?
-4. **Retire vs. IDEA-003** — land the terminal column first (Wave 2 dependency) or
-   ship refinement Wave 1 (create/split/combine) without retire?
+4. **Combine id** — keep fold-into-survivor, or add a `--new` variant that mints a
+   fresh id for cleaner provenance?
+5. **Idea-inbox pass** — the PO lens now reads the inbox for *dedup*, *consolidate*
+   (recommend merging duplicate ideas — inbox hygiene applied via `idea-new` +
+   `idea-archive`, no new verb), and a *promote* nudge to the Vision gate (never
+   authoring a story from an idea). Two follow-ups if the recommend-only merge proves
+   clunky: (a) should refine **rank** promote-candidates so Vision has an order? (b)
+   is a dedicated **`board.py idea-merge`** verb worth it later, or does `idea-new` +
+   `idea-archive` stay sufficient? (Decided for now: recommend-only, no new verb.)
