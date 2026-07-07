@@ -68,9 +68,13 @@ import argparse, difflib, glob, json, os, re, sys, shutil
 
 import workflow_log
 
-COLUMNS = ["todo", "in-progress", "review", "done", "blocked"]
+COLUMNS = ["todo", "in-progress", "review", "done", "blocked", "retired"]
 ACTIVE = ["todo", "in-progress", "review", "done"]  # the linear path
 FORWARD = {"todo": "in-progress", "in-progress": "review", "review": "done"}
+# `retired` is the terminal won't-do/superseded column (IDEA-003): reachable from
+# any active column or from blocked, NOT shipped (≠ done, so metrics don't count
+# it), and terminal — a retired story can only be revived back to `todo`. It is
+# how `retire`/`combine` remove a PBI without an unaudited `rm`.
 ROOT = workflow_log.project_root()
 BOARD = os.path.join(ROOT, "backlog", "board")
 TEMPLATE = os.path.join(ROOT, "backlog", "stories", "STORY.template.md")
@@ -642,6 +646,97 @@ def id_matches_filename(item_id, path):
     return item_id == base
 
 
+# ---------- refinement helpers (combine + fan-out FEAT, IDEA-016) ----------
+def feature_path(fid):
+    """Path to a FEAT-NNN file (whether or not it exists)."""
+    return os.path.join(FEATURES, f"{fid}.md")
+
+
+def story_touch_scope(sid):
+    """The Touch-scope globs of a story, or None if the story isn't found."""
+    p = find_story(sid)
+    if not p:
+        return None
+    _, body = read_story(p)
+    return touch_scope(body)
+
+
+def _scope_probe(glob):
+    """A representative concrete-ish path for a Touch-scope glob, so two globs can
+    be tested for a shared match. `**`→two segments, `*`/`?`→one segment."""
+    g = glob.replace("**", "\x00").replace("*", "seg").replace("?", "s")
+    return g.replace("\x00", "seg/seg")
+
+
+def globs_overlap(a, b):
+    """Conservative Touch-scope overlap test: do two path globs share any path?
+    Errs toward flagging overlap (fnmatch `*` crosses `/`), so a false lane is
+    caught rather than missed — the SM lens's human-verified proof backstops it."""
+    import fnmatch
+    if a == b:
+        return True
+    pa, pb = _scope_probe(a), _scope_probe(b)
+    return (fnmatch.fnmatchcase(pa, b.replace("**", "*"))
+            or fnmatch.fnmatchcase(pb, a.replace("**", "*")))
+
+
+def scopes_overlap(a_globs, b_globs):
+    """First overlapping (globA, globB) pair between two scope sets, or None."""
+    for ga in a_globs:
+        for gb in b_globs:
+            if globs_overlap(ga, gb):
+                return (ga, gb)
+    return None
+
+
+def fanout_overlaps(children):
+    """Reasons `children` are NOT a provable disjoint lane set: missing stories,
+    empty Touch scopes (can't prove disjoint), or pairwise Touch-scope overlaps.
+    Empty list ⇒ the children are pairwise-disjoint and each has a real scope."""
+    problems, scopes = [], {}
+    for c in children:
+        ts = story_touch_scope(c)
+        if ts is None:
+            problems.append(f"{c}: not found")
+        elif not ts:
+            problems.append(f"{c}: empty Touch scope (can't prove disjoint)")
+        else:
+            scopes[c] = ts
+    kids = list(scopes)
+    for i in range(len(kids)):
+        for j in range(i + 1, len(kids)):
+            hit = scopes_overlap(scopes[kids[i]], scopes[kids[j]])
+            if hit:
+                problems.append(f"{kids[i]} ∩ {kids[j]} on {hit[0]} / {hit[1]}")
+    return problems
+
+
+def fanout_fingerprint(children):
+    """A stable short hash of the children's Touch scopes — the freshness anchor
+    for a stamped disjointness proof. Any child Touch-scope edit changes it, so a
+    stale `fanout_verified` is detectable without re-running the SM check."""
+    import hashlib
+    parts = []
+    for c in sorted(children):
+        ts = story_touch_scope(c) or []
+        parts.append(c + "=" + ",".join(sorted(ts)))
+    return hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:12]
+
+
+def get_section(body, header):
+    """Inner text of a `## <header>` section (through the next `##` or EOF)."""
+    m = re.search(rf"##\s*{re.escape(header)}\s*\n(.*?)(\n##|\Z)", body, re.DOTALL)
+    return m.group(1) if m else None
+
+
+def replace_section(body, header, new_inner):
+    """Replace the inner text of a `## <header>` section; returns (body, found)."""
+    m = re.search(rf"(##\s*{re.escape(header)}\s*\n)(.*?)(\n##|\Z)", body, re.DOTALL)
+    if not m:
+        return body, False
+    return body[:m.start()] + m.group(1) + new_inner + m.group(3) + body[m.end():], True
+
+
 def git_changed_files(base):
     """Files changed (vs `base` ref) — staged, unstaged, and untracked."""
     import subprocess
@@ -771,6 +866,15 @@ def legal_move(src, dst):
         return False, f"unknown column '{dst}'"
     if src == dst:
         return False, "already in that column"
+    if dst == "retired":
+        if src not in ACTIVE and src != "blocked":
+            return False, "can only retire from an active or blocked column"
+        return True, ""
+    if src == "retired":
+        # terminal: a retired story may only be revived back to todo
+        if dst != "todo":
+            return False, "a retired story can only be revived to todo"
+        return True, ""
     if dst == "blocked":
         if src not in ACTIVE:
             return False, "can only block from an active column"
@@ -900,6 +1004,13 @@ def cmd_move(args):
     if src == "blocked":
         fm.pop("prev_column", None)
         fm["blocked_reason"] = "~"
+    if dst == "retired":
+        fm["prev_column"] = src
+        fm["retired_reason"] = args.reason or fm.get("retired_reason", "unspecified")
+    if src == "retired":
+        # revive: clear the retirement stamps
+        fm.pop("prev_column", None)
+        fm["retired_reason"] = "~"
     if dst == "in-progress":
         try:
             fm["attempts"] = str(int(fm.get("attempts", "0") or "0") + 1)
@@ -1609,6 +1720,181 @@ def cmd_show(args):
         sys.exit(f"error: {args.id} not found")
     with open(path, encoding="utf-8") as f:
         print(f.read())
+
+
+def _fmt_reflist(items):
+    return "[" + ", ".join(items) + "]"
+
+
+def _retire_story(sid, reason, extra=None):
+    """Move a story to the terminal `retired` column with stamps. Shared by
+    `retire` and `combine` (source parking). Bypasses the forward build gates —
+    retire is terminal, not a build move; callers pre-check the source column."""
+    path = find_story(sid)
+    fm, body = read_story(path)
+    src = fm["_column"]
+    fm.pop("_path", None); fm.pop("_column", None)
+    fm["prev_column"] = src
+    fm["retired_reason"] = reason
+    if extra:
+        fm.update(extra)
+    dst_dir = os.path.join(BOARD, "retired")
+    os.makedirs(dst_dir, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(dump_fm(fm, body))
+    shutil.move(path, os.path.join(dst_dir, f"{sid}.md"))
+    _log("retire", story_id=sid, message=reason, **{"from": src, "to": "retired"})
+    return src
+
+
+def cmd_retire(args):
+    """Refinement move: send a story to the terminal `retired` column (IDEA-003).
+
+    A won't-do/superseded PBI leaves the buildable columns without an unaudited
+    `rm`; revive with `move <id> todo`. Delegates to cmd_move so the same
+    legal-move policy and stamping apply."""
+    args.column = "retired"
+    args.base = ""
+    args.skip_review_check = args.skip_ready = args.skip_code_review = False
+    args.force_attempts = False
+    cmd_move(args)
+
+
+def cmd_combine(args):
+    """Refinement: fold source stories into a target, then retire the sources.
+
+    Merges each source's sad_refs, Touch scope, and acceptance criteria into the
+    target (nothing is lost), stamps `combined_from`, and moves each source to the
+    terminal `retired` column stamped `combined_into`. Only unstarted sources
+    (todo/blocked) may be combined — active work is not silently folded away."""
+    target = args.into
+    if not STORY_ID.match(target):
+        _fatal(f"{target}: bad target id (use STORY-NNN)", event="combine")
+    tpath = find_story(target)
+    if not tpath:
+        _fatal(f"target {target} not found", event="combine")
+    sources = [s for s in args.sources if s != target]
+    if not sources:
+        _fatal("combine needs >=1 source distinct from --into", event="combine")
+    for sid in sources:
+        if not STORY_ID.match(sid):
+            _fatal(f"{sid}: bad source id (use STORY-NNN)", event="combine")
+        sp = find_story(sid)
+        if not sp:
+            _fatal(f"source {sid} not found", event="combine")
+        col = os.path.basename(os.path.dirname(sp))
+        if col not in ("todo", "blocked"):
+            _fatal(f"source {sid} is {col}; only todo/blocked stories may be "
+                   f"combined (don't fold away active work)", event="combine")
+
+    tfm, tbody = read_story(tpath)
+    t_refs = parse_sad_refs(tfm.get("sad_refs", ""))
+    t_scope = touch_scope(tbody)
+    added_refs, added_scope, ac_appends, folded = [], [], [], []
+
+    for sid in sources:
+        sfm, sbody = read_story(find_story(sid))
+        for r in parse_sad_refs(sfm.get("sad_refs", "")):
+            if r not in t_refs and r not in added_refs:
+                added_refs.append(r)
+        for g in touch_scope(sbody):
+            if g not in t_scope and g not in added_scope:
+                added_scope.append(g)
+        for line in (get_section(sbody, "Acceptance Criteria") or "").splitlines():
+            bm = CRITERION_BOX.match(line)
+            if bm:
+                ac_appends.append(f"- [ ] (from {sid}) {bm.group(3).strip()}")
+        folded.append(sid)
+
+    tfm.pop("_path", None); tfm.pop("_column", None)
+    if added_refs:
+        tfm["sad_refs"] = _fmt_reflist(t_refs + added_refs)
+    prev_cf = parse_list(tfm.get("combined_from", ""))
+    tfm["combined_from"] = _fmt_reflist(prev_cf + [s for s in folded if s not in prev_cf])
+
+    if added_scope:
+        cur = get_section(tbody, "Touch scope")
+        add = "\n".join(f"- {g}" for g in added_scope)
+        if cur is not None:
+            tbody, _ = replace_section(tbody, "Touch scope",
+                                       cur.rstrip("\n") + "\n" + add + "\n")
+        else:
+            tbody = tbody.rstrip("\n") + "\n\n## Touch scope\n" + add + "\n"
+    if ac_appends:
+        cur = get_section(tbody, "Acceptance Criteria")
+        if cur is not None:
+            tbody, _ = replace_section(tbody, "Acceptance Criteria",
+                                       cur.rstrip("\n") + "\n" + "\n".join(ac_appends) + "\n")
+
+    with open(tpath, "w", encoding="utf-8") as f:
+        f.write(dump_fm(tfm, tbody))
+    for sid in folded:
+        _retire_story(sid, f"combined into {target}", extra={"combined_into": target})
+
+    print(f"combined {', '.join(folded)} into {target} "
+          f"(+{len(added_refs)} sad_refs, +{len(added_scope)} scope, "
+          f"+{len(ac_appends)} criteria); source(s) retired")
+    _log("combine", story_id=target, message=f"folded {','.join(folded)}",
+         count=len(folded))
+
+
+def cmd_fanout(args):
+    """Refinement: mark/refresh (or --clear) a FEAT as a fan-out lane set.
+
+    Verifies the children's Touch scopes are pairwise-disjoint (the load-bearing
+    precondition for safe worktree fan-out), then stamps the proof the /fanout
+    guard requires: fanout / fanout_children / fanout_verified / fanout_scope_hash
+    (+ optional fanout_spine / fanout_wip)."""
+    from datetime import datetime, timezone
+    fid = args.id
+    if not FEAT_ID.match(fid):
+        _fatal(f"{fid}: fan-out target must be a FEAT-NNN", event="fanout")
+    fpath = feature_path(fid)
+    if not os.path.exists(fpath):
+        _fatal(f"feature {fid} not found", event="fanout")
+    ffm, fbody = read_backlog_file(fpath)
+    ffm.pop("_path", None)
+
+    if args.clear:
+        for k in ("fanout", "fanout_children", "fanout_verified",
+                  "fanout_scope_hash", "fanout_spine", "fanout_wip"):
+            ffm.pop(k, None)
+        with open(fpath, "w", encoding="utf-8") as f:
+            f.write(dump_fm(ffm, fbody))
+        print(f"cleared fan-out marking on {fid}")
+        _log("fanout", message=fid)
+        return
+
+    children = parse_list(args.children) if args.children else parse_list(ffm.get("fanout_children", ""))
+    if len(children) < 2:
+        _fatal("a fan-out FEAT needs >=2 children (--children STORY-a,STORY-b)", event="fanout")
+    problems = fanout_overlaps(children)
+    if problems:
+        _fatal("children are not a provable disjoint lane set:\n  - "
+               + "\n  - ".join(problems)
+               + "\n(serialize or split the overlap, then re-run)", event="fanout")
+    spine = (args.spine or ffm.get("fanout_spine") or "").strip()
+    if spine and spine not in SENTINELS:
+        if not STORY_ID.match(spine) or not find_story(spine):
+            _fatal(f"fanout_spine {spine} is not a real story", event="fanout")
+        if spine in children:
+            _fatal(f"fanout_spine {spine} cannot also be a child (the spine lands "
+                   f"serialized first)", event="fanout")
+
+    ffm["fanout"] = "true"
+    ffm["fanout_children"] = "[" + ", ".join(children) + "]"
+    ffm["fanout_verified"] = datetime.now(timezone.utc).date().isoformat()
+    ffm["fanout_scope_hash"] = fanout_fingerprint(children)
+    if spine and spine not in SENTINELS:
+        ffm["fanout_spine"] = spine
+    if args.wip is not None:
+        ffm["fanout_wip"] = str(args.wip)
+    with open(fpath, "w", encoding="utf-8") as f:
+        f.write(dump_fm(ffm, fbody))
+    extra = f" (+spine {spine})" if (spine and spine not in SENTINELS) else ""
+    print(f"{fid} is a verified fan-out lane set: {len(children)} children{extra} "
+          f"— proof {ffm['fanout_scope_hash']}")
+    _log("fanout", message=fid, count=len(children))
 
 
 def cmd_render(args):
@@ -2438,6 +2724,27 @@ def cmd_validate(args):
             if EPIC_ID.match(parent) and not epic_exists(parent):
                 problems.append(f"{fid}: orphan feature — parent {parent} not found")
 
+        # Fan-out FEAT (IDEA-016): a runnable lane set must stay a *provable*
+        # disjoint set, or /fanout would recreate the shared-branch merge thrash.
+        if (fm.get("fanout") or "").strip().lower() == "true":
+            kids = parse_list(fm.get("fanout_children", ""))
+            if len(kids) < 2:
+                problems.append(f"{fid}: fanout FEAT needs >=2 fanout_children")
+            else:
+                ovs = fanout_overlaps(kids)
+                if ovs:
+                    problems.append(f"{fid}: fanout children are not a disjoint "
+                                    f"lane set — {'; '.join(ovs)}")
+                elif fanout_fingerprint(kids) != (fm.get("fanout_scope_hash") or "").strip():
+                    warnings.append(f"{fid}: fanout proof stale (a child Touch "
+                                    f"scope changed) — re-run `board.py fanout {fid}`")
+            verified = (fm.get("fanout_verified") or "").strip()
+            if not verified or verified in SENTINELS:
+                warnings.append(f"{fid}: fanout FEAT missing a fanout_verified stamp")
+            spine = (fm.get("fanout_spine") or "").strip()
+            if spine and spine not in SENTINELS and not find_story(spine):
+                problems.append(f"{fid}: fanout_spine {spine} not found")
+
     for fm in stories:
         sid = fm.get("id", "?")
         col = fm["_column"]
@@ -3215,6 +3522,29 @@ def main():
     st = sub.add_parser("set")
     st.add_argument("id"); st.add_argument("field"); st.add_argument("value")
     st.set_defaults(fn=cmd_set)
+
+    # Refinement (IDEA-016): reshape the backlog for currency + parallelism.
+    cb = sub.add_parser("combine",
+                        help="refinement: fold source stories into a target, retiring the sources")
+    cb.add_argument("sources", nargs="+", help="STORY ids to fold in (todo/blocked only)")
+    cb.add_argument("--into", required=True, help="the surviving target STORY id")
+    cb.add_argument("--reason", default="")
+    cb.set_defaults(fn=cmd_combine)
+
+    fo = sub.add_parser("fanout",
+                        help="refinement: mark a FEAT as a verified-disjoint fan-out lane set")
+    fo.add_argument("id", help="FEAT-NNN to mark")
+    fo.add_argument("--children", help="comma-separated STORY ids (>=2, pairwise-disjoint Touch scopes)")
+    fo.add_argument("--spine", help="optional contract-first STORY landed before the limbs")
+    fo.add_argument("--wip", type=int, help="per-FEAT concurrency ceiling")
+    fo.add_argument("--clear", action="store_true", help="remove the fan-out marking")
+    fo.set_defaults(fn=cmd_fanout)
+
+    rt = sub.add_parser("retire",
+                        help="refinement: move a story to the terminal `retired` column")
+    rt.add_argument("id")
+    rt.add_argument("--reason", required=True, help="why it's won't-do/superseded")
+    rt.set_defaults(fn=cmd_retire)
 
     rj = sub.add_parser("reject")
     rj.add_argument("id")

@@ -20,7 +20,7 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOLS = os.path.dirname(HERE)
-COLUMNS = ["todo", "in-progress", "review", "done", "blocked"]
+COLUMNS = ["todo", "in-progress", "review", "done", "blocked", "retired"]
 
 failures = []
 
@@ -407,7 +407,7 @@ def run():
         m = re.search(r"const DATA = (\{.*?\});\n", html)
         check("embedded DATA json present", bool(m))
         data = json.loads(m.group(1))
-        check("model carries stories + columns", bool(data["stories"]) and len(data["columns"]) == 5)
+        check("model carries stories + columns", bool(data["stories"]) and len(data["columns"]) == 6)
         cov = data["sad_coverage"]
         anchors = {a["id"]: a for a in cov["anchors"]}
         check("SAD#1.1 leaf is covered by its story",
