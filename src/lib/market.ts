@@ -14,6 +14,15 @@ import {
   type NodeParams,
   type RawSourceKind,
 } from './dag/index.ts';
+// The four reserved node-family kernel maps live in their own modules under
+// dag/kernels/ so the FEAT-014 fan-out stories (algebraic/relational→STORY-041,
+// composite→STORY-043, pattern→STORY-044) each fill their OWN file instead of all
+// editing this one literal (STORY-056). They ship empty — the reserved kinds stay
+// reserved — and are spread-merged into DAG_KERNELS below.
+import { algebraicKernels } from './dag/kernels/algebraic.ts';
+import { relationalKernels } from './dag/kernels/relational.ts';
+import { compositeKernels } from './dag/kernels/composite.ts';
+import { patternKernels } from './dag/kernels/pattern.ts';
 
 // ---------- shared types ----------
 export type IndicatorType = 'ema' | 'sma' | 'rsi' | 'macd' | 'stochrsi';
@@ -1284,7 +1293,12 @@ const nums = (s: readonly (number | null)[]): number[] => s as number[];
 const mut = (s: readonly (number | null)[]): (number | null)[] => s as (number | null)[];
 const period = (p: NodeParams): number => +(p.period as number);
 
-export const DAG_KERNELS: DagKernels = {
+// The raw-source (L0) and aggregation (L1) kernels stay composed here in the
+// engine: they REUSE the existing ema/sma/rsi math and RAW_SOURCE derivations
+// above, so moving them under dag/kernels/ would force a `dag/ → market.ts` import
+// cycle (SAD-002#5.1 forbids it). Only the four reserved node-families need their
+// own module to unblock the fan-out; these two lanes are already owned here.
+const rawSourceKernels: DagKernels = {
   open:   (_i, _p, b) => RAW_SOURCE.open(b),
   high:   (_i, _p, b) => RAW_SOURCE.high(b),
   low:    (_i, _p, b) => RAW_SOURCE.low(b),
@@ -1292,9 +1306,26 @@ export const DAG_KERNELS: DagKernels = {
   volume: (_i, _p, b) => RAW_SOURCE.volume(b),
   hl2:    (_i, _p, b) => RAW_SOURCE.hl2(b),
   hlc3:   (_i, _p, b) => RAW_SOURCE.hlc3(b),
+};
+const aggregationKernels: DagKernels = {
   ema:    (i, p) => ema(nums(i[0]), period(p)),
   sma:    (i, p) => sma(mut(i[0]), period(p)),
   rsi:    (i, p) => rsi(nums(i[0]), period(p)),
+};
+
+// Single source of truth for operator implementations (ADR-004 / SAD-002#8.4),
+// composed from the per-family maps. Spread order is L0 → L1 → reserved families;
+// the reserved maps are empty today, so the resolved kernel set is identical to
+// before the STORY-056 re-homing — the reserved kinds remain absent (throw as
+// reserved). Registration stays data-driven (SAD-002#5.2): a kind is registered
+// iff it is present here, and eval.ts is untouched.
+export const DAG_KERNELS: DagKernels = {
+  ...rawSourceKernels,
+  ...aggregationKernels,
+  ...algebraicKernels,
+  ...relationalKernels,
+  ...compositeKernels,
+  ...patternKernels,
 };
 
 /**
