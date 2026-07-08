@@ -24,6 +24,14 @@ import type { MarketDataProvider } from '../src/lib/data/provider.ts';
 // Delete the pointer (or the DB) to fall back to the synthetic dataset.
 const DEV_ACTIVE_DB_POINTER = join(resolve(import.meta.dirname, '..'), '.dev-active-db');
 
+// MVP boot default (ADR-008 interim decision, SAD#8.8): the DB the Yahoo importer
+// builds (`yahoo:backfill`, tools/yahoo-fetch → repo-root `yahoo-market.db`). When
+// present, the dev service boots on it so manual testing runs on real,
+// split/dividend-adjusted bars (bar.c = adjClose) instead of the synthetic
+// generator. This mirrors tools/yahoo-fetch/backfill.ts DEFAULT_YAHOO_DB; it is
+// redefined here (not imported) to keep server/ from depending on tools/.
+const DEFAULT_YAHOO_DB = join(resolve(import.meta.dirname, '..'), 'yahoo-market.db');
+
 // Persist the imported DB as the dev "active dataset" so it survives restarts.
 // Best-effort: a write failure just means the next boot falls back to synthetic.
 // `pointerPath` is overridable for tests so they never touch the real repo file.
@@ -52,6 +60,17 @@ function persistedDevDb(env: NodeJS.ProcessEnv, pointerPath: string = DEV_ACTIVE
   } catch { return null; }
 }
 
+// The Yahoo MVP default DB, if it exists AND we are in a dev/test context. Gated
+// on DEV_TOOLS exactly like the dev pointer above: the Yahoo build is a local,
+// personal-use MVP dataset (ADR-008 interim / SAD#8.8), never a production path,
+// and the production guard in providerFromEnv() refuses it there anyway. Returns
+// null on a fresh checkout with no backfill, so boot falls back to synthetic
+// rather than fail-fasting on a missing file (unlike an explicit MARKETDATA_DB).
+function defaultYahooDb(env: NodeJS.ProcessEnv, yahooDbPath: string = DEFAULT_YAHOO_DB): string | null {
+  if (env.DEV_TOOLS !== '1' && env.DEV_TOOLS !== 'true') return null;
+  return existsSync(yahooDbPath) ? yahooDbPath : null;
+}
+
 // Which adapter is feeding the system, as a serialisable descriptor. The store
 // tracks this so the dev DB-selector UI (STORY-035) can show what is active and
 // switch between datasets at runtime, not just at boot. `synthetic` carries no
@@ -67,11 +86,17 @@ export type DatasetSource =
 export function sourceFromEnv(
   env: NodeJS.ProcessEnv = process.env,
   pointerPath: string = DEV_ACTIVE_DB_POINTER,
+  yahooDbPath: string = DEFAULT_YAHOO_DB,
 ): DatasetSource {
   const dbPath = env.MARKETDATA_DB;
   if (dbPath) return { kind: 'sqlite', path: resolve(dbPath) };
   const devDb = persistedDevDb(env, pointerPath);
-  return devDb ? { kind: 'sqlite', path: resolve(devDb) } : { kind: 'synthetic' };
+  if (devDb) return { kind: 'sqlite', path: resolve(devDb) };
+  // MVP boot default: an explicitly-selected dev DB (pointer, above) wins, but
+  // absent one, boot on the Yahoo build when it exists (ADR-008 interim / SAD#8.8).
+  const yahooDb = defaultYahooDb(env, yahooDbPath);
+  if (yahooDb) return { kind: 'sqlite', path: yahooDb };
+  return { kind: 'synthetic' };
 }
 
 // Build the live provider for a dataset descriptor. Opening a SQLite source
@@ -82,10 +107,11 @@ export function providerForSource(source: DatasetSource): MarketDataProvider {
 
 // Until ADR-008 (SAD#8.8) selects a licensed vendor and legal sign-off lands
 // (STORY-015 ships that adapter), the adapters behind the port are the dev/test
-// ones (SAD#8.7): the synthetic generator by default, or — when MARKETDATA_DB
-// points at a database built by the EOD importer (STORY-031) — the SQLite reader
-// (STORY-032). Because the service consumes the PORT, selecting an adapter is a
-// config switch here — no handler or engine edits.
+// ones (SAD#8.7): the SQLite reader (STORY-032) when a DB is selected — via
+// MARKETDATA_DB, the dev pointer, or the Yahoo MVP build (yahoo-market.db, the
+// ADR-008 interim default) — else the synthetic generator. Because the service
+// consumes the PORT, selecting an adapter is a config switch here — no handler
+// or engine edits.
 //
 // When MARKETDATA_DB is SET, the SQLite adapter is chosen and an unreadable or
 // non-STORY-031 DB throws here (fail-fast). It is deliberately NOT silently
@@ -100,8 +126,9 @@ export function providerForSource(source: DatasetSource): MarketDataProvider {
 export function providerFromEnv(
   env: NodeJS.ProcessEnv = process.env,
   pointerPath: string = DEV_ACTIVE_DB_POINTER,
+  yahooDbPath: string = DEFAULT_YAHOO_DB,
 ): MarketDataProvider {
-  const source = sourceFromEnv(env, pointerPath);
+  const source = sourceFromEnv(env, pointerPath, yahooDbPath);
   if (env.NODE_ENV === 'production') {
     throw new Error(
       `Refusing to serve the '${source.kind}' dev/test market-data adapter in a ` +
