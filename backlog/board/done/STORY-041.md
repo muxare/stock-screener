@@ -9,7 +9,6 @@ estimate: ~
 attempts: 1
 prev_column: ~
 blocked_reason: ~
-reject_reason: ~
 combined_from: [STORY-042]
 base_commit: 2b71a4d96dbdb5002cc3ba844be724f4d3eb826f
 ---
