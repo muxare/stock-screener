@@ -1,7 +1,7 @@
 ---
 id: STORY-044
 type: story
-parent: FEAT-015
+parent: FEAT-014
 capability: CAP-pattern-nodes
 sad_refs: [SAD-002#5.1, SAD-002#2.1, SAD-002#2.2]
 target: ~
@@ -56,6 +56,12 @@ deferred temporal layer.
 > the acceptance criteria.
 
 ## Touch scope
-- src/lib/market.ts
-- src/lib/dag/**
-- src/lib/*.test.ts
+- src/lib/dag/pattern.ts          # new: PATTERNS → boolean DAG nodes (ADR-005, SAD-002#8.5)
+- src/lib/dag/pattern.test.ts     # new: bar-for-bar parity vs evalPatternAt (this lane's OWN file, not fidelity.test.ts)
+- src/lib/dag/kernels/pattern.ts  # fill the pattern kernel; module seam created by STORY-056
+# Narrowed from {src/lib/market.ts, src/lib/dag/**, src/lib/*.test.ts} (/refine): specific file
+# paths, no ** globs, so {043,044} are pairwise-disjoint for the fanout guard. This lane does NOT
+# edit src/lib/market.ts — it only READS the exported PATTERNS/evalPatternAt (market.ts:1058/1086)
+# as the parity oracle (imports, not edits) and builds pattern nodes over indicator/raw nodes via
+# the STORY-039 node model. It does NOT touch src/lib/fidelity.test.ts (that file has no pattern
+# subject — STORY-043 owns it); pattern parity lives in its own pattern.test.ts.

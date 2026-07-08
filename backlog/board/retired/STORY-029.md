@@ -7,8 +7,9 @@ sad_refs: [SAD#4.2, SAD#4.3, SAD#5.10, SAD#5.9]
 target: ~
 estimate: ~
 attempts: 0
-blocked_reason: WON'T-DO (product decision 2026-06-28): reseed/new-session is a synthetic-data-only affordance; demos will use real historical data, so it has no production value. Closed, not pending. Revive only if a synthetic demo mode is wanted.
-prev_column: todo
+blocked_reason: ~
+prev_column: blocked
+retired_reason: WON'T-DO (product decision 2026-06-28): reseed/new-session is a synthetic-data-only affordance; no production value under the real-Yahoo-EOD direction (EPIC-006 shipped).
 ---
 
 ## User Story

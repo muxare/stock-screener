@@ -66,6 +66,14 @@ Persisted def/rule JSON is unchanged and lowered at evaluation time
 > the acceptance criteria.
 
 ## Touch scope
-- src/lib/market.ts
-- src/lib/dag/**
-- src/lib/*.test.ts
+- src/lib/dag/lower.ts             # new: shared lowering layer (IndicatorDef/rules/PCF → nodes, SAD-002#5.3)
+- src/lib/dag/lower.test.ts        # new: lowering unit tests
+- src/lib/dag/kernels/composite.ts # fill composite kernels (macd/stochrsi/relVol/priceVsEma); module seam created by STORY-056
+- src/lib/fidelity.test.ts         # reroute indicator/preset/PCF subjects from pinned → live-differential (the parity gate; this lane owns it)
+# Narrowed from {src/lib/market.ts, src/lib/dag/**, src/lib/*.test.ts} (/refine) so {043,044}
+# form a pairwise-disjoint fan-out pair. Uses SPECIFIC file paths, no ** globs — the fanout guard
+# is a literal-glob overlap check. Do NOT edit src/lib/market.ts: build lowering as new pure
+# functions under dag/, sourcing raw-source semantics from the STORY-056 raw-source kernels (not
+# market.ts srcArr). The OLD entry-point rewiring (indSeries/eval*) is STORY-045's compat shim
+# (SAD-002#5.4), explicitly out of this story. If lowering genuinely cannot avoid a market.ts edit,
+# STOP and flag it (the spine/slice is wrong) rather than silently expanding scope.

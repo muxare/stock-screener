@@ -63,6 +63,12 @@ will sit on. Explicitly **no** server/transport/materialisation code
 > the acceptance criteria.
 
 ## Touch scope
-- src/lib/market.ts
-- src/lib/dag/**
-- src/lib/*.test.ts
+- src/lib/dag/schedule.ts        # new: read-only schedulability surface (stable topo order + per-(node,bar) accessor)
+- src/lib/dag/index.ts           # one barrel-export line for the new surface
+- src/lib/dag/schedule.test.ts   # new: the surface's own tests
+# Narrowed from {src/lib/market.ts, src/lib/dag/**, src/lib/*.test.ts} (/refine, this
+# ceremony): the deliverable is additive read-only surface over machinery STORY-040
+# already built — EvalStats.computed (bottom-up topological order) + the per-node cache
+# in src/lib/dag/eval.ts are already public, so this consumes them without touching
+# market.ts, the DAG_KERNELS region, eval.ts, or the shared fidelity.test.ts. This
+# lifts STORY-047 out of the engine-chain collision set → independent parallel lane.

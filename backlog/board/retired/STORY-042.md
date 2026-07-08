@@ -7,9 +7,11 @@ sad_refs: [SAD-002#5.1, SAD-002#5.3, SAD-002#2.1]
 target: ~
 estimate: ~
 attempts: 0
-prev_column: ~
+prev_column: todo
 blocked_reason: ~
 reject_reason: ~
+retired_reason: combined into STORY-041
+combined_into: STORY-041
 ---
 
 ## User Story
