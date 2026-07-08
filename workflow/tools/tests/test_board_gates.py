@@ -620,6 +620,34 @@ def run_phase_r1():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def run_touch_scope_unit():
+    """Unit-level: the Touch-scope parser tolerates the annotated authoring style
+    the /refine stories use — a leading multi-line <!-- --> note and a trailing
+    `# ...` comment per bullet. Regression for the gate bug where a bullet with an
+    inline comment never matched its real path (blocking `move review`) and a
+    full-line `# ...` comment naming an out-of-scope file leaked into the globs."""
+    print("\n[touch_scope] annotated Touch scope parses to bare paths")
+    sys.path.insert(0, TOOLS)
+    import board  # the real module under test
+    body = (
+        "## Touch scope\n"
+        "<!-- Deliberately does NOT touch src/lib/dag/index.ts: STORY-047 owns it,\n"
+        "     and taking it here would collide with 047's independent lane. -->\n"
+        "- src/lib/market.ts               # the spread-merge edit + helpers moved down\n"
+        "- src/lib/dag/kernels/**          # new per-family kernel modules\n"
+        "# Narrowed from {src/lib/market.ts, src/lib/dag/**} (/refine) — do NOT edit market.ts\n"
+    )
+    globs = board.touch_scope(body)
+    check("inline # comment stripped: exactly the two declared globs",
+          globs == ["src/lib/market.ts", "src/lib/dag/kernels/**"])
+    check("declared plain path matches (was the move-review blocker)",
+          board.path_in_scope("src/lib/market.ts", globs))
+    check("glob path matches under the ** prefix",
+          board.path_in_scope("src/lib/dag/kernels/composite.ts", globs))
+    check("full-line # comment naming an out-of-scope file does NOT leak into scope",
+          not board.path_in_scope("src/lib/dag/index.ts", globs))
+
+
 def report():
     print()
     if failures:
@@ -634,4 +662,5 @@ if __name__ == "__main__":
     run()
     run_phase4()
     run_phase_r1()
+    run_touch_scope_unit()
     report()

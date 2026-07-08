@@ -410,13 +410,23 @@ def unchecked_criteria(body):
 
 
 def touch_scope(body):
-    """Return list of path globs from the Touch scope section."""
+    """Return list of path globs from the Touch scope section.
+
+    Tolerates the annotated authoring style the /refine-produced stories use:
+    a leading multi-line ``<!-- ... -->`` note and a trailing ``# ...`` comment
+    on each bullet (e.g. ``- src/lib/market.ts   # the spread-merge edit``).
+    Both are stripped so only the path/glob remains — otherwise a bullet with an
+    inline comment never matches a real path, and a full-line ``# ...`` comment
+    that happens to name an out-of-scope file would leak into the glob list and
+    wrongly widen scope."""
     m = re.search(r"##\s*Touch scope\s*\n(.*?)(\n##|\Z)", body, re.DOTALL)
     if not m:
         return []
+    section = re.sub(r"<!--.*?-->", "", m.group(1), flags=re.DOTALL)  # drop HTML notes
     globs = []
-    for line in m.group(1).splitlines():
+    for line in section.splitlines():
         line = line.strip().lstrip("-").strip()
+        line = line.split("#", 1)[0].strip()  # drop trailing inline # comment (paths carry no #)
         if line and not line.startswith("<"):
             globs.append(normalize_path(line))
     return globs
