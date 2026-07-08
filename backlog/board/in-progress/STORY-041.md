@@ -6,11 +6,12 @@ capability: CAP-algebra
 sad_refs: [SAD-002#5.1, SAD-002#5.3, SAD-002#2.1]
 target: ~
 estimate: ~
-attempts: 0
+attempts: 1
 prev_column: ~
 blocked_reason: ~
 reject_reason: ~
 combined_from: [STORY-042]
+base_commit: 2b71a4d96dbdb5002cc3ba844be724f4d3eb826f
 ---
 
 ## User Story
@@ -29,27 +30,27 @@ STORY-043: per ADR-004 (SAD-002#8.4), there is **one** arithmetic implementation
 combine existing series (SAD-002#1.2).
 
 ## Acceptance Criteria
-- [ ] `+ − × ÷` exist as first-class node kinds taking scalar-series inputs and
+- [x] `+ − × ÷` exist as first-class node kinds taking scalar-series inputs and
       producing a scalar series (SAD-002#5.1, SAD-002#6.2 "algebraic").
-- [ ] A node's level is carried by its inputs (`1 + max(level of inputs)`), so an
+- [x] A node's level is carried by its inputs (`1 + max(level of inputs)`), so an
       algebraic node over L1 inputs is L2, etc. (SAD-002#2.6).
-- [ ] A composed expression evaluates correctly — e.g. `(EMA18 − EMA50) / <scalar>`
+- [x] A composed expression evaluates correctly — e.g. `(EMA18 − EMA50) / <scalar>`
       produces the expected series (SAD-002#3.4).
-- [ ] Division by zero / null inputs follow the existing engine's null-handling
+- [x] Division by zero / null inputs follow the existing engine's null-handling
       semantics exactly (no new NaN/Infinity behaviour) (SAD-002#2.1).
-- [ ] The `hl2`/`hlc3` source derivations are expressible via these nodes (or
+- [x] The `hl2`/`hlc3` source derivations are expressible via these nodes (or
       remain bit-identical), with no second arithmetic path (SAD-002#5.3).
-- [ ] Nodes stay plain serialisable data, immutable, pure/isomorphic
+- [x] Nodes stay plain serialisable data, immutable, pure/isomorphic
       (SAD-002#5.1, SAD-002#2.2) — for both algebraic and boolean kinds below.
-- [ ] (relational) `> < ≥ ≤ == !=` exist as boolean node kinds taking scalar inputs
+- [x] (relational) `> < ≥ ≤ == !=` exist as boolean node kinds taking scalar inputs
       and producing a boolean series (SAD-002#5.1, SAD-002#6.2 "relational/boolean").
-- [ ] (relational) `cross_up` and `cross_down` exist as boolean nodes with the exact
+- [x] (relational) `cross_up` and `cross_down` exist as boolean nodes with the exact
       crossing semantics of the current engine (including the previous-bar comparison
       and null handling) (SAD-002#3.5, SAD-002#2.1).
-- [ ] (relational) Each comparison/cross operator reproduces the current truth values
+- [x] (relational) Each comparison/cross operator reproduces the current truth values
       **bar-for-bar** for the operands in `evalCondAt`/`evalChainAt`/`evalIndRuleAt`
       (SAD-002#3.5).
-- [ ] (relational) Boolean nodes carry level by their scalar inputs (SAD-002#2.6).
+- [x] (relational) Boolean nodes carry level by their scalar inputs (SAD-002#2.6).
 
 ## Architectural Constraints (from SAD)
 - Make `+ − × ÷` and the comparison/`cross_*` operators first-class node kinds; do
@@ -81,7 +82,14 @@ combine existing series (SAD-002#1.2).
      literal kernel files STORY-056 creates, so 041 is disjoint from {043,044,045,
      056} for the fanout guard. 041 only delivers node kinds into the kernel
      modules; it does NOT edit market.ts (that is 056's spread-merge). -->
+<!-- Widened (human-approved, 2026-07-08) to include dag/eval.test.ts: registering
+     the algebraic/relational kernels un-reserves `add`/`gt`, so the "reserved kinds
+     are firewalled" assertion in eval.test.ts (which STORY-056 deliberately left
+     asserting they throw) must drop those two kinds. This update is intrinsic to
+     un-reserving them — it belongs to the first story that does so (this one), not a
+     parallel lane. It was in the pre-narrow scope (src/lib/dag/**). -->
 - src/lib/dag/kernels/algebraic.ts
 - src/lib/dag/kernels/relational.ts
 - src/lib/dag/kernels/algebraic.test.ts
 - src/lib/dag/kernels/relational.test.ts
+- src/lib/dag/eval.test.ts

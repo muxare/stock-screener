@@ -185,13 +185,24 @@ describe('engine purity (SAD-002#2.2, AC#8)', () => {
   });
 });
 
-describe('reserved kinds are firewalled (STORY-041/042/043)', () => {
+describe('reserved kinds are firewalled (STORY-043 lowering, pattern)', () => {
   it('throws rather than guessing when a kind has no registered kernel', () => {
-    const add = node('add', [EMA20, SMA50], {});    // algebraic — STORY-041
-    const gt = node('gt', [EMA20, SMA50], {});       // relational — STORY-042
+    // STORY-041 registered the algebraic (`add`) and relational (`gt`) kernels, so
+    // those kinds resolve now (see kernels/algebraic.test.ts, kernels/relational.test.ts).
+    // The composite-lowering kinds (`macd`, STORY-043) and `pattern` (STORY-044)
+    // stay reserved until their stories land — evaluating one still throws.
     const macd = node('macd', [EMA20, EMA50], { signal: 9 }); // composite — lowering STORY-043
-    for (const n of [add, gt, macd]) {
+    const pat = node('pattern', [EMA20], {});                  // multi-bar structure — STORY-044
+    for (const n of [macd, pat]) {
       expect(() => evaluate(n, barsOf(UNIVERSE[0]), DAG_KERNELS)).toThrow(/no evaluator kernel|reserved/i);
+    }
+  });
+
+  it('resolves the now-registered algebraic/relational kinds (STORY-041) without throwing', () => {
+    const add = node('add', [EMA20, SMA50], {}); // algebraic — STORY-041
+    const gt = node('gt', [EMA20, SMA50], {});   // relational — STORY-041
+    for (const n of [add, gt]) {
+      expect(() => evaluate(n, barsOf(UNIVERSE[0]), DAG_KERNELS)).not.toThrow();
     }
   });
 });
