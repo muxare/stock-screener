@@ -7,10 +7,10 @@ sad_refs: [SAD-002#5.1, SAD-002#6.2, SAD-002#8.4]
 target: ~
 estimate: ~
 work_type: enabler
-attempts: 0
+attempts: 1
 prev_column: ~
 blocked_reason: ~
-reject_reason: ~
+base_commit: c0d9fb481ea7b85a1b71f301b87005d3c30fa638
 ---
 
 ## User Story
@@ -39,26 +39,26 @@ the single source of truth for operator implementations — this story only re-h
 it without changing what it resolves to.
 
 ## Acceptance Criteria
-- [ ] A `src/lib/dag/kernels/` directory exists with **one module per reserved
+- [x] A `src/lib/dag/kernels/` directory exists with **one module per reserved
       node-family** the fan-out needs to own disjointly: `algebraic.ts`,
       `relational.ts` (both later filled by STORY-041), `composite.ts` (STORY-043),
       and `pattern.ts` (STORY-044). Each exports a `Kernels`-typed map
       (`Partial<Record<NodeKind, Kernel>>` per `SAD-002#5.1`), initially **empty**
       (the reserved kinds remain reserved — evaluating one still throws).
-- [ ] `DAG_KERNELS` in `src/lib/market.ts` is rebuilt as a **spread-merge** of the
+- [x] `DAG_KERNELS` in `src/lib/market.ts` is rebuilt as a **spread-merge** of the
       per-family maps, e.g.
       `{ ...rawSourceKernels, ...aggregationKernels, ...algebraicKernels, ...relationalKernels, ...compositeKernels, ...patternKernels }`,
       and its exported type/shape is unchanged (`SAD-002#5.1`, `SAD-002#6.2`).
-- [ ] `DAG_KERNELS` resolves to the **identical kernel set** as before this story:
+- [x] `DAG_KERNELS` resolves to the **identical kernel set** as before this story:
       the same registered kinds (`open/high/low/close/volume/hl2/hlc3` +
       `ema/sma/rsi`) map to the same functions; the reserved kinds are still absent.
-- [ ] The whole existing suite stays green **unchanged** — in particular
+- [x] The whole existing suite stays green **unchanged** — in particular
       `src/lib/fidelity.test.ts` (bar-for-bar parity) and `src/lib/dag/eval.test.ts`
       pass without edits, proving behaviour preservation (`SAD-002#2.3`).
-- [ ] The `src/lib/dag/` modules stay **pure, dependency-free, and isomorphic**
+- [x] The `src/lib/dag/` modules stay **pure, dependency-free, and isomorphic**
       (`SAD-002#2.2`, `SAD-002#5.1`): no import cycle is introduced between
       `market.ts` and `src/lib/dag/kernels/**` (see Constraints).
-- [ ] `npm run lint` and `npm run test` pass.
+- [x] `npm run lint` and `npm run test` pass.
 
 ## Architectural Constraints (from SAD)
 - **One kernel table, re-homed not rewritten (ADR-004 / SAD-002#8.4).** Keep the
