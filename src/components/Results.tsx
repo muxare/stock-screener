@@ -31,6 +31,13 @@ const COLS: Col[] = [
 
 const col = (c: number) => (c >= 0 ? '#06a96b' : '#e23d3d');
 
+// A scalar column can arrive non-finite: a name with a zero/missing prior close
+// yields NaN/Infinity in the engine, which `JSON.stringify` turns into `null` on
+// the wire — and `null.toFixed()` would throw and blank the whole table. Render
+// such values as '—' so one bad row degrades to a dash instead of a crash.
+const fin = (v: number) => Number.isFinite(v);
+const nf = (v: number, d: number, suf = '') => (fin(v) ? v.toFixed(d) + suf : '—');
+
 export function Results() {
   // primitive deps for derived selectors (read via getState() inside useMemo).
   // The matched rows come from the screening service (SAD#4.2) via the store;
@@ -223,12 +230,12 @@ export function Results() {
                     <span style={{ fontSize: '11px', color: '#9aa1a8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</span>
                   </div>
                 </div>
-                <span style={{ fontSize: '13px', fontWeight: 600, fontVariantNumeric: 'tabular-nums', textAlign: 'right' }}>${s.price.toFixed(2)}</span>
-                <span style={{ fontSize: '12.5px', fontWeight: 600, fontVariantNumeric: 'tabular-nums', textAlign: 'right', color: col(s.changePct) }}>{(s.changePct >= 0 ? '↑ +' : '↓ ') + s.changePct.toFixed(2) + '%'}</span>
-                <span style={{ fontSize: '12.5px', fontVariantNumeric: 'tabular-nums', textAlign: 'right', color: s.rsi > 70 ? '#e23d3d' : s.rsi < 30 ? '#06a96b' : '#6b7280' }}>{s.rsi.toFixed(0)}</span>
-                <span style={{ fontSize: '12.5px', fontVariantNumeric: 'tabular-nums', textAlign: 'right', color: col(s.macdHist) }}>{s.macdHist.toFixed(2)}</span>
-                <span style={{ fontSize: '12.5px', fontVariantNumeric: 'tabular-nums', textAlign: 'right', color: s.stochK > 80 ? '#e23d3d' : s.stochK < 20 ? '#06a96b' : '#6b7280' }}>{s.stochK.toFixed(0)}</span>
-                <span style={{ fontSize: '12.5px', fontVariantNumeric: 'tabular-nums', textAlign: 'right', fontWeight: s.relVol > 1.5 ? 700 : 400, color: s.relVol > 1.5 ? '#06a96b' : '#15171a' }}>{s.relVol.toFixed(2) + '×'}</span>
+                <span style={{ fontSize: '13px', fontWeight: 600, fontVariantNumeric: 'tabular-nums', textAlign: 'right' }}>{fin(s.price) ? '$' + s.price.toFixed(2) : '—'}</span>
+                <span style={{ fontSize: '12.5px', fontWeight: 600, fontVariantNumeric: 'tabular-nums', textAlign: 'right', color: col(s.changePct) }}>{fin(s.changePct) ? (s.changePct >= 0 ? '↑ +' : '↓ ') + s.changePct.toFixed(2) + '%' : '—'}</span>
+                <span style={{ fontSize: '12.5px', fontVariantNumeric: 'tabular-nums', textAlign: 'right', color: s.rsi > 70 ? '#e23d3d' : s.rsi < 30 ? '#06a96b' : '#6b7280' }}>{nf(s.rsi, 0)}</span>
+                <span style={{ fontSize: '12.5px', fontVariantNumeric: 'tabular-nums', textAlign: 'right', color: col(s.macdHist) }}>{nf(s.macdHist, 2)}</span>
+                <span style={{ fontSize: '12.5px', fontVariantNumeric: 'tabular-nums', textAlign: 'right', color: s.stochK > 80 ? '#e23d3d' : s.stochK < 20 ? '#06a96b' : '#6b7280' }}>{nf(s.stochK, 0)}</span>
+                <span style={{ fontSize: '12.5px', fontVariantNumeric: 'tabular-nums', textAlign: 'right', fontWeight: s.relVol > 1.5 ? 700 : 400, color: s.relVol > 1.5 ? '#06a96b' : '#15171a' }}>{nf(s.relVol, 2, '×')}</span>
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   <span style={{ fontSize: '11px', fontWeight: 600, padding: '3px 8px', borderRadius: '20px', background: tr[2], color: tr[1] }}>{tr[0]}</span>
                 </div>
@@ -237,7 +244,7 @@ export function Results() {
                     <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${Math.max(2, Math.min(98, s.pct52w)).toFixed(0)}%`, background: '#cdd3d8', borderRadius: '3px' }} />
                     <div style={{ position: 'absolute', left: `${Math.max(2, Math.min(98, s.pct52w)).toFixed(0)}%`, top: '50%', width: '7px', height: '7px', borderRadius: '50%', background: '#15171a', transform: 'translate(-50%,-50%)' }} />
                   </div>
-                  <span style={{ fontSize: '11px', color: '#aab0b6', textAlign: 'right' }}>{s.pct52w.toFixed(0) + '% of 52w'}</span>
+                  <span style={{ fontSize: '11px', color: '#aab0b6', textAlign: 'right' }}>{fin(s.pct52w) ? s.pct52w.toFixed(0) + '% of 52w' : '—'}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'flex-end', paddingLeft: '6px' }}><Spark values={s.sparkline} /></div>
               </HDiv>
