@@ -185,15 +185,15 @@ describe('engine purity (SAD-002#2.2, AC#8)', () => {
   });
 });
 
-describe('reserved kinds are firewalled (STORY-043 lowering, pattern)', () => {
+describe('reserved kinds are firewalled (STORY-043 lowering)', () => {
   it('throws rather than guessing when a kind has no registered kernel', () => {
     // STORY-041 registered the algebraic (`add`) and relational (`gt`) kernels, so
     // those kinds resolve now (see kernels/algebraic.test.ts, kernels/relational.test.ts).
-    // The composite-lowering kinds (`macd`, STORY-043) and `pattern` (STORY-044)
-    // stay reserved until their stories land — evaluating one still throws.
+    // STORY-044 registered the `pattern` kernel (see kernels/pattern.test.ts), so it
+    // resolves too. The composite-lowering kinds (`macd`, STORY-043) stay reserved
+    // until that story lands — evaluating one still throws.
     const macd = node('macd', [EMA20, EMA50], { signal: 9 }); // composite — lowering STORY-043
-    const pat = node('pattern', [EMA20], {});                  // multi-bar structure — STORY-044
-    for (const n of [macd, pat]) {
+    for (const n of [macd]) {
       expect(() => evaluate(n, barsOf(UNIVERSE[0]), DAG_KERNELS)).toThrow(/no evaluator kernel|reserved/i);
     }
   });
