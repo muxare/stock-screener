@@ -7,6 +7,18 @@ source_kind: idea
 
 # Project Plan — End-of-day market-data fetch (Yahoo Finance EOD)
 
+> **⏸ DEFERRED to post-MVP (decided 2026-07-09).** Yahoo is no longer a committed
+> MVP data vendor — see SAD#8.8 ADR-008. The fetcher shipped by this plan
+> (tools/yahoo-fetch, STORY-050–053) stays in the tree and working behind the
+> `MarketDataProvider` port, but is **not** on the MVP critical path and is **not**
+> the dev boot default. MVP now runs on a **local, static EOD snapshot** (Boris
+> Marjanovic "Huge Stock Market Dataset", Stooq-sourced adjusted closes) loaded
+> through the existing STORY-031 CSV importer. Rationale: the unofficial Yahoo
+> endpoint is rate-limited (hard HTTP 429 from a dev IP, 2026-07-08) and its ToS
+> bars redistribution — not worth carrying on the MVP path when a local snapshot
+> suffices. Re-committing Yahoo (or any live vendor) is a fresh decision after MVP;
+> everything below remains valid design for that future work.
+
 Derived from `backlog/ideas/IDEA-002.md`. Resolves the open vendor question
 (SAD#8.8 ADR-008) for a **personal / dev-use** deployment by selecting **Yahoo
 Finance EOD** as the data source and building the one thing the existing data

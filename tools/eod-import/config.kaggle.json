@@ -1,0 +1,15 @@
+{
+  "_comment": "Boris Marjanovic 'Huge Stock Market Dataset' (Kaggle), Stooq-sourced. One file per instrument named <ticker>.us.txt, header Date,Open,High,Low,Close,Volume,OpenInt (OpenInt is unmapped and ignored). No ticker column: the ticker comes from the filename stem, which is normalized like any column ticker — stripSuffix '.us' + upper-case turns 'aapl.us.txt' into 'AAPL'. ISO dates. Bars are already split/dividend adjusted (Stooq) — this tool does NO corporate-action math (SAD#2.2). No name/sector in the data, so name falls back to the ticker and sector to 'Unknown' (no metadataFile). MVP local EOD snapshot per SAD#8.8 / ADR-008; static through ~Nov 2017; personal use only, NOT redistributed.",
+  "columns": {
+    "date": "Date",
+    "open": "Open",
+    "high": "High",
+    "low": "Low",
+    "close": "Close",
+    "volume": "Volume"
+  },
+  "dateFormat": "iso",
+  "ticker": { "case": "upper", "stripSuffix": ".us" },
+  "delimiter": ",",
+  "hasHeader": true
+}

@@ -5,7 +5,7 @@
 // explicit sector/name resolution, and a representative-size perf check.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -166,6 +166,55 @@ describe('one file per ticker', () => {
     const { instruments } = readDb(out);
     // name falls back to ticker; sector to 'Unknown' (no column, no metadata)
     expect(instruments).toEqual([{ ticker: 'AAPL', name: 'AAPL', sector: 'Unknown' }]);
+  });
+});
+
+// ---------- Stooq/Kaggle layout: .txt directory glob + normalized filename ticker ----------
+
+describe('Stooq/Kaggle one-file-per-ticker .txt layout', () => {
+  // config.kaggle.json shape: no ticker column, ticker from filename stem,
+  // stripSuffix '.us' + upper-case, extra OpenInt column ignored.
+  const kaggleConfig = normalizeConfig({
+    columns: { date: 'Date', open: 'Open', high: 'High', low: 'Low', close: 'Close', volume: 'Volume' },
+    dateFormat: 'iso',
+    ticker: { case: 'upper', stripSuffix: '.us' },
+  });
+
+  it('globs .txt files from a directory and takes a normalized ticker from the filename', () => {
+    const src = join(dir, 'stocks');
+    mkdirSync(src);
+    const bars = 'Date,Open,High,Low,Close,Volume,OpenInt\n2017-11-10,1,2,0.5,1.5,1000,0\n';
+    writeFileSync(join(src, 'aapl.us.txt'), bars);
+    writeFileSync(join(src, 'msft.us.txt'), bars);
+    // A non-input extension in the same dir must be ignored by the glob.
+    writeFileSync(join(src, 'README.md'), 'ignore me');
+
+    const out = join(dir, 'out.db');
+    const report = runImport([src], out, kaggleConfig);
+    expect(report.files).toBe(2); // README.md not globbed
+    expect(report.instruments).toBe(2);
+
+    const { instruments } = readDb(out);
+    // 'aapl.us.txt' → stem 'aapl.us' → stripSuffix + upper → 'AAPL' (not 'aapl.us')
+    expect(instruments.map((i) => i.ticker)).toEqual(['AAPL', 'MSFT']);
+    // no name/sector in the data → name = ticker, sector = 'Unknown'
+    expect(instruments[0]).toEqual({ ticker: 'AAPL', name: 'AAPL', sector: 'Unknown' });
+  });
+
+  it('tolerates empty and header-only .txt files without failing the run', () => {
+    const src = join(dir, 'stocks');
+    mkdirSync(src);
+    writeFileSync(join(src, 'empty.us.txt'), ''); // 0-byte, like ~32 in the real dataset
+    writeFileSync(join(src, 'headeronly.us.txt'), 'Date,Open,High,Low,Close,Volume,OpenInt\n');
+    writeFileSync(join(src, 'good.us.txt'), 'Date,Open,High,Low,Close,Volume,OpenInt\n2017-11-10,1,2,0.5,1.5,1000,0\n');
+
+    const out = join(dir, 'out.db');
+    const report = runImport([src], out, kaggleConfig);
+    expect(report.files).toBe(3);
+    expect(report.instruments).toBe(1); // only GOOD contributed a bar
+    expect(report.bars).toBe(1);
+    const { instruments } = readDb(out);
+    expect(instruments.map((i) => i.ticker)).toEqual(['GOOD']);
   });
 });
 
