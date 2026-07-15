@@ -7,7 +7,7 @@ sad_refs: [SAD#4.3, SAD#6.1, SAD#2.2, SAD#8.5, SAD#8.8]
 target: ~
 estimate: ~
 attempts: 0
-blocked_reason: Production data path: vendor selection + redistribution legal sign-off still open (ADR-008 production horizon, SAD#8.8). MVP is now served by the Yahoo importer per the ADR-008 interim decision (2026-07-08); this story ships the production adapter only after sign-off.
+blocked_reason: Production data path: vendor selection + redistribution legal sign-off still open (ADR-008 production horizon, SAD#8.8). MVP is served by a local, static EOD snapshot via the STORY-031 CSV importer; Yahoo is deferred to post-MVP (ADR-008 revised 2026-07-09). This story ships the production adapter only after sign-off.
 prev_column: todo
 ---
 

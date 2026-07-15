@@ -6,10 +6,10 @@ capability: CAP-pattern-nodes
 sad_refs: [SAD-002#5.1, SAD-002#2.1, SAD-002#2.2]
 target: ~
 estimate: ~
-attempts: 0
+attempts: 1
 prev_column: ~
 blocked_reason: ~
-reject_reason: ~
+base_commit: fe7213c7382b1e0915caf85b7495d8ac0bf5d75d
 ---
 
 ## User Story
@@ -25,15 +25,15 @@ must match `evalPatternAt` (`SAD-001#3.7`) bar-for-bar, including multi-bar and
 deferred temporal layer.
 
 ## Acceptance Criteria
-- [ ] Each pattern in `PATTERNS` (`SAD-001#3.7`) is expressed as a boolean DAG
+- [x] Each pattern in `PATTERNS` (`SAD-001#3.7`) is expressed as a boolean DAG
       node consuming raw + indicator-level inputs (SAD-002#3.6, SAD-002#8.5).
-- [ ] Each pattern node's flag matches `evalPatternAt` **bar-for-bar** over the
+- [x] Each pattern node's flag matches `evalPatternAt` **bar-for-bar** over the
       fixture series (SAD-002#3.6, SAD-002#2.1).
-- [ ] Multi-bar patterns and `n`-parameterised patterns produce identical results
+- [x] Multi-bar patterns and `n`-parameterised patterns produce identical results
       to the current evaluator (SAD-002#3.6).
-- [ ] Pattern nodes carry derived level from their inputs and remain immutable,
+- [x] Pattern nodes carry derived level from their inputs and remain immutable,
       serialisable, and pure/isomorphic (SAD-002#5.1, SAD-002#2.2).
-- [ ] Pattern flags are computed through the evaluator (memoised, prunable) like
+- [x] Pattern flags are computed through the evaluator (memoised, prunable) like
       any other node — no separate per-bar pattern cache path.
 
 ## Architectural Constraints (from SAD)
@@ -59,6 +59,7 @@ deferred temporal layer.
 - src/lib/dag/pattern.ts          # new: PATTERNS → boolean DAG nodes (ADR-005, SAD-002#8.5)
 - src/lib/dag/pattern.test.ts     # new: bar-for-bar parity vs evalPatternAt (this lane's OWN file, not fidelity.test.ts)
 - src/lib/dag/kernels/pattern.ts  # fill the pattern kernel; module seam created by STORY-056
+- src/lib/dag/eval.test.ts         # AMENDED (Exception gate 2026-07-09): shared reserved-kinds firewall test — registering the pattern kernel un-reserves `pattern`, so this lane drops ONLY that case (leaves macd reserved). Shared with STORY-043 (un-reserves stochrsi); serialized by merge order (044 merges first, 043 rebases on top) so the two lanes never conflict on this file.
 # Narrowed from {src/lib/market.ts, src/lib/dag/**, src/lib/*.test.ts} (/refine): specific file
 # paths, no ** globs, so {043,044} are pairwise-disjoint for the fanout guard. This lane does NOT
 # edit src/lib/market.ts — it only READS the exported PATTERNS/evalPatternAt (market.ts:1058/1086)
