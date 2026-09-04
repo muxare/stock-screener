@@ -94,7 +94,7 @@ describe('runBackfill', () => {
     expect(inst!.sector).toBe('Technology');
 
     expect(inst!.bars).toHaveLength(3);
-    expect(inst!.dates[0]).toBe(AAPL_FIRST.date);
+    expect(inst!.dates?.[0]).toBe(AAPL_FIRST.date);
     // bar.c is the ADJUSTED close, not the raw close (SAD-003#6.1 / ADR-004)…
     expect(inst!.bars[0].c).toBe(AAPL_FIRST.adjClose);
     expect(inst!.bars[0].c).not.toBe(AAPL_FIRST.close);

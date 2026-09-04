@@ -89,6 +89,14 @@ describe('HTTP/JSON endpoint (SAD#4.2)', () => {
     expect(body).toEqual(provider.getInstrument('AAPL'));
   });
 
+  it('GET /instrument/:ticker answers 400 to a malformed percent-encoding and stays up', async () => {
+    const r = await fetch(`${base}/instrument/%E0%A4%A`);
+    expect(r.status).toBe(400);
+    // the process survived: the next request is served normally
+    const ok = await fetch(`${base}/instrument/AAPL`);
+    expect(ok.status).toBe(200);
+  });
+
   it('GET /instrument/:ticker returns 404 for an unknown ticker', async () => {
     const r = await fetch(`${base}/instrument/NOPE`);
     expect(r.status).toBe(404);

@@ -68,7 +68,7 @@ export function DevImportModal() {
                 onChange={(e) => setImportConfigText((e.target as HTMLTextAreaElement).value)}
                 spellCheck={false}
                 style={{ ...field, marginTop: 8, minHeight: 150, resize: 'vertical', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12, lineHeight: 1.5 }}
-                focusStyle={{ borderColor: '#06a96b', background: '#fff' }}
+                focusStyle={{ border: '1px solid #06a96b', background: '#fff' }}
               />
             )}
           </div>
@@ -117,7 +117,7 @@ export function DevImportModal() {
           {/* Target DB ---------------------------------------------------- */}
           <div>
             <div style={label}>Target database</div>
-            <HInput value={di.targetDb} onChange={(e) => setImportTargetDb((e.target as HTMLInputElement).value)} style={field} focusStyle={{ borderColor: '#06a96b', background: '#fff' }} />
+            <HInput value={di.targetDb} onChange={(e) => setImportTargetDb((e.target as HTMLInputElement).value)} style={field} focusStyle={{ border: '1px solid #06a96b', background: '#fff' }} />
             <div style={{ fontSize: 11, color: '#aab0b6', marginTop: 6 }}>Imported data becomes the active dataset and persists across restarts — delete the DB (or <code>.dev-active-db</code>) to return to the generated one. <code>MARKETDATA_DB</code> overrides.</div>
           </div>
 

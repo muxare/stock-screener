@@ -12,7 +12,7 @@
 // imported data is screened immediately — no process restart.
 
 import { readdirSync, readFileSync, statSync, mkdtempSync, writeFileSync, rmSync, existsSync } from 'node:fs';
-import { basename, extname, join, resolve } from 'node:path';
+import { basename, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { loadMetadata, runImport } from '../tools/eod-import/run.ts';
 import { loadConfig, normalizeConfig } from '../tools/eod-import/config.ts';
@@ -63,6 +63,21 @@ function dataRoot(env: NodeJS.ProcessEnv): string {
   const repoData = join(REPO_ROOT, 'data');
   if (existsSync(repoData)) return repoData;
   return join(TOOLS_DIR, 'fixtures');
+}
+
+// Request-supplied paths are confined to the places an import legitimately
+// touches: the repo, the browsable data root, and the OS temp dir (uploads and
+// tests). Anything else (a home directory, /etc) is refused before it is read
+// or written. Env-supplied defaults are the operator's choice and are trusted.
+function isWithin(root: string, p: string): boolean {
+  const rel = relative(root, p);
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+function assertAllowedPath(p: string, env: NodeJS.ProcessEnv, what: string): void {
+  const roots = [REPO_ROOT, dataRoot(env), tmpdir()];
+  if (!roots.some((r) => isWithin(r, p))) {
+    throw new RequestError(`${what} must be under the repo, the data dir, or the temp dir: ${p}`);
+  }
 }
 
 function listConfigs(): ConfigOption[] {
@@ -181,6 +196,7 @@ export function runDevImport(
   }
 
   const targetDb = resolve(req.targetDb || env.MARKETDATA_DB || DEFAULT_DB);
+  if (req.targetDb) assertAllowedPath(targetDb, env, 'targetDb');
 
   // Resolve the input: uploads take precedence; otherwise a server-side path.
   let tempDir: string | null = null;
@@ -190,6 +206,7 @@ export function runDevImport(
     inputPaths = [writeUploads(req.uploads, tempDir)];
   } else if (req.inputPath) {
     const p = resolve(req.inputPath);
+    assertAllowedPath(p, env, 'inputPath');
     if (!existsSync(p)) throw new RequestError(`input path does not exist: ${p}`);
     inputPaths = [p];
   } else {

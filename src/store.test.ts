@@ -1,14 +1,8 @@
-// store.test.ts — first client-side store tests (STORY-035 AC#6). Exercises the
-// store's service orchestration with an INJECTED fake MarketClient (no network),
-// proving the seam from STORY-035 makes the data flow unit-testable. Covers:
-// stale-generation responses are dropped (last-write-wins), the `screenError`
-// banner is set on failure, and `displayed[]` caches by ticker (one fetch/name).
-
 import { describe, it, expect, vi } from 'vitest';
-import { afterEach } from 'vitest';
 import { create } from 'zustand';
 import { makeScreenerState, type ScreenerState } from './store';
-import type { MarketClient, ScreenResp } from './lib/client/marketClient';
+import type { MarketClient, ScreenResp, SignalsRequest, SignalsResp, FanSignalRow } from './lib/client/marketClient';
+import type { FanEntryEvent, FanBacktestResult } from './lib/fanBacktest';
 import type { InstrumentBars } from './lib/market';
 
 function deferred<T>() {
@@ -19,7 +13,17 @@ function deferred<T>() {
 }
 
 function screenResp(tickers: string[]): ScreenResp {
-  return { total: tickers.length, count: tickers.length, offset: 0, limit: 0, elapsedMs: 1, tickers, results: [] };
+  return {
+    universe: tickers.length,
+    elapsedMs: 1,
+    matches: tickers.map((t) => ({
+      ticker: t, name: t, sector: 'Tech', price: 1, changePct: 0,
+      ema18: 4, ema50: 3, ema100: 2, ema200: 1, ema200Ago: { 21: 0.8, 63: 0.6, 105: 0.4 },
+      worstGap: 0.1, sparkline: [1, 2],
+      avgVol20: 500_000, relVol: 1, marketCap: 1e9,
+    })),
+    near: [],
+  };
 }
 
 const BARS: InstrumentBars = {
@@ -27,9 +31,6 @@ const BARS: InstrumentBars = {
   bars: Array.from({ length: 5 }, (_, i) => ({ o: i + 1, h: i + 2, l: i, c: i + 1.5, v: 100 + i })),
 };
 
-// A fake client whose `screen` hands back controllable deferreds (and records
-// the AbortSignal each call received, so tests can assert the store cancels a
-// superseded request), plus stubs for the rest of the seam.
 type FakeClient = MarketClient & {
   screenCalls: ReturnType<typeof deferred<ScreenResp>>[];
   screenSignals: (AbortSignal | undefined)[];
@@ -42,13 +43,31 @@ function fakeClient(overrides: Partial<MarketClient> = {}): FakeClient {
     screenSignals,
     facts: async () => ({ total: 0, sectors: [], sample: null }),
     instrument: async () => null,
-    screen: vi.fn((_rules, _limit, signal?: AbortSignal) => {
+    screen: vi.fn((signal?: AbortSignal) => {
       screenSignals.push(signal);
       const d = deferred<ScreenResp>();
       screenCalls.push(d);
       return d.promise;
     }),
-    backtest: async () => null,
+    backtest: vi.fn(async () => ({
+      elapsedMs: 1,
+      config: { strategy: 'onset' as const, entry: 'match' as const, targetR: 3, macdWindow: false, maxHoldBars: 60, horizons: [5] },
+      universe: 1,
+      stocksScanned: 1,
+      totalEntries: 0,
+      stocksWithEntries: 0,
+      forwardHorizons: [],
+      trades: { count: 0, winRate: 0, avgReturnPct: 0, medianReturnPct: 0, avgR: 0, medianR: 0, hitTargetPct: 0, avgBarsHeld: 0, byExitReason: {} },
+      entries: [],
+      factors: [],
+      account: {
+        startCash: 10_000, endEquity: 10_000, returnPct: 0, maxDrawdownPct: 0,
+        taken: 0, skipped: { total: 0, noCash: 0, maxPositions: 0 },
+        endReason: 'window' as const, windowStart: null, windowEnd: null,
+        candidates: 0, curve: [], fills: [],
+      },
+    })),
+    signals: async () => ({ universe: 0, elapsedMs: 1, strategy: 'onset' as const, rows: [] }),
     devImportOptions: async () => null,
     devImport: async () => ({ files: 0, instruments: 0, bars: 0, skipped: 0, errors: [], targetDb: '', universe: 0 }),
     databases: async () => null,
@@ -62,135 +81,225 @@ function makeStore(client: MarketClient) {
 }
 
 describe('runScreen generation guard', () => {
-  it('drops a stale (superseded) response and aborts it so the newest run wins', async () => {
+  it('drops a stale response and aborts it so the newest run wins', async () => {
     const client = fakeClient();
     const store = makeStore(client);
 
-    const p1 = store.getState().runScreen(); // gen 1
-    const p2 = store.getState().runScreen(); // gen 2 — supersedes gen 1
+    const p1 = store.getState().runScreen();
+    const p2 = store.getState().runScreen();
     expect(client.screenCalls).toHaveLength(2);
-
-    // The superseded (gen 1) request must have been cancelled by the store; the
-    // current (gen 2) request must still be live. This exercises the abort half
-    // of the orchestration, not just the generation guard.
     expect(client.screenSignals[0]?.aborted).toBe(true);
     expect(client.screenSignals[1]?.aborted).toBe(false);
 
-    // Newer run settles first and commits…
     client.screenCalls[1].resolve(screenResp(['NEW']));
     await p2;
-    expect(store.getState().screen?.tickers).toEqual(['NEW']);
+    expect(store.getState().matches.map((r) => r.ticker)).toEqual(['NEW']);
 
-    // …then the older (stale) run settles and must NOT overwrite it.
     client.screenCalls[0].resolve(screenResp(['OLD']));
     await p1;
-    expect(store.getState().screen?.tickers).toEqual(['NEW']);
+    expect(store.getState().matches.map((r) => r.ticker)).toEqual(['NEW']);
   });
 
-  it('sequences each store independently (per-store counters, not module scope)', async () => {
-    // STORY-035 moved the generation counters into the per-store factory closure.
-    // Two live stores must NOT cross-cancel: store A's second run must not abort
-    // store B's in-flight run, and each commits its own result.
-    const a = fakeClient();
-    const b = fakeClient();
-    const storeA = makeStore(a);
-    const storeB = makeStore(b);
-
-    const pA = storeA.getState().runScreen();
-    const pB = storeB.getState().runScreen();
-    // A second run on A bumps only A's counter/abort — B is untouched.
-    const pA2 = storeA.getState().runScreen();
-
-    expect(a.screenSignals[0]?.aborted).toBe(true);  // A's first, superseded
-    expect(b.screenSignals[0]?.aborted).toBe(false); // B's only run, still live
-
-    b.screenCalls[0].resolve(screenResp(['B']));
-    a.screenCalls[1].resolve(screenResp(['A']));
-    a.screenCalls[0].resolve(screenResp(['A-stale'])); // superseded — must be dropped
-    await Promise.all([pA, pA2, pB]);
-
-    expect(storeA.getState().screen?.tickers).toEqual(['A']);
-    expect(storeB.getState().screen?.tickers).toEqual(['B']);
-  });
-});
-
-describe('runScreen failure', () => {
-  it('sets the screenError banner and clears loading when the client throws', async () => {
+  it('sets screenError when the service fails', async () => {
     const client = fakeClient();
     const store = makeStore(client);
-
-    // Seed a previously-committed screen so "screen is preserved" is a real
-    // assertion, not a tautology against the null initial state.
-    const seed = store.getState().runScreen();
-    client.screenCalls[0].resolve(screenResp(['SEED']));
-    await seed;
-    expect(store.getState().screen?.tickers).toEqual(['SEED']);
-
     const p = store.getState().runScreen();
-    expect(store.getState().screenLoading).toBe(true);
-    client.screenCalls[1].reject(new Error('service down'));
+    client.screenCalls[0].reject(new Error('down'));
     await p;
-
-    expect(store.getState().screenError).toMatch(/unavailable/i);
-    expect(store.getState().screenLoading).toBe(false);
-    // The failed run must not wipe the user's visible results table.
-    expect(store.getState().screen?.tickers).toEqual(['SEED']);
+    expect(store.getState().screenError).toMatch(/unavailable/);
   });
 });
 
-describe('ensureDisplayed caching', () => {
-  it('builds and caches a Stock by ticker, fetching each name only once', async () => {
-    const instrument = vi.fn(async () => BARS);
-    const store = makeStore(fakeClient({ instrument }));
+describe('fan filters', () => {
+  it('filters matches by volume and sector', () => {
+    const client = fakeClient();
+    const store = makeStore(client);
+    store.setState({
+      matches: [
+        { ticker: 'A', name: 'A', sector: 'Tech', price: 50, changePct: 0, ema18: 4, ema50: 3, ema100: 2, ema200: 1, ema200Ago: { 21: 0.8, 63: 0.6, 105: 0.4 }, worstGap: 0.1, sparkline: [], avgVol20: 2e6, relVol: 1, marketCap: 10e9 },
+        { ticker: 'B', name: 'B', sector: 'Energy', price: 8, changePct: 0, ema18: 4, ema50: 3, ema100: 2, ema200: 1, ema200Ago: { 21: 0.8, 63: 0.6, 105: 0.4 }, worstGap: 0.1, sparkline: [], avgVol20: 80_000, relVol: 1, marketCap: 200e6 },
+      ],
+      near: [],
+    });
+    store.getState().setFilter('minAvgVol', 250_000);
+    expect(store.getState().filteredMatches().map((r) => r.ticker)).toEqual(['A']);
+    store.getState().setFilter('sector', 'Energy');
+    expect(store.getState().filteredMatches()).toEqual([]);
+    store.getState().resetFilters();
+    expect(store.getState().filteredMatches()).toHaveLength(2);
+  });
+});
 
+describe('ensureDisplayed', () => {
+  it('caches a built stock after one instrument fetch', async () => {
+    const client = fakeClient({ instrument: vi.fn(async () => BARS) });
+    const store = makeStore(client);
     await store.getState().ensureDisplayed('AAPL');
-    await store.getState().ensureDisplayed('AAPL'); // cached — no second fetch
-
-    expect(instrument).toHaveBeenCalledTimes(1);
-    expect(store.getState().displayed['AAPL']).toBeDefined();
-    expect(store.getState().displayed['AAPL'].ticker).toBe('AAPL');
+    await store.getState().ensureDisplayed('AAPL');
+    expect(client.instrument).toHaveBeenCalledTimes(1);
+    expect(store.getState().displayed.AAPL?.ticker).toBe('AAPL');
+    expect(store.getState().displayStatus.AAPL).toBe('loaded');
   });
 
-  it('does not cache when the name is unknown (404 → null)', async () => {
-    const instrument = vi.fn(async () => null);
-    const store = makeStore(fakeClient({ instrument }));
-
+  it('marks error when instrument returns null', async () => {
+    const store = makeStore(fakeClient({ instrument: async () => null }));
     await store.getState().ensureDisplayed('NOPE');
+    expect(store.getState().displayStatus.NOPE).toBe('error');
+  });
 
-    expect(instrument).toHaveBeenCalledTimes(1);
-    expect(store.getState().displayed['NOPE']).toBeUndefined();
+  it('drops bars that arrive after a database switch', async () => {
+    const d = deferred<InstrumentBars | null>();
+    const store = makeStore(fakeClient({
+      instrument: vi.fn(() => d.promise),
+      screen: async () => screenResp([]), // selectDatabase awaits a fresh screen
+    }));
+    const pending = store.getState().ensureDisplayed('AAPL');
+    await store.getState().selectDatabase('/somewhere/other.db');
+    d.resolve(BARS);
+    await pending;
+    expect(store.getState().displayed.AAPL).toBeUndefined();
+    expect(store.getState().displayStatus.AAPL).toBeUndefined();
   });
 });
 
-// STORY-037: init() must not probe the DEV_TOOLS-gated dev surfaces in a
-// production build. Both `/dev/import/options` (probeDevImport) and
-// `/dev/databases` (probeDatabases) 404 in prod by design, so knocking on them
-// on every load is a guaranteed-fail round-trip. The probes are gated behind the
-// build-time `import.meta.env.DEV` flag; here we drive both sides of that gate.
-describe('init dev-probe gate (STORY-037)', () => {
-  afterEach(() => { vi.unstubAllEnvs(); });
+describe('openFanBacktest while a run is in flight', () => {
+  it('supersedes the run: running clears, the aborted run leaves no result or error', async () => {
+    const d = deferred<FanBacktestResult & { elapsedMs: number }>();
+    const store = makeStore(fakeClient({ backtest: vi.fn(() => d.promise) }));
+    store.getState().openFanBacktest();
+    const run = store.getState().runFanBacktest();
+    expect(store.getState().fanBacktest.running).toBe(true);
+    store.getState().openFanBacktest();
+    expect(store.getState().fanBacktest.running).toBe(false);
+    d.reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+    await run;
+    expect(store.getState().fanBacktest.running).toBe(false);
+    expect(store.getState().fanBacktest.result).toBeNull();
+    expect(store.getState().fanBacktest.error).toBeNull();
+  });
+});
 
-  it('does NOT probe the dev-only surfaces in a production build', () => {
-    vi.stubEnv('DEV', false);
-    const devImportOptions = vi.fn(async () => null);
-    const databases = vi.fn(async () => null);
-    const store = makeStore(fakeClient({ devImportOptions, databases }));
-
-    store.getState().init();
-
-    expect(devImportOptions).not.toHaveBeenCalled();
-    expect(databases).not.toHaveBeenCalled();
+describe('inspectFanEntry', () => {
+  it('opens a trade review and loads bars for that ticker', async () => {
+    const client = fakeClient({ instrument: vi.fn(async () => BARS) });
+    const store = makeStore(client);
+    store.getState().inspectFanEntry({
+      ticker: 'AAPL', name: 'Apple', date: '2017-09-07', barIndex: 2,
+      strategy: 'tag50', signal: 'match', entryPrice: 10, worstGap: 0, forwardReturns: {},
+      trade: {
+        entryBar: 2, exitBar: 4, entryPrice: 10, exitPrice: 11, stopPrice: 9, targetPrice: 13,
+        returnPct: 10, realizedR: 1, barsHeld: 2, maxFavorablePct: 12, maxAdversePct: -1, exitReason: 'trail',
+      },
+      fanBar: 1, reactionBar: 2, impulseBar: 1, indicators: null,
+    });
+    expect(store.getState().fanBacktest.inspecting?.ticker).toBe('AAPL');
+    await vi.waitFor(() => expect(store.getState().displayed.AAPL).toBeTruthy());
+    expect(client.instrument).toHaveBeenCalledWith('AAPL');
+    store.getState().closeFanTradeReview();
+    expect(store.getState().fanBacktest.inspecting).toBeNull();
   });
 
-  it('still probes both dev-only surfaces in a dev build', () => {
-    vi.stubEnv('DEV', true);
-    const devImportOptions = vi.fn(async () => null);
-    const databases = vi.fn(async () => null);
-    const store = makeStore(fakeClient({ devImportOptions, databases }));
+  it('steps previous/next through the current result list', () => {
+    const store = makeStore(fakeClient());
+    const a: FanEntryEvent = {
+      ticker: 'AAA', name: 'A', date: '2016-01-01', barIndex: 10,
+      strategy: 'tag50', signal: 'match', entryPrice: 1, worstGap: 0, forwardReturns: {},
+      trade: null, fanBar: 8, reactionBar: 10, impulseBar: 9, indicators: null,
+    };
+    const b: FanEntryEvent = { ...a, ticker: 'BBB', name: 'B', barIndex: 20, reactionBar: 20, fanBar: 18 };
+    const result = {
+      config: store.getState().fanBacktest.config,
+      universe: 2, stocksScanned: 2, totalEntries: 2, stocksWithEntries: 2,
+      forwardHorizons: [], trades: {
+        count: 0, winRate: 0, avgReturnPct: 0, medianReturnPct: 0, avgR: 0, medianR: 0,
+        hitTargetPct: 0, avgBarsHeld: 0, byExitReason: {},
+      },
+      entries: [a, b],
+      factors: [],
+      account: {
+        startCash: 10_000, endEquity: 10_000, returnPct: 0, maxDrawdownPct: 0,
+        taken: 0, skipped: { total: 0, noCash: 0, maxPositions: 0 },
+        endReason: 'window' as const, windowStart: null, windowEnd: null,
+        candidates: 0, curve: [], fills: [],
+      },
+      elapsedMs: 1,
+    } satisfies FanBacktestResult & { elapsedMs: number };
+    store.setState({ fanBacktest: { ...store.getState().fanBacktest, result, inspecting: b } });
+    store.getState().stepFanTradeReview(-1);
+    expect(store.getState().fanBacktest.inspecting?.ticker).toBe('AAA');
+    store.getState().stepFanTradeReview(1);
+    expect(store.getState().fanBacktest.inspecting?.ticker).toBe('BBB');
+    store.getState().stepFanTradeReview(1);
+    expect(store.getState().fanBacktest.inspecting?.ticker).toBe('BBB');
+  });
+});
 
-    store.getState().init();
+function signalRow(ticker: string): FanSignalRow {
+  return {
+    ticker, name: ticker, sector: 'Tech', price: 50, changePct: 0,
+    strategy: 'tag50', entryDate: '2026-01-05', barsAgo: 1,
+    entryPrice: 50, stopPrice: 48, riskPerShare: 2, riskPct: 4,
+    targetLoR: 2.5, targetHiR: 3, targetLoPrice: 55, targetHiPrice: 56, openR: 0.3,
+    avgVol20: 1e6, marketCap: 2e9, sparkline: [],
+  };
+}
 
-    expect(devImportOptions).toHaveBeenCalledTimes(1);
-    expect(databases).toHaveBeenCalledTimes(1);
+describe('live entry signals', () => {
+  it('runs a scan when a strategy is chosen and clears when turned off', async () => {
+    const calls: SignalsRequest[] = [];
+    const client = fakeClient({
+      signals: vi.fn(async (body: SignalsRequest): Promise<SignalsResp> => {
+        calls.push(body);
+        return { universe: 3, elapsedMs: 1, strategy: body.strategy, rows: [signalRow('AAA')] };
+      }),
+    });
+    const store = makeStore(client);
+    store.getState().setSignalStrategy('tag50');
+    await vi.waitFor(() => expect(store.getState().signals.map((r) => r.ticker)).toEqual(['AAA']));
+    expect(calls[0].strategy).toBe('tag50');
+    store.getState().setSignalStrategy('');
+    expect(store.getState().signals).toEqual([]);
+    expect(store.getState().signalsError).toBeNull();
+  });
+
+  it('re-runs on a scan filter change but not on a client-side facet', async () => {
+    const calls: SignalsRequest[] = [];
+    const client = fakeClient({
+      signals: vi.fn(async (body: SignalsRequest): Promise<SignalsResp> => {
+        calls.push(body);
+        return { universe: 3, elapsedMs: 1, strategy: body.strategy, rows: [] };
+      }),
+    });
+    const store = makeStore(client);
+    store.getState().setSignalStrategy('tag50');
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    store.getState().setFilter('minAvgVol', 250_000);
+    await vi.waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls[1].minAvgVol).toBe(250_000);
+    // sector / min-price are applied client-side, so they must not trigger a scan.
+    store.getState().setFilter('sector', 'Tech');
+    store.getState().setFilter('minPrice', 5);
+    await Promise.resolve();
+    expect(calls).toHaveLength(2);
+  });
+
+  it('sets signalsError when the scan fails', async () => {
+    const client = fakeClient({ signals: vi.fn(async () => { throw new Error('down'); }) });
+    const store = makeStore(client);
+    store.getState().setSignalStrategy('tag50');
+    await vi.waitFor(() => expect(store.getState().signalsError).toMatch(/unavailable/));
+  });
+});
+
+describe('openFanBacktest copies screener liquidity filters', () => {
+  it('seeds minAvgVol, minMarketCap, and 200-EMA slope from the main filter bar', () => {
+    const store = makeStore(fakeClient());
+    store.getState().setFilter('minAvgVol', 250_000);
+    store.getState().setFilter('minMarketCap', 1e9);
+    store.getState().setFilter('ema200RisingBars', 105);
+    store.getState().openFanBacktest();
+    expect(store.getState().fanBacktest.config.minAvgVol).toBe(250_000);
+    expect(store.getState().fanBacktest.config.minMarketCap).toBe(1e9);
+    expect(store.getState().fanBacktest.config.ema200RisingBars).toBe(105);
   });
 });

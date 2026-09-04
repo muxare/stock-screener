@@ -140,7 +140,8 @@ function instrumentAt(seed: number, idx: number): InstrumentBars {
   let startPrice = 0;
   for (let i = 0; i <= idx; i++) startPrice = 18 + priceRand() * 380;
   const bars = genSeries(mulberry32(seed * 131 + idx * 977), startPrice);
-  return { ticker, name, sector, bars, dates: genDates(bars.length, SYNTH_END) };
+  const sharesOutstanding = Math.round(25e6 + idx * 95e6 + priceRand() * 180e6);
+  return { ticker, name, sector, bars, dates: genDates(bars.length, SYNTH_END), sharesOutstanding };
 }
 
 /**

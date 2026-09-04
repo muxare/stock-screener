@@ -12,32 +12,6 @@ function jsonRes(body: unknown, { ok = true, status = 200 }: { ok?: boolean; sta
   return { ok, status, json: async () => body };
 }
 
-// A Response-like whose body streams the given raw string chunks, one per
-// reader.read() — so callers can split NDJSON lines ACROSS reads and exercise
-// the cross-chunk buffer reassembly.
-function streamRes(chunks: string[], { ok = true, status = 200 }: { ok?: boolean; status?: number } = {}) {
-  const enc = new TextEncoder();
-  let i = 0;
-  return {
-    ok,
-    status,
-    body: {
-      getReader() {
-        return {
-          read: async () => (i < chunks.length
-            ? { value: enc.encode(chunks[i++]), done: false }
-            : { value: undefined, done: true }),
-        };
-      },
-    },
-  };
-}
-
-// Convenience: NDJSON lines delivered as one chunk.
-function ndjsonRes(lines: string[], opts: { ok?: boolean; status?: number } = {}) {
-  return streamRes([lines.map((l) => l + '\n').join('')], opts);
-}
-
 let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
@@ -89,81 +63,78 @@ describe('httpMarketClient.instrument', () => {
 });
 
 describe('httpMarketClient.screen', () => {
-  it('POSTs /screen with {rules, limit} and forwards the signal', async () => {
-    const resp = { total: 1, count: 1, offset: 0, limit: 0, elapsedMs: 1, tickers: ['AAPL'], results: [] };
+  it('POSTs /screen with an empty JSON body and forwards the signal', async () => {
+    const resp = { universe: 1, elapsedMs: 1, matches: [], near: [] };
     fetchMock.mockResolvedValue(jsonRes(resp));
     const ac = new AbortController();
-    const rules = [{ kind: 'flag', field: 'up' }] as never;
-    const out = await httpMarketClient().screen(rules, 10, ac.signal);
+    const out = await httpMarketClient().screen(ac.signal);
     expect(out).toEqual(resp);
     const [url, opts] = fetchMock.mock.calls[0];
     expect(url).toBe('/screen');
     expect(opts.method).toBe('POST');
     expect(opts.signal).toBe(ac.signal);
-    expect(JSON.parse(opts.body)).toEqual({ rules, limit: 10 });
-  });
-
-  it('defaults limit to 0 when omitted', async () => {
-    fetchMock.mockResolvedValue(jsonRes({ tickers: [], results: [] }));
-    await httpMarketClient().screen([] as never);
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ rules: [], limit: 0 });
+    expect(JSON.parse(opts.body)).toEqual({});
   });
 
   it('throws on !res.ok', async () => {
     fetchMock.mockResolvedValue(jsonRes(null, { ok: false, status: 400 }));
-    await expect(httpMarketClient().screen([] as never)).rejects.toThrow('screen failed: 400');
+    await expect(httpMarketClient().screen()).rejects.toThrow('screen failed: 400');
   });
 });
 
+function ndjsonRes(lines: string[]) {
+  const text = lines.map((l) => l + '\n').join('');
+  const bytes = new TextEncoder().encode(text);
+  return {
+    ok: true,
+    status: 200,
+    body: {
+      getReader() {
+        let sent = false;
+        return {
+          async read() {
+            if (sent) return { done: true, value: undefined };
+            sent = true;
+            return { done: false, value: bytes };
+          },
+        };
+      },
+    },
+  };
+}
+
 describe('httpMarketClient.backtest', () => {
-  it('parses NDJSON progress lines then the result line', async () => {
-    const result = { type: 'result', trades: 5, ret: 1.2 };
+  const cfg = {
+    strategy: 'onset' as const,
+    entry: 'match' as const,
+    targetR: 3,
+    macdWindow: false,
+    maxHoldBars: 60,
+    horizons: [5],
+  };
+
+  it('POSTs /backtest and parses NDJSON progress then result', async () => {
+    const result = {
+      type: 'result', elapsedMs: 12, config: cfg, universe: 2, stocksScanned: 2,
+      totalEntries: 1, stocksWithEntries: 1, forwardHorizons: [],
+      trades: { count: 1, winRate: 100, avgReturnPct: 2, medianReturnPct: 2, avgBarsHeld: 5, byExitReason: {} },
+      entries: [],
+    };
     fetchMock.mockResolvedValue(ndjsonRes([
-      JSON.stringify({ type: 'progress', pct: 25 }),
-      JSON.stringify({ type: 'progress', pct: 80 }),
+      JSON.stringify({ type: 'progress', name: 1, total: 2 }),
       JSON.stringify(result),
     ]));
-    const progress: number[] = [];
-    const out = await httpMarketClient().backtest([] as never, (p) => progress.push(p));
-    expect(progress).toEqual([25, 80]);
-    expect(out).toEqual(result);
+    const progress: { name: number; total: number }[] = [];
+    const out = await httpMarketClient().backtest(cfg, (p) => progress.push(p));
+    expect(fetchMock.mock.calls[0][0]).toBe('/backtest');
+    expect(progress).toEqual([{ name: 1, total: 2 }]);
+    expect(out.totalEntries).toBe(1);
+    expect(out.elapsedMs).toBe(12);
   });
 
-  it('reassembles lines that straddle reader chunks', async () => {
-    const result = { type: 'result', trades: 7, ret: 3.4 };
-    const full = [
-      JSON.stringify({ type: 'progress', pct: 40 }),
-      JSON.stringify(result),
-    ].map((l) => l + '\n').join('');
-    // Split at fixed offsets that land mid-line, so both the `buf` carry and the
-    // streaming TextDecoder must stitch the JSON back together.
-    fetchMock.mockResolvedValue(streamRes([full.slice(0, 8), full.slice(8, 30), full.slice(30)]));
-    const progress: number[] = [];
-    const out = await httpMarketClient().backtest([] as never, (p) => progress.push(p));
-    expect(progress).toEqual([40]);
-    expect(out).toEqual(result);
-  });
-
-  it('forwards the AbortSignal to fetch', async () => {
-    fetchMock.mockResolvedValue(ndjsonRes([JSON.stringify({ type: 'result', ok: true })]));
-    const ac = new AbortController();
-    await httpMarketClient().backtest([] as never, undefined, ac.signal);
-    expect(fetchMock.mock.calls[0][1].signal).toBe(ac.signal);
-  });
-
-  it('returns null when the stream carries no result line', async () => {
-    fetchMock.mockResolvedValue(ndjsonRes([JSON.stringify({ type: 'progress', pct: 50 })]));
-    expect(await httpMarketClient().backtest([] as never)).toBeNull();
-  });
-
-  it('throws when the stream carries an error line', async () => {
-    fetchMock.mockResolvedValue(ndjsonRes([JSON.stringify({ type: 'error', error: 'boom' })]));
-    await expect(httpMarketClient().backtest([] as never)).rejects.toThrow('boom');
-  });
-
-  it('throws on !res.ok', async () => {
-    fetchMock.mockResolvedValue({ ok: false, status: 503, body: null });
-    await expect(httpMarketClient().backtest([] as never)).rejects.toThrow('backtest failed: 503');
+  it('throws a restart hint on 404 (stale Vite proxy)', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 404, json: async () => { throw new Error('empty'); } });
+    await expect(httpMarketClient().backtest(cfg)).rejects.toThrow(/restart the Vite dev server/);
   });
 });
 

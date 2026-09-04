@@ -18,36 +18,35 @@
 // server-side market-data port).
 // ----------------------------------------------------------------------------
 
-import type { InstrumentBars, BacktestResult, Rule } from '../market';
+import type { InstrumentBars } from '../market';
+import type { FanRow } from '../fan';
+import type { FanBacktestConfig, FanBacktestProgress, FanBacktestResult, FanStrategyId } from '../fanBacktest';
+import type { FanSignalRow } from '../fanSignals';
 
-// Per-match row returned by /screen — mirrors `ScreenRow` in server/screen.ts.
-// Carries the scalars the results table renders plus the 40-day sparkline, so a
-// row draws without fetching that name's bars.
-export interface Row {
-  ticker: string;
-  name: string;
-  sector: string;
-  price: number;
-  changePct: number;
-  rsi: number;
-  macdHist: number;
-  stochK: number;
-  relVol: number;
-  ema20: number;
-  ema50: number;
-  ema200: number;
-  pct52w: number;
-  sparkline: number[];
-}
+export type { FanRow };
+export type { FanBacktestConfig, FanBacktestProgress, FanBacktestResult };
+export type { FanSignalRow };
 
 export interface ScreenResp {
-  total: number;
-  count: number;
-  offset: number;
-  limit: number;
+  universe: number;
   elapsedMs: number;
-  tickers: string[];
-  results: Row[];
+  matches: FanRow[];
+  near: FanRow[];
+}
+
+// Live "current entry" screen (per strategy). The client carries the strategy
+// and the universe floors the server reuses to build the scan config.
+export interface SignalsRequest {
+  strategy: FanStrategyId;
+  minAvgVol?: number;
+  minMarketCap?: number;
+  ema200RisingBars?: number;
+}
+export interface SignalsResp {
+  universe: number;
+  elapsedMs: number;
+  strategy: FanStrategyId;
+  rows: FanSignalRow[];
 }
 
 // Universe facts only (STORY-028): count + sector facets with NO per-name row
@@ -111,21 +110,18 @@ export interface ActivateDbReport {
 // The client-side read seam. Exposes exactly today's calls and nothing
 // speculative (STORY-035 AC#1).
 export interface MarketClient {
-  /** Universe-wide facts: count + sector facets + a sample name. */
   facts(signal?: AbortSignal): Promise<FactsResp>;
-  /** One name's bars, or `null` on 404. */
   instrument(ticker: string): Promise<InstrumentBars | null>;
-  /** Run a rule set against the universe; `limit: 0` returns counts/tickers only. */
-  screen(rules: Rule[], limit?: number, signal?: AbortSignal): Promise<ScreenResp>;
-  /** Stream a full-universe backtest; resolves the single `result` payload (or `null`). */
-  backtest(rules: Rule[], onProgress?: (pct: number) => void, signal?: AbortSignal): Promise<BacktestResult | null>;
-  /** Dev-only import options; `null` when DEV_TOOLS is off (or the service is down). */
+  screen(signal?: AbortSignal): Promise<ScreenResp>;
+  signals(body: SignalsRequest, signal?: AbortSignal): Promise<SignalsResp>;
+  backtest(
+    config: FanBacktestConfig,
+    onProgress?: (p: FanBacktestProgress) => void,
+    signal?: AbortSignal,
+  ): Promise<FanBacktestResult & { elapsedMs: number }>;
   devImportOptions(): Promise<ImportOptionsResp | null>;
-  /** Run a dev-only EOD import. */
   devImport(body: DevImportRequest): Promise<DevImportReport>;
-  /** Dev-only list of selectable market-data DBs; `null` when DEV_TOOLS is off. */
   databases(): Promise<DatabasesResp | null>;
-  /** Switch the active dataset (a SQLite DB by path, or the synthetic generator). */
   activateDatabase(body: ActivateDbRequest): Promise<ActivateDbReport>;
 }
 
@@ -153,6 +149,26 @@ export interface MarketClientOptions {
 // former `api*` helpers from src/store.ts — same endpoints, same error/null
 // semantics, same NDJSON parse.
 // ----------------------------------------------------------------------------
+// One line of the /backtest NDJSON stream. A line that is not valid JSON or not
+// a known message shape is skipped rather than aborting the whole run; a stream
+// that never yields a result line still fails at the end with a clear error.
+type BacktestStreamMsg =
+  | { type: 'progress'; name: number; total: number }
+  | ({ type: 'result'; elapsedMs: number } & FanBacktestResult);
+
+function parseBacktestLine(line: string): BacktestStreamMsg | null {
+  if (!line.trim()) return null;
+  let parsed: unknown;
+  try { parsed = JSON.parse(line); } catch { return null; }
+  if (!parsed || typeof parsed !== 'object') return null;
+  const m = parsed as { type?: unknown; name?: unknown; total?: unknown };
+  if (m.type === 'progress' && typeof m.name === 'number' && typeof m.total === 'number') {
+    return { type: 'progress', name: m.name, total: m.total };
+  }
+  if (m.type === 'result') return parsed as BacktestStreamMsg;
+  return null;
+}
+
 export function httpMarketClient(opts: MarketClientOptions = {}): MarketClient {
   const instrumentTimeoutMs = opts.instrumentTimeoutMs ?? DEFAULT_INSTRUMENT_TIMEOUT_MS;
   return {
@@ -174,46 +190,63 @@ export function httpMarketClient(opts: MarketClientOptions = {}): MarketClient {
       return res.json() as Promise<InstrumentBars>;
     },
 
-    async screen(rules, limit = 0, signal) {
+    async screen(signal) {
       const res = await fetch('/screen', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ rules, limit }),
+        body: '{}',
         signal,
       });
       if (!res.ok) throw new Error('screen failed: ' + res.status);
       return res.json() as Promise<ScreenResp>;
     },
 
-    // NDJSON stream (SAD#2.4): throttled `progress` lines, then one `result` line
-    // carrying the single summary payload (SAD#6.5).
-    async backtest(rules, onProgress, signal) {
+    async signals(body, signal) {
+      const res = await fetch('/signals', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal,
+      });
+      if (!res.ok) throw new Error('signals failed: ' + res.status);
+      return res.json() as Promise<SignalsResp>;
+    },
+
+    async backtest(config, onProgress, signal) {
       const res = await fetch('/backtest', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ rules }),
+        body: JSON.stringify(config),
         signal,
       });
-      if (!res.ok || !res.body) throw new Error('backtest failed: ' + res.status);
-      const reader = res.body.getReader();
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        if (res.status === 404) {
+          throw new Error('Backtest endpoint not found — restart the Vite dev server so /backtest is proxied.');
+        }
+        throw new Error(data.error || 'backtest failed: ' + res.status);
+      }
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error('backtest failed: no response body');
       const dec = new TextDecoder();
       let buf = '';
-      let result: BacktestResult | null = null;
+      let result: (FanBacktestResult & { elapsedMs: number }) | null = null;
       for (;;) {
-        const { value, done } = await reader.read();
+        const { done, value } = await reader.read();
         if (done) break;
         buf += dec.decode(value, { stream: true });
-        let nl: number;
-        while ((nl = buf.indexOf('\n')) >= 0) {
-          const line = buf.slice(0, nl).trim();
-          buf = buf.slice(nl + 1);
-          if (!line) continue;
-          const msg = JSON.parse(line) as { type: string; pct?: number; error?: string } & Record<string, unknown>;
-          if (msg.type === 'progress') onProgress?.(msg.pct ?? 0);
-          else if (msg.type === 'result') result = msg as unknown as BacktestResult;
-          else if (msg.type === 'error') throw new Error(String(msg.error));
+        const lines = buf.split('\n');
+        buf = lines.pop() ?? '';
+        for (const line of lines) {
+          const msg = parseBacktestLine(line);
+          if (!msg) continue;
+          if (msg.type === 'progress') onProgress?.({ name: msg.name, total: msg.total });
+          else result = msg;
         }
       }
+      const tail = parseBacktestLine(buf);
+      if (tail?.type === 'result') result = tail;
+      if (!result) throw new Error('backtest failed: stream ended without result');
       return result;
     },
 

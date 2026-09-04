@@ -1,4 +1,4 @@
-# CLAUDE.md — stock-screener
+# AGENTS.md — stock-screener
 
 A stock screener: compose, save, and run technical screens against a market
 universe. React/TypeScript front end, a Node/TypeScript server, and a
@@ -32,7 +32,7 @@ Run `npm run test` and `npm run lint` before considering any change done.
 - `server/` — API + dev dataset handlers, screening/backtest logic.
 - `tools/` — data-import scripts (eod-import, yahoo-fetch).
 - `backlog/` — the project's work items and architecture (see the workflow below).
-- `workflow/` — the agentic sprint/board system. **Read `workflow/CLAUDE.md` before
+- `workflow/` — the agentic sprint/board system. **Read `workflow/AGENTS.md` before
   touching anything under `workflow/` or `backlog/`.**
 
 ## Conventions
@@ -48,4 +48,4 @@ This repo runs a lightweight agentic Scrum. **Disk is the source of truth**
 `SessionStart` hook re-injects the live sprint/WIP state, so you never hand-maintain
 "where we are" here. The board is mutated **only** through `workflow/tools/board.py`
 (hooks block manual file moves). Run `python3 workflow/tools/board.py status` to see
-where things stand and the next step. Full rules: **`workflow/CLAUDE.md`**.
+where things stand and the next step. Full rules: **`workflow/AGENTS.md`**.

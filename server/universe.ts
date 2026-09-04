@@ -1,8 +1,8 @@
 // universe.ts — warm, memoized production universe (SAD#4.3 / SAD#2.3).
 //
 // The universe is built ONCE and reused across requests so the per-Stock
-// indicator caches (`_indCache`, `_pcfEma`, …) computed during evaluation stay
-// warm — this is the "warm-cache" path the SAD#2.3 p95 budget is stated for.
+// indicator series are computed once — this is the "warm-cache" path the
+// SAD#2.3 p95 budget is stated for.
 // Bars enter only through the MarketDataProvider port (SAD#5.10): the service
 // depends on the port, never a concrete vendor SDK.
 
