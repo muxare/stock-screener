@@ -1,8 +1,9 @@
 # Strategy builder — implementation plan
 
-Status (2026-09-07): **Phase 1 landed** on `feat/strategy-builder` — engine, presets, parser,
-trade simulator, server/client/store plumbing, minimal modal. Parity with the old engine is
-exact for all 8 presets (see "Parity baseline"). Resume at "Phase 2" below.
+Status (2026-09-07): **Phases 1–2 landed** on `feat/strategy-builder` — engine, presets, parser,
+trade simulator, server/client/store plumbing, minimal modal, and one mark per step on the trade
+review chart. Parity with the old engine is exact for all 8 presets (see "Parity baseline").
+Resume at "Phase 3" below.
 
 ## Context
 
@@ -276,7 +277,7 @@ tracker), `FanTradeReview.tsx` (`trailEma` from the def), `FilterBar.tsx`,
 `FanLists.tsx`. Temporary adapter in `fanExample.ts` (`legacyIdOf(def)` + flat exit
 fields from `def.trade.exit`) so it compiles until phase 3.
 
-**Phase 2 — marks in the trade review.** `FanTradeReview.tsx`: replace the setup band,
+**Phase 2 — marks in the trade review.** ✅ landed 2026-09-07. `FanTradeReview.tsx`: replace the setup band,
 `markLine` / `diamond` / `high` triangle and the `'fan / tag'` label with a loop over
 `event.marks` (dashed line + glyph per kind + label), setup band from first candle mark
 to entry, legend built from marks; clamp in `tradeChartRange`.

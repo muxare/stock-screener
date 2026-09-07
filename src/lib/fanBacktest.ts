@@ -49,7 +49,7 @@ export type { FanEntryIndicators } from './strategy/primitives.ts';
 export { simulateRTrade } from './strategy/trade.ts';
 export type { FanSimulatedTrade, FanTradeExitReason } from './strategy/trade.ts';
 export { findStrategyEntries, runStrategy } from './strategy/engine.ts';
-export type { StrategyDef, StrategyMark, Step, EntrySpec, StopSpec, ExitSpec } from './strategy/types.ts';
+export type { StrategyDef, StrategyMark, StepKind, Step, EntrySpec, StopSpec, ExitSpec } from './strategy/types.ts';
 
 export interface FanBacktestConfig {
   /** The step machine + trade rows. Presets: strategy/presets.ts. */
