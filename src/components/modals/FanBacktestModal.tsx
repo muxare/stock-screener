@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { useScreener } from '../../store';
 import { HButton } from '../ui/Hoverable';
 import { Disclosure } from '../ui/Disclosure';
-import { FAN_STRATEGIES, fanEntryIndex, type FanStrategyId } from '../../lib/fanBacktest';
+import { fanEntryIndex } from '../../lib/fanBacktest';
+import { presets, presetById } from '../../lib/strategy/presets';
+import type { Step, StrategyDef } from '../../lib/strategy/types';
 import { AVG_VOL_PRESETS, MARKET_CAP_PRESETS, EMA200_RISING_PRESETS } from '../../lib/filters';
 import { FanTradeReview } from './FanTradeReview';
 import { FanExampleChart } from './FanExampleChart';
@@ -21,6 +23,32 @@ const card: React.CSSProperties = {
   background: '#fafbfb', border: '1px solid #eef0f1', borderRadius: 10, padding: '12px 14px',
 };
 const nf = (v: number, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '—');
+const PRESETS = presets();
+
+/** Append / remove the trailing 18–50 MACD guard step. */
+function withMacdGuard(def: StrategyDef, on: boolean): StrategyDef {
+  const steps: Step[] = def.steps.filter((st) => st.type !== 'macd_favorable');
+  if (on) {
+    const ids = new Set(steps.map((st) => st.id));
+    let id = 'macd';
+    for (let k = 2; ids.has(id); k++) id = `macd${k}`;
+    const guard: Step = { id, type: 'macd_favorable' };
+    steps.push(guard);
+  }
+  return { ...def, steps };
+}
+
+function trackerOf(def: StrategyDef): (Step & { type: 'pullback'; mode: 'swing' }) | null {
+  const t = def.steps.find((st) => st.type === 'pullback' && st.mode === 'swing');
+  return t && t.type === 'pullback' && t.mode === 'swing' ? t : null;
+}
+
+function withRearm(def: StrategyDef, on: boolean): StrategyDef {
+  return {
+    ...def,
+    steps: def.steps.map((st) => (st.type === 'pullback' && st.mode === 'swing' ? { ...st, rearmOnNewHigh: on } : st)),
+  };
+}
 
 function Stat({ k, v, sub }: { k: string; v: string; sub?: string }) {
   return (
@@ -57,6 +85,8 @@ export function FanBacktestModal() {
   const bt = useScreener((s) => s.fanBacktest);
   const close = useScreener((s) => s.closeFanBacktest);
   const setCfg = useScreener((s) => s.setFanBacktestConfig);
+  const setDef = useScreener((s) => s.setStrategyDef);
+  const patchExit = useScreener((s) => s.patchExit);
   const run = useScreener((s) => s.runFanBacktest);
   const closeReview = useScreener((s) => s.closeFanTradeReview);
   const stepReview = useScreener((s) => s.stepFanTradeReview);
@@ -76,7 +106,11 @@ export function FanBacktestModal() {
   const pct = (v: number) => `${v >= 0 ? '+' : ''}${nf(v)}%`;
   const usd = (v: number) => `${v < 0 ? '-' : ''}$${Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
   const usd2 = (v: number) => `${v < 0 ? '-' : ''}$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  const hint = FAN_STRATEGIES.find((s) => s.id === bt.config.strategy)?.hint;
+  const def = bt.config.strategy;
+  const exit = def.trade.exit;
+  const hint = def.description;
+  const macdOn = exit.macdExit || def.steps.some((st) => st.type === 'macd_favorable');
+  const tracker = trackerOf(def);
   const reason = (s: string) => s.replace(/_/g, ' ');
   const inspectIdx = inspecting && r ? fanEntryIndex(r.entries, inspecting) : -1;
   const pageStart = safePage * PAGE_SIZE;
@@ -103,13 +137,13 @@ export function FanBacktestModal() {
           <div style={{ fontSize: 17, fontWeight: 700 }}>Fan strategy backtest</div>
           <div style={{ fontSize: 12.5, color: '#8b9298', marginTop: 3 }}>
             Long-only. 1R under the pullback/50-EMA
-            {bt.config.trailEma === 50
+            {exit.trailEma === 50
               ? ', then trail the 50 after 1R breakeven. MACD does not cut a trailed trade.'
-              : bt.config.trailPivot
+              : exit.trailPivot
                 ? ', then trail 2¢ under confirmed pivot lows. MACD does not cut a trailed trade.'
-                : bt.config.targetWindow
+                : exit.targetWindow
                   ? ', exit at 2.5R (course target window).'
-                  : `, ${bt.config.targetR}R target.`}
+                  : `, ${exit.targetR}R target.`}
             {' '}Default is a 50-EMA tag while 18&gt;50&gt;100&gt;200. Swing account sizes each fill at 1R and stops at the window or ruin.
           </div>
         </div>
@@ -124,7 +158,7 @@ export function FanBacktestModal() {
                 event={inspecting}
                 stock={inspectStock}
                 status={inspectStatus}
-                trailEma={bt.config.trailEma ?? null}
+                trailEma={exit.trailPivot ? null : exit.trailEma}
                 onClose={closeReview}
                 onRetry={() => retryDisplayed(inspecting.ticker)}
                 onPrev={() => stepReview(-1)}
@@ -144,46 +178,38 @@ export function FanBacktestModal() {
             <div>
               <label style={label}>Strategy</label>
               <select
-                value={bt.config.strategy}
+                value={PRESETS.some((p) => p.id === def.id) ? def.id : '__custom'}
                 disabled={bt.running}
-                onChange={(e) => setCfg('strategy', e.target.value as FanStrategyId)}
+                onChange={(e) => {
+                  if (e.target.value === '__custom') return;
+                  // Keep the exit management the user has dialled in; the preset brings its steps, entry and stop.
+                  const next = presetById(e.target.value);
+                  setDef({ ...next, trade: { ...next.trade, exit: { ...exit, fanExit: next.trade.exit.fanExit } } });
+                }}
                 style={field}
               >
-                {FAN_STRATEGIES.map((s) => (
-                  <option key={s.id} value={s.id}>{s.label}</option>
+                {PRESETS.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
+                {!PRESETS.some((p) => p.id === def.id) && <option value="__custom">{def.name}</option>}
               </select>
             </div>
             <div>
               <label style={label}>Target</label>
               <select
                 value={
-                  bt.config.trailPivot ? 'pivot'
-                    : bt.config.targetWindow ? 'window'
-                      : bt.config.trailEma === 50 ? 'trail50'
-                        : String(bt.config.targetR)
+                  exit.trailPivot ? 'pivot'
+                    : exit.targetWindow ? 'window'
+                      : exit.trailEma === 50 ? 'trail50'
+                        : String(exit.targetR)
                 }
                 disabled={bt.running}
                 onChange={(e) => {
                   const v = e.target.value;
-                  if (v === 'trail50') {
-                    setCfg('trailPivot', false);
-                    setCfg('targetWindow', false);
-                    setCfg('trailEma', 50);
-                  } else if (v === 'window') {
-                    setCfg('trailPivot', false);
-                    setCfg('trailEma', null);
-                    setCfg('targetWindow', true);
-                  } else if (v === 'pivot') {
-                    setCfg('trailEma', null);
-                    setCfg('targetWindow', false);
-                    setCfg('trailPivot', true);
-                  } else {
-                    setCfg('trailPivot', false);
-                    setCfg('targetWindow', false);
-                    setCfg('trailEma', null);
-                    setCfg('targetR', Number(v));
-                  }
+                  if (v === 'trail50') patchExit({ trailPivot: false, targetWindow: false, trailEma: 50 });
+                  else if (v === 'window') patchExit({ trailPivot: false, trailEma: null, targetWindow: true });
+                  else if (v === 'pivot') patchExit({ trailEma: null, targetWindow: false, trailPivot: true });
+                  else patchExit({ trailPivot: false, targetWindow: false, trailEma: null, targetR: Number(v) });
                 }}
                 style={field}
               >
@@ -198,9 +224,9 @@ export function FanBacktestModal() {
             <div>
               <label style={label}>Max hold</label>
               <select
-                value={bt.config.maxHoldBars == null ? '' : String(bt.config.maxHoldBars)}
+                value={exit.maxHoldBars == null ? '' : String(exit.maxHoldBars)}
                 disabled={bt.running}
-                onChange={(e) => setCfg('maxHoldBars', e.target.value === '' ? null : Number(e.target.value))}
+                onChange={(e) => patchExit({ maxHoldBars: e.target.value === '' ? null : Number(e.target.value) })}
                 style={field}
               >
                 <option value="10">10 bars</option>
@@ -217,11 +243,15 @@ export function FanBacktestModal() {
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#5b6168' }}>
             <input
               type="checkbox"
-              checked={bt.config.macdWindow}
+              checked={macdOn}
               disabled={bt.running}
-              onChange={(e) => setCfg('macdWindow', e.target.checked)}
+              onChange={(e) => {
+                const on = e.target.checked;
+                const next = withMacdGuard(def, on);
+                setDef({ ...next, trade: { ...next.trade, exit: { ...next.trade.exit, macdExit: on } } });
+              }}
             />
-            {bt.config.trailEma || bt.config.trailPivot
+            {exit.trailEma || exit.trailPivot
               ? '18–50 MACD window (entry filter only; does not cut a trailed trade)'
               : '18–50 MACD window (entry filter + exit when line < signal)'}
           </label>
@@ -229,9 +259,9 @@ export function FanBacktestModal() {
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#5b6168' }}>
             <input
               type="checkbox"
-              checked={bt.config.continueEpisode !== false}
-              disabled={bt.running || bt.config.strategy === 'onset' || bt.config.strategy === 'bunn_bounce' || bt.config.strategy === 'bunn_cont'}
-              onChange={(e) => setCfg('continueEpisode', e.target.checked)}
+              checked={tracker?.rearmOnNewHigh === true}
+              disabled={bt.running || !tracker}
+              onChange={(e) => setDef(withRearm(def, e.target.checked))}
             />
             Continuation pullbacks (re-arm after a new swing high)
           </label>
@@ -239,9 +269,9 @@ export function FanBacktestModal() {
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#5b6168' }}>
             <input
               type="checkbox"
-              checked={bt.config.breakevenAtR != null && bt.config.breakevenAtR > 0}
+              checked={exit.breakevenAtR != null && exit.breakevenAtR > 0}
               disabled={bt.running}
-              onChange={(e) => setCfg('breakevenAtR', e.target.checked ? 1 : null)}
+              onChange={(e) => patchExit({ breakevenAtR: e.target.checked ? 1 : null })}
             />
             Move stop to breakeven at 1R
           </label>

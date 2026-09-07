@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { create } from 'zustand';
 import { makeScreenerState, type ScreenerState } from './store';
 import type { MarketClient, ScreenResp, SignalsRequest, SignalsResp, FanSignalRow } from './lib/client/marketClient';
-import type { FanEntryEvent, FanBacktestResult } from './lib/fanBacktest';
+import { DEFAULT_FAN_BACKTEST_CONFIG, type FanEntryEvent, type FanBacktestResult } from './lib/fanBacktest';
 import type { InstrumentBars } from './lib/market';
 
 function deferred<T>() {
@@ -51,7 +51,7 @@ function fakeClient(overrides: Partial<MarketClient> = {}): FakeClient {
     }),
     backtest: vi.fn(async () => ({
       elapsedMs: 1,
-      config: { strategy: 'onset' as const, entry: 'match' as const, targetR: 3, macdWindow: false, maxHoldBars: 60, horizons: [5] },
+      config: { ...DEFAULT_FAN_BACKTEST_CONFIG, horizons: [5] },
       universe: 1,
       stocksScanned: 1,
       totalEntries: 0,
@@ -67,7 +67,7 @@ function fakeClient(overrides: Partial<MarketClient> = {}): FakeClient {
         candidates: 0, curve: [], fills: [],
       },
     })),
-    signals: async () => ({ universe: 0, elapsedMs: 1, strategy: 'onset' as const, rows: [] }),
+    signals: async () => ({ universe: 0, elapsedMs: 1, strategy: 'onset', strategyName: 'Fan onset (baseline)', rows: [] }),
     devImportOptions: async () => null,
     devImport: async () => ({ files: 0, instruments: 0, bars: 0, skipped: 0, errors: [], targetDb: '', universe: 0 }),
     databases: async () => null,
@@ -185,12 +185,13 @@ describe('inspectFanEntry', () => {
     const store = makeStore(client);
     store.getState().inspectFanEntry({
       ticker: 'AAPL', name: 'Apple', date: '2017-09-07', barIndex: 2,
-      strategy: 'tag50', signal: 'match', entryPrice: 10, worstGap: 0, forwardReturns: {},
+      strategyId: 'tag50', strategyName: '50-EMA tag', entryMode: 'close', summary: '',
+      entryPrice: 10, worstGap: 0, forwardReturns: {},
       trade: {
         entryBar: 2, exitBar: 4, entryPrice: 10, exitPrice: 11, stopPrice: 9, targetPrice: 13,
         returnPct: 10, realizedR: 1, barsHeld: 2, maxFavorablePct: 12, maxAdversePct: -1, exitReason: 'trail',
       },
-      fanBar: 1, reactionBar: 2, impulseBar: 1, indicators: null,
+      marks: [], fanBar: 1, reactionBar: 2, impulseBar: 1, indicators: null,
     });
     expect(store.getState().fanBacktest.inspecting?.ticker).toBe('AAPL');
     await vi.waitFor(() => expect(store.getState().displayed.AAPL).toBeTruthy());
@@ -203,8 +204,9 @@ describe('inspectFanEntry', () => {
     const store = makeStore(fakeClient());
     const a: FanEntryEvent = {
       ticker: 'AAA', name: 'A', date: '2016-01-01', barIndex: 10,
-      strategy: 'tag50', signal: 'match', entryPrice: 1, worstGap: 0, forwardReturns: {},
-      trade: null, fanBar: 8, reactionBar: 10, impulseBar: 9, indicators: null,
+      strategyId: 'tag50', strategyName: '50-EMA tag', entryMode: 'close', summary: '',
+      entryPrice: 1, worstGap: 0, forwardReturns: {},
+      trade: null, marks: [], fanBar: 8, reactionBar: 10, impulseBar: 9, indicators: null,
     };
     const b: FanEntryEvent = { ...a, ticker: 'BBB', name: 'B', barIndex: 20, reactionBar: 20, fanBar: 18 };
     const result = {
@@ -250,7 +252,8 @@ describe('live entry signals', () => {
     const client = fakeClient({
       signals: vi.fn(async (body: SignalsRequest): Promise<SignalsResp> => {
         calls.push(body);
-        return { universe: 3, elapsedMs: 1, strategy: body.strategy, rows: [signalRow('AAA')] };
+        const id = typeof body.strategy === 'string' ? body.strategy : body.strategy.id;
+        return { universe: 3, elapsedMs: 1, strategy: id, strategyName: id, rows: [signalRow('AAA')] };
       }),
     });
     const store = makeStore(client);
@@ -267,7 +270,8 @@ describe('live entry signals', () => {
     const client = fakeClient({
       signals: vi.fn(async (body: SignalsRequest): Promise<SignalsResp> => {
         calls.push(body);
-        return { universe: 3, elapsedMs: 1, strategy: body.strategy, rows: [] };
+        const id = typeof body.strategy === 'string' ? body.strategy : body.strategy.id;
+        return { universe: 3, elapsedMs: 1, strategy: id, strategyName: id, rows: [] };
       }),
     });
     const store = makeStore(client);
@@ -283,11 +287,47 @@ describe('live entry signals', () => {
     expect(calls).toHaveLength(2);
   });
 
+  it('sends a saved custom strategy as its definition and an unknown id as an error', async () => {
+    const calls: SignalsRequest[] = [];
+    const client = fakeClient({
+      signals: vi.fn(async (body: SignalsRequest): Promise<SignalsResp> => {
+        calls.push(body);
+        const id = typeof body.strategy === 'string' ? body.strategy : body.strategy.id;
+        return { universe: 3, elapsedMs: 1, strategy: id, strategyName: id, rows: [] };
+      }),
+    });
+    const store = makeStore(client);
+    const mine = { ...DEFAULT_FAN_BACKTEST_CONFIG.strategy, id: 'mine', name: 'Mine', builtin: undefined };
+    store.setState({ strategies: [mine] });
+    store.getState().setSignalStrategy('mine');
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    expect(typeof calls[0].strategy).toBe('object');
+    expect((calls[0].strategy as { id: string }).id).toBe('mine');
+    store.getState().setSignalStrategy('ghost');
+    await vi.waitFor(() => expect(store.getState().signalsError).toMatch(/Unknown strategy/));
+    expect(calls).toHaveLength(1);
+  });
+
   it('sets signalsError when the scan fails', async () => {
     const client = fakeClient({ signals: vi.fn(async () => { throw new Error('down'); }) });
     const store = makeStore(client);
     store.getState().setSignalStrategy('tag50');
     await vi.waitFor(() => expect(store.getState().signalsError).toMatch(/unavailable/));
+  });
+});
+
+describe('strategy editing in the backtest modal', () => {
+  it('setStrategyDef replaces the def and patchExit edits only the exit row', () => {
+    const store = makeStore(fakeClient());
+    const before = store.getState().fanBacktest.config.strategy;
+    store.getState().patchExit({ trailEma: null, targetR: 2 });
+    const after = store.getState().fanBacktest.config.strategy;
+    expect(after.trade.exit.trailEma).toBeNull();
+    expect(after.trade.exit.targetR).toBe(2);
+    expect(after.steps).toBe(before.steps);
+    expect(after.trade.stop).toEqual(before.trade.stop);
+    store.getState().setStrategyDef({ ...before, id: 'x', name: 'X' });
+    expect(store.getState().fanBacktest.config.strategy.id).toBe('x');
   });
 });
 

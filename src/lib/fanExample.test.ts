@@ -1,10 +1,36 @@
 import { describe, it, expect } from 'vitest';
 import { DEFAULT_FAN_BACKTEST_CONFIG, type FanBacktestConfig } from './fanBacktest.ts';
-import { buildFanExample } from './fanExample.ts';
+import { buildFanExample, legacyIdOf } from './fanExample.ts';
+import { presetById, newCustomStrategy } from './strategy/presets.ts';
+import type { ExitSpec } from './strategy/types.ts';
 
-const cfg = (over: Partial<FanBacktestConfig> = {}): FanBacktestConfig => ({
-  ...DEFAULT_FAN_BACKTEST_CONFIG,
-  ...over,
+/** Legacy-flavoured overrides mapped onto the StrategyDef config (adapter under test). */
+interface Over extends Partial<ExitSpec> {
+  strategy?: string;
+  macdWindow?: boolean;
+  continueEpisode?: boolean;
+}
+
+const cfg = ({ strategy = 'tag50', macdWindow, continueEpisode, ...exit }: Over = {}): FanBacktestConfig => {
+  const def = presetById(strategy);
+  const steps = continueEpisode === undefined
+    ? def.steps
+    : def.steps.map((s) => (s.type === 'pullback' && s.mode === 'swing' ? { ...s, rearmOnNewHigh: continueEpisode } : s));
+  return {
+    ...DEFAULT_FAN_BACKTEST_CONFIG,
+    strategy: {
+      ...def,
+      steps,
+      trade: { ...def.trade, exit: { ...def.trade.exit, ...exit, ...(macdWindow === undefined ? {} : { macdExit: macdWindow }) } },
+    },
+  };
+};
+
+describe('legacyIdOf', () => {
+  it('maps presets to themselves and a custom pullback strategy to the nearest sketch', () => {
+    expect(legacyIdOf(presetById('bunn_cont'))).toBe('bunn_cont');
+    expect(legacyIdOf(newCustomStrategy())).toBe('tag50');
+  });
 });
 
 describe('buildFanExample', () => {

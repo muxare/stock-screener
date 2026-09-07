@@ -3,7 +3,8 @@ import { useScreener } from '../store';
 import type { FanRow, FanSignalRow } from '../store';
 import { FAN_ENTER_LOOKBACK, FAN_NEAR_MARGIN } from '../lib/fan';
 import { filtersActive, filterFanRows } from '../lib/filters';
-import { filterSignalRows, fmtTargetWindow, strategyLabel } from '../lib/fanSignals';
+import { filterSignalRows, fmtTargetWindow } from '../lib/fanSignals';
+import { strategyNameOf } from '../lib/strategy/presets';
 import { HDiv } from './ui/Hoverable';
 import { Spark } from './ui/Spark';
 import { Disclosure } from './ui/Disclosure';
@@ -147,6 +148,7 @@ function SignalTable({
 
 function SignalList() {
   const strategy = useScreener((s) => s.signalStrategy);
+  const strategies = useScreener((s) => s.strategies);
   const signalsAll = useScreener((s) => s.signals);
   const search = useScreener((s) => s.search);
   const filters = useScreener((s) => s.filters);
@@ -163,7 +165,7 @@ function SignalList() {
   );
 
   if (strategy === '') return null;
-  const label = strategyLabel(strategy);
+  const label = strategyNameOf(strategy, strategies);
   const shown = rows.length;
   const total = signalsAll.length;
   const clientFiltered = filters.sector !== '' || filters.minPrice > 0 || search.trim() !== '';

@@ -6,7 +6,6 @@ import {
   currentOpenEntry,
   fmtTargetWindow,
   filterSignalRows,
-  strategyLabel,
   SIGNAL_TARGET_LO_R,
   SIGNAL_TARGET_HI_R,
   type FanSignalSubject,
@@ -14,6 +13,7 @@ import {
 } from './fanSignals.ts';
 import { ema } from './indicators.ts';
 import type { FanEntryEvent } from './fanBacktest.ts';
+import { presetById } from './strategy/presets.ts';
 
 function rampSeries(flatBars: number, rampBars: number, flat = 10, step = 0.45): number[] {
   return [
@@ -50,21 +50,29 @@ function subject(over: Partial<FanSignalSubject> = {}): FanSignalSubject {
   };
 }
 
-const onsetCfg = signalScanConfig('onset');
+const onsetCfg = signalScanConfig(presetById('onset'));
 
 describe('signalScanConfig', () => {
   it('is an un-managed 3R trade carrying the universe filters', () => {
-    const cfg = signalScanConfig('tag50', { minAvgVol: 250_000, minMarketCap: 1e9, ema200RisingBars: 63 });
-    expect(cfg.strategy).toBe('tag50');
-    expect(cfg.targetR).toBe(SIGNAL_TARGET_HI_R);
-    expect(cfg.trailEma).toBeNull();
-    expect(cfg.trailPivot).toBe(false);
-    expect(cfg.targetWindow).toBe(false);
-    expect(cfg.breakevenAtR).toBeNull();
-    expect(cfg.maxHoldBars).toBeNull();
+    const cfg = signalScanConfig(presetById('tag50'), { minAvgVol: 250_000, minMarketCap: 1e9, ema200RisingBars: 63 });
+    expect(cfg.strategy.id).toBe('tag50');
+    expect(cfg.strategy.steps).toEqual(presetById('tag50').steps);
+    const exit = cfg.strategy.trade.exit;
+    expect(exit.targetR).toBe(SIGNAL_TARGET_HI_R);
+    expect(exit.trailEma).toBeNull();
+    expect(exit.trailPivot).toBe(false);
+    expect(exit.targetWindow).toBe(false);
+    expect(exit.breakevenAtR).toBeNull();
+    expect(exit.maxHoldBars).toBeNull();
+    expect(exit.macdExit).toBe(false);
     expect(cfg.minAvgVol).toBe(250_000);
     expect(cfg.minMarketCap).toBe(1e9);
     expect(cfg.ema200RisingBars).toBe(63);
+  });
+
+  it('keeps the preset fan-break exit (onset flattens on the full fan)', () => {
+    expect(signalScanConfig(presetById('onset')).strategy.trade.exit.fanExit).toBe('full');
+    expect(signalScanConfig(presetById('tag50')).strategy.trade.exit.fanExit).toBe('slow');
   });
 });
 
@@ -88,13 +96,13 @@ describe('screenFanSignals', () => {
   });
 
   it('applies the volume floor before scanning', () => {
-    const cfg = signalScanConfig('onset', { minAvgVol: 1_000_000 });
+    const cfg = signalScanConfig(presetById('onset'), { minAvgVol: 1_000_000 });
     const thin = subject({ ticker: 'THIN', avgVol20: 1_000 });
     expect(screenFanSignals([thin], cfg)).toEqual([]);
   });
 
   it('excludes unknown market caps when a cap floor is set', () => {
-    const cfg = signalScanConfig('onset', { minMarketCap: 1e9 });
+    const cfg = signalScanConfig(presetById('onset'), { minMarketCap: 1e9 });
     const unknown = subject({ ticker: 'UNK', marketCap: null });
     expect(screenFanSignals([unknown], cfg)).toEqual([]);
   });
@@ -103,8 +111,9 @@ describe('screenFanSignals', () => {
 function sampleEvent(over: Partial<FanEntryEvent> = {}): FanEntryEvent {
   return {
     ticker: 'AAA', name: 'Aaa', date: '2026-01-05', barIndex: 48,
-    strategy: 'tag50', signal: 'match', entryPrice: 100, worstGap: 0.02,
-    forwardReturns: {},
+    strategyId: 'tag50', strategyName: '50-EMA tag', entryMode: 'close', summary: '',
+    entryPrice: 100, worstGap: 0.02,
+    forwardReturns: {}, marks: [],
     trade: {
       entryBar: 48, exitBar: 50, entryPrice: 100, exitPrice: 101,
       stopPrice: 96, targetPrice: 112, returnPct: 1, realizedR: 0.25,
@@ -163,11 +172,5 @@ describe('filterSignalRows', () => {
     expect(filterSignalRows(rows, '', 'Tech', 0).map((r) => r.ticker)).toEqual(['BIG']);
     expect(filterSignalRows(rows, '', '', 10).map((r) => r.ticker)).toEqual(['BIG']);
     expect(filterSignalRows(rows, 'mid', '', 0).map((r) => r.ticker)).toEqual(['MID']);
-  });
-});
-
-describe('strategyLabel', () => {
-  it('maps a known id to its label', () => {
-    expect(strategyLabel('tag50')).toMatch(/50-EMA tag/);
   });
 });

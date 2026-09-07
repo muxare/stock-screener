@@ -12,7 +12,8 @@ import type {
   DevImportReport,
   DatabaseEntry,
 } from './lib/client/marketClient';
-import type { FanStrategyId } from './lib/fanBacktest';
+import type { StrategyDef, ExitSpec } from './lib/strategy/types';
+import { resolveStrategy } from './lib/strategy/presets';
 import {
   applyFanFilters,
   DEFAULT_FAN_FILTERS,
@@ -29,7 +30,7 @@ import {
 
 export type { FanRow, FanSignalRow, ImportConfigOption, ImportDataEntry, DevImportReport, DatabaseEntry, FanFilters };
 export type { FanBacktestConfig, FanBacktestProgress, FanBacktestResult, FanEntryEvent };
-export type { FanStrategyId };
+export type { StrategyDef, ExitSpec };
 export { DEFAULT_FAN_FILTERS, DEFAULT_FAN_BACKTEST_CONFIG };
 
 export type DisplayStatus = 'loading' | 'loaded' | 'error';
@@ -116,8 +117,10 @@ export interface ScreenerState {
   sectors: string[];
   search: string;
   filters: FanFilters;
-  /** '' = fan lists; a strategy id switches the screener to the live-entries view. */
-  signalStrategy: FanStrategyId | '';
+  /** Saved custom strategies (presets are not stored here). */
+  strategies: StrategyDef[];
+  /** '' = fan lists; a strategy id (preset or saved) switches the screener to the live-entries view. */
+  signalStrategy: string;
   signals: FanSignalRow[];
   signalsLoading: boolean;
   signalsError: string | null;
@@ -135,7 +138,7 @@ export interface ScreenerState {
   onSearch: (v: string) => void;
   setFilter: <K extends keyof FanFilters>(key: K, value: FanFilters[K]) => void;
   resetFilters: () => void;
-  setSignalStrategy: (strategy: FanStrategyId | '') => void;
+  setSignalStrategy: (strategy: string) => void;
   runSignals: () => Promise<void>;
   selectStock: (t: string) => void;
   closeDetail: () => void;
@@ -160,6 +163,10 @@ export interface ScreenerState {
   openFanBacktest: () => void;
   closeFanBacktest: () => void;
   setFanBacktestConfig: <K extends keyof FanBacktestConfig>(key: K, value: FanBacktestConfig[K]) => void;
+  /** Replace the strategy under edit in the backtest modal. */
+  setStrategyDef: (def: StrategyDef) => void;
+  /** Patch the exit row of the strategy under edit. */
+  patchExit: (patch: Partial<ExitSpec>) => void;
   runFanBacktest: () => Promise<void>;
   inspectFanEntry: (entry: FanEntryEvent) => void;
   stepFanTradeReview: (dir: -1 | 1) => void;
@@ -187,6 +194,7 @@ export function makeScreenerState(client: MarketClient = httpMarketClient()): St
     sectors: [],
     search: '',
     filters: { ...DEFAULT_FAN_FILTERS },
+    strategies: [],
     signalStrategy: '',
     signals: [],
     signalsLoading: false,
@@ -277,11 +285,17 @@ export function makeScreenerState(client: MarketClient = httpMarketClient()): St
       signalsAbort?.abort();
       const ac = new AbortController();
       signalsAbort = ac;
-      const { filters } = get();
+      const { filters, strategies } = get();
+      const def = resolveStrategy(strategy, strategies);
+      if (!def) {
+        set({ signals: [], signalsLoading: false, signalsError: `Unknown strategy "${strategy}".` });
+        return;
+      }
       set({ signalsLoading: true, signalsError: null });
       try {
         const resp = await client.signals({
-          strategy,
+          // Presets travel as their id; a saved strategy carries its definition.
+          strategy: def.builtin ? def.id : def,
           minAvgVol: filters.minAvgVol,
           minMarketCap: filters.minMarketCap,
           ema200RisingBars: filters.ema200RisingBars,
@@ -453,6 +467,14 @@ export function makeScreenerState(client: MarketClient = httpMarketClient()): St
     setFanBacktestConfig: (key, value) => set((s) => ({
       fanBacktest: { ...s.fanBacktest, config: { ...s.fanBacktest.config, [key]: value } },
     })),
+    setStrategyDef: (def) => set((s) => ({
+      fanBacktest: { ...s.fanBacktest, config: { ...s.fanBacktest.config, strategy: def } },
+    })),
+    patchExit: (patch) => set((s) => {
+      const strategy = s.fanBacktest.config.strategy;
+      const next: StrategyDef = { ...strategy, trade: { ...strategy.trade, exit: { ...strategy.trade.exit, ...patch } } };
+      return { fanBacktest: { ...s.fanBacktest, config: { ...s.fanBacktest.config, strategy: next } } };
+    }),
     inspectFanEntry: (entry) => {
       set((s) => ({ fanBacktest: { ...s.fanBacktest, inspecting: entry } }));
       void get().ensureDisplayed(entry.ticker);

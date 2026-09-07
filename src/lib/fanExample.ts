@@ -1,16 +1,82 @@
 // Textbook schematic of the selected fan-backtest config.
 // EMA spacing is exaggerated so the stack, tag, and management are readable —
-// this is not a live ticker and is not fed through findFanEntries.
+// this is not a live ticker and is not fed through the engine.
+//
+// TEMPORARY (strategy builder phase 1): the sketch is still keyed on the eight
+// legacy strategy ids; `buildFanExample` adapts a StrategyDef-based config to
+// the old flat shape (`legacyIdOf` + exit fields from `def.trade.exit`). Phase 3
+// replaces this file with strategy/example.ts, which generates the sketch from
+// the steps and runs the real engine over it.
 
 import { ema } from './indicators.ts';
-import {
-  BUNN_PENNY,
-  BUNN_WINDOW_HI,
-  BUNN_WINDOW_LO,
-  FAN_STRATEGIES,
-  type FanBacktestConfig,
-  type FanStrategyId,
-} from './fanBacktest.ts';
+import { BUNN_PENNY, BUNN_WINDOW_HI, BUNN_WINDOW_LO, type FanBacktestConfig } from './fanBacktest.ts';
+import { isPresetId, strategyNameOf } from './strategy/presets.ts';
+import type { StrategyDef } from './strategy/types.ts';
+
+type FanStrategyId = 'onset' | 'cross' | 'tag18' | 'tag50' | 'structure' | 'dual_ema' | 'bunn_bounce' | 'bunn_cont';
+
+/** The old flat config the sketch was written against. */
+interface LegacyConfig {
+  strategy: FanStrategyId;
+  name: string;
+  hint: string;
+  targetR: number;
+  macdWindow: boolean;
+  maxHoldBars: number | null;
+  continueEpisode: boolean;
+  breakevenAtR: number | null;
+  trailEma: 18 | 50 | null;
+  targetWindow: boolean;
+  trailPivot: boolean;
+  minAvgVol?: number;
+  minMarketCap?: number;
+  ema200RisingBars?: number;
+  startCash?: number;
+  riskPct?: number;
+  maxPositions?: number;
+  windowMonths?: number;
+}
+
+/** Nearest legacy sketch for a definition: its own id when it is a preset, else a shape-based guess. */
+export function legacyIdOf(def: StrategyDef): FanStrategyId {
+  if (isPresetId(def.id)) return def.id as FanStrategyId;
+  const types = def.steps.map((s) => s.type);
+  if (types.includes('fan_onset')) return 'onset';
+  if (types.includes('reversal_candle')) return types.some((t) => t === 'ema_cross') ? 'bunn_cont' : 'bunn_bounce';
+  if (types.includes('ema_tag')) return def.steps.some((s) => s.type === 'ema_tag' && s.ema === 18) ? 'tag18' : 'tag50';
+  if (types.includes('ema_cross')) return 'cross';
+  return 'tag50';
+}
+
+function legacyOf(config: FanBacktestConfig): LegacyConfig {
+  const def = config.strategy;
+  const exit = def.trade.exit;
+  const tracker = def.steps.find((s) => s.type === 'pullback' && s.mode === 'swing');
+  return {
+    strategy: legacyIdOf(def),
+    name: def.name || strategyNameOf(def.id),
+    hint: def.description ?? '',
+    targetR: exit.targetR,
+    macdWindow: exit.macdExit || def.steps.some((s) => s.type === 'macd_favorable'),
+    maxHoldBars: exit.maxHoldBars,
+    continueEpisode: tracker?.type === 'pullback' && tracker.mode === 'swing' ? tracker.rearmOnNewHigh : false,
+    breakevenAtR: exit.breakevenAtR,
+    trailEma: exit.trailEma,
+    targetWindow: exit.targetWindow,
+    trailPivot: exit.trailPivot,
+    minAvgVol: config.minAvgVol,
+    minMarketCap: config.minMarketCap,
+    ema200RisingBars: config.ema200RisingBars,
+    startCash: config.startCash,
+    riskPct: config.riskPct,
+    maxPositions: config.maxPositions,
+    windowMonths: config.windowMonths,
+  };
+}
+
+export function buildFanExample(config: FanBacktestConfig): FanExampleChartModel {
+  return buildLegacyExample(legacyOf(config));
+}
 
 export interface FanExamplePhase {
   id: string;
@@ -96,13 +162,13 @@ interface Seg {
   vol?: number;
 }
 
-function trailMode(config: FanBacktestConfig): 'ema50' | 'pivot' | null {
+function trailMode(config: LegacyConfig): 'ema50' | 'pivot' | null {
   if (config.trailPivot) return 'pivot';
   if (config.trailEma === 50) return 'ema50';
   return null;
 }
 
-function runLabel(config: FanBacktestConfig): string {
+function runLabel(config: LegacyConfig): string {
   const t = trailMode(config);
   if (t === 'ema50') return 'Trail 50-EMA';
   if (t === 'pivot') return 'Trail pivots';
@@ -110,19 +176,19 @@ function runLabel(config: FanBacktestConfig): string {
   return `Run to ${config.targetR}R`;
 }
 
-function runBars(config: FanBacktestConfig): number {
+function runBars(config: LegacyConfig): number {
   if (trailMode(config)) return 16;
   if (config.maxHoldBars != null) return Math.max(6, Math.min(config.maxHoldBars, 16));
   return 14;
 }
 
-function showContinuation(config: FanBacktestConfig): boolean {
+function showContinuation(config: LegacyConfig): boolean {
   if (config.continueEpisode === false) return false;
   return config.strategy === 'tag18' || config.strategy === 'tag50'
     || config.strategy === 'structure' || config.strategy === 'dual_ema';
 }
 
-function segsOf(config: FanBacktestConfig): Seg[] {
+function segsOf(config: LegacyConfig): Seg[] {
   const strat = config.strategy;
   const run: Seg = { id: 'trade', label: runLabel(config), fill: FILL.trade, n: runBars(config), close: 'run', vol: 1.15 };
   const tagShape: Shape = strat === 'dual_ema' ? 'dual' : strat === 'structure' ? 'rev' : strat === 'tag18' ? 'tag18' : 'tag50';
@@ -309,7 +375,7 @@ function ohlcOf(
   });
 }
 
-function accountNote(config: FanBacktestConfig): string {
+function accountNote(config: LegacyConfig): string {
   const cash = config.startCash ?? 10_000;
   const risk = config.riskPct ?? 1;
   const names = config.maxPositions ?? 4;
@@ -318,7 +384,7 @@ function accountNote(config: FanBacktestConfig): string {
   return `Swing account (not drawn): ${risk}% of $${cash.toLocaleString()} per 1R, max ${names} names, ${win}.`;
 }
 
-function filterNote(config: FanBacktestConfig): string | null {
+function filterNote(config: LegacyConfig): string | null {
   const bits: string[] = [];
   if ((config.ema200RisingBars ?? 0) > 0) {
     const n = config.ema200RisingBars ?? 21;
@@ -329,7 +395,7 @@ function filterNote(config: FanBacktestConfig): string | null {
   return bits.length ? `Universe filters: ${bits.join(', ')}.` : null;
 }
 
-export function buildFanExample(config: FanBacktestConfig): FanExampleChartModel {
+function buildLegacyExample(config: LegacyConfig): FanExampleChartModel {
   const segs = segsOf(config);
   const { phases, n, at } = layout(segs);
   const tag = at('tag');
@@ -443,7 +509,6 @@ export function buildFanExample(config: FanBacktestConfig): FanExampleChartModel
     });
   }
 
-  const strat = FAN_STRATEGIES.find((s) => s.id === config.strategy);
   const notes: string[] = [];
   if (config.macdWindow) {
     notes.push(trail
@@ -470,8 +535,8 @@ export function buildFanExample(config: FanBacktestConfig): FanExampleChartModel
     marks,
     levels,
     bands,
-    title: `Textbook: ${strat?.label ?? config.strategy}`,
-    caption: strat?.hint ?? '',
+    title: `Textbook: ${config.name}`,
+    caption: config.hint,
     notes,
   };
 }

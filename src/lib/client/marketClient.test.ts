@@ -6,6 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { httpMarketClient } from './marketClient';
+import { presetById } from '../strategy/presets';
 
 // A minimal Response-like for the JSON endpoints.
 function jsonRes(body: unknown, { ok = true, status = 200 }: { ok?: boolean; status?: number } = {}) {
@@ -104,14 +105,7 @@ function ndjsonRes(lines: string[]) {
 }
 
 describe('httpMarketClient.backtest', () => {
-  const cfg = {
-    strategy: 'onset' as const,
-    entry: 'match' as const,
-    targetR: 3,
-    macdWindow: false,
-    maxHoldBars: 60,
-    horizons: [5],
-  };
+  const cfg = { strategy: presetById('onset'), horizons: [5] };
 
   it('POSTs /backtest and parses NDJSON progress then result', async () => {
     const result = {

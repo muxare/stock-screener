@@ -6,7 +6,7 @@ import { runFanScreen } from './screen.ts';
 import type { FanRow } from './screen.ts';
 import { runFanSignals } from './signals.ts';
 import type { FanSignalRow } from './signals.ts';
-import type { FanBacktestConfig, FanStrategyId } from '../src/lib/fanBacktest.ts';
+import type { FanBacktestConfig } from '../src/lib/fanBacktest.ts';
 
 export interface ScreenResponse {
   universe: number;
@@ -31,7 +31,9 @@ export function handleScreen(universe: Stock[]): ScreenResponse {
 export interface SignalsResponse {
   universe: number;
   elapsedMs: number;
-  strategy: FanStrategyId;
+  /** Strategy id (preset or saved) and its display name. */
+  strategy: string;
+  strategyName: string;
   rows: FanSignalRow[];
 }
 
@@ -41,7 +43,8 @@ export function handleSignals(universe: Stock[], config: FanBacktestConfig): Sig
   return {
     universe: universe.length,
     elapsedMs: performance.now() - start,
-    strategy: config.strategy,
+    strategy: config.strategy.id,
+    strategyName: config.strategy.name,
     rows,
   };
 }

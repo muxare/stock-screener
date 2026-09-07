@@ -7,13 +7,11 @@ import {
   DEFAULT_FAN_FILTERS,
   filtersActive,
 } from '../lib/filters';
-import { FAN_STRATEGIES } from '../lib/fanBacktest';
+import { useMemo } from 'react';
+import { presets } from '../lib/strategy/presets';
 import { HButton } from './ui/Hoverable';
 
-const STRATEGY_OPTIONS = [
-  { label: 'Fan lists (no entry)', value: '' },
-  ...FAN_STRATEGIES.map((s) => ({ label: s.label, value: s.id })),
-];
+const PRESET_OPTIONS = presets().map((s) => ({ label: s.name, value: s.id }));
 
 const selectStyle = {
   padding: '7px 10px',
@@ -60,8 +58,15 @@ export function FilterBar() {
   const resetFilters = useScreener((s) => s.resetFilters);
   const signalStrategy = useScreener((s) => s.signalStrategy);
   const setSignalStrategy = useScreener((s) => s.setSignalStrategy);
+  const strategies = useScreener((s) => s.strategies);
   const active = filtersActive(filters);
   const entriesMode = signalStrategy !== '';
+
+  const strategyOptions = useMemo(() => [
+    { label: 'Fan lists (no entry)', value: '' },
+    ...PRESET_OPTIONS,
+    ...strategies.map((s) => ({ label: s.name, value: s.id })),
+  ], [strategies]);
 
   const sectorOptions = [
     { label: 'All sectors', value: '' },
@@ -73,8 +78,8 @@ export function FilterBar() {
       <FilterSelect
         label="Entry strategy"
         value={signalStrategy}
-        onChange={(v) => setSignalStrategy(v as typeof signalStrategy)}
-        options={STRATEGY_OPTIONS}
+        onChange={(v) => setSignalStrategy(v)}
+        options={strategyOptions}
         title="Show only names with a live open entry for the chosen strategy, with entry / stop / R / target. Leave off for the fan lists."
       />
       <FilterSelect

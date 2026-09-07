@@ -1,7 +1,8 @@
 # Strategy builder — implementation plan
 
-Status (2026-09-06): **plan approved, no code written yet.** Branch `feat/strategy-builder`
-exists off `main` (24fd177) with no commits. Resume at "Phase 1" below.
+Status (2026-09-07): **Phase 1 landed** on `feat/strategy-builder` — engine, presets, parser,
+trade simulator, server/client/store plumbing, minimal modal. Parity with the old engine is
+exact for all 8 presets (see "Parity baseline"). Resume at "Phase 2" below.
 
 ## Context
 
@@ -51,13 +52,16 @@ Step kinds are derived from the type: **candle** (consumes a bar, at most one pe
 **instant** (fires on the same bar as the previous step if true, else waits), **guard**
 (must be true on the bar the preceding step fired; a failing guard cancels that firing
 back to the nearest preceding candle step, no reset), **tracker** (fires instantly, then
-keeps state). Only `holdable` types accept `hold`.
+keeps state; **its bar is the swing high, so the chain ends on that bar** — no tag on the
+cross bar). Only `holdable` types accept `hold`. Each type is also **anchored** or not
+(its mark pins a specific bar: candles, the tracker, and `ema_cross`; `fan_up` and guards
+are not) — `fanBar / impulseBar / reactionBar` derive from anchored marks only.
 
 | type | kind | params | fires when |
 |---|---|---|---|
 | `fan_up` | instant, holdable | `mode: 'full' \| 'slow'` | 18>50>100>200 (full) or 50>100>200 (slow) |
 | `fan_onset` | candle | `entry: 'match' \| 'near'` | fan status transitions into `entry` (`classifyFanAtIndex`) |
-| `ema_cross` | candle, holdable | `fast 18, slow 50, dir up/down, require none/slow_fan/full_fan` | fast crosses slow (+ require at i). **Hold is lagged one bar**: up → `e18[i-1] > e50[i-1]`, down → `e18[i-1] < e50[i-1]`, so the opposite cross can fire before the hold breaks (needed by `bunn_cont`) |
+| `ema_cross` | **instant**, holdable, anchored | `fast 18, slow 50, dir up/down, require none/slow_fan/full_fan` | fast crosses slow (+ require at i). A cross is an indicator event, not a candle shape, so it does not consume the bar: a reversal candle or a tag can fire on the cross bar (this is what keeps `bunn_cont` at parity). **Hold is lagged one bar**: up → `e18[i-1] > e50[i-1]`, down → `e18[i-1] < e50[i-1]`, so the opposite cross can fire before the hold breaks; a later opposite `ema_cross` on the same pair *releases* the hold |
 | `pullback` mode `run` | candle | `minBars, lowerHighs, lowerLows, belowEma 18/50/100/null, belowField low/close, nextBarOnly` | run of ≥ minBars consecutive lower-high/lower-low bars whose last bar is below the EMA; `extends(i)` keeps the run alive while the next step waits |
 | `pullback` mode `swing` | tracker | `maxLowerLows (0–2), rearmOnNewHigh` | fires instantly on the previous step's bar (`swingHigh = h[i]`); tracks swing high / pullback low / lower-low count; count > max resets; new swing high re-arms after an entry (old `continueEpisode`) |
 | `price_vs_ema` | candle, holdable | `ema, field high/close/low, dir above/below` | field vs EMA on the bar |
@@ -101,7 +105,9 @@ the fill bar, one open trade per name (`lastExit`), `MIN_R_FRAC` rejection.
 Per bar, in this order:
 
 ```
-1. HOLDS  — for every fired step with hold: if !holds(i) → reset('hold', step); next bar
+1. HOLDS  — for every fired step with hold: if !holds(i) → reset('hold', step); the chain
+            still runs on this bar from step 1 (a reset never blinds the machine to the bar
+            that caused it — an 18/50 whipsaw re-crosses down on the bar the lagged hold breaks)
 2. TRACKER — if swing tracker active:
      h[i] >= swingHigh → swingHigh=h[i], swingHighBar=i, lowerLows=0, lastLow=pullbackLow=l[i],
                          armed = true if rearmOnNewHigh or not yet taken; move tracker mark; skipEvents=true
@@ -110,21 +116,22 @@ Per bar, in this order:
 3. PENDING buy stop — if set: h[i] >= buyStop → (i > lastExit && ema200 gate) ? enter(i, fill=buyStop) : drop;
      then afterEntryReposition(); else if maxWait exceeded → drop + reset; next bar (nothing else fires while pending)
 4. if i <= lastExit or skipEvents → next bar (track only during an open trade / new-high bar)
-5. MAXWAIT — cur step has maxWait and i - lastFireBar > maxWait:
-     prev step extends(i)? → move prev mark to i, lastFireBar=i, next bar   (pullback run keeps running)
-     else reset('max_wait', cur); next bar
-6. REFRESH — prev step has refresh and fires(i) → move its mark to i
-7. FIRE CHAIN — candleUsed=false; while cur:
+5. REFRESH — prev step has refresh and fires(i) → move its mark to i (does not consume the bar)
+6. FIRE CHAIN — candleUsed=false; while cur:
      cur is candle && candleUsed → break
      tracker present && !armed && cur.index > trackerIdx → break        (parked until re-arm)
      !cur.fires(i):
-        cur is guard → cancel back to nearest preceding candle step (truncate marks, cursor=k); break
+        cur is guard → cancel back to nearest preceding candle step (never past a live tracker); break
+        prev step extends(i) → move prev mark to i, lastFireBar=i; break   (pullback run keeps running)
+        cur.maxWait != null && i - lastFireBar >= maxWait → reset('max_wait', cur); break
         else break (wait)
      push mark {stepId, stepIndex, kind, bar:i, price}; candle → candleUsed=true
      tracker step → init tracker state; cursor++; lastFireBar=i
      cursor == steps.length → trigger(i); break
+     tracker step → break (its bar is the swing high)
 
-trigger(i): entry.mode=='close' → (ema200 gate) enter(i, fill=c[i]); afterEntryReposition()
+trigger(i): entry.mode=='close' → ema200 gate && enter(i, fill=c[i]) ? afterEntryReposition()
+                                   : cancel back to the nearest candle step (retry next bar)
             else pending = { trigBar:i, buyStop: h[i]+offset, maxWait }          (fills from i+1)
 enter():   stop = stopPriceOf(...); rSize = fill-stop; reject if !(rSize>0) || rSize/fill < MIN_R_FRAC
            target = fill + (exit.targetWindow ? 2.5 : exit.targetR) * rSize
@@ -140,10 +147,11 @@ stopPriceOf(): base = trigger_low ? l[trigBar] : mark_low ? l[mark(stepId).bar]
 `trace: true` records every reset/cancel `{ bar, step, reason }`; the example pane uses
 it to explain why a step never fired.
 
-Known non-parity with the old code (accepted): the Bunn presets checked MACD at the fill
-bar (now a guard on the trigger bar; not in the presets by default); the Bunn continuation
-no longer tests a bounce on the cross-down bar itself; a guard-cancelled tag no longer
-retries on the same bar.
+Known non-parity with the old code (accepted, none of it affects the default presets): the
+Bunn presets checked MACD at the fill bar (now a guard on the trigger bar; only when the
+MACD checkbox is on); a guard-cancelled tag no longer retries on the same bar (the guards in
+the presets are stateless, so this changes nothing measurable). Everything else — including
+a bounce on the cross-down bar and a resume on the bounce bar — is reproduced exactly.
 
 ### 3. Presets — `src/lib/strategy/presets.ts` (ids unchanged; names/hints from today's `FAN_STRATEGIES`)
 
@@ -254,7 +262,7 @@ before presets' own imports (hence the layering).
 Each phase green on `npm run typecheck && npm run test && npm run lint` before the next;
 one commit each.
 
-**Phase 1 — engine and plumbing.** Create `types.ts`, `primitives.ts`, `trade.ts`,
+**Phase 1 — engine and plumbing.** ✅ landed 2026-09-07. Create `types.ts`, `primitives.ts`, `trade.ts`,
 `steps.ts`, `presets.ts`, `parse.ts`, `engine.ts`. In `fanBacktest.ts` delete the 8
 detectors, `maybeEnter`, `scanStart`, `ENTRY_STORY`, `FAN_STRATEGIES`, `FanStrategyId`;
 rewrite `FanBacktestConfig`, `FanEntryEvent`, `explainFanTrade` (entry sentence from
@@ -296,6 +304,12 @@ Old `findFanEntries` output per strategy over the synthetic universe (`synthetic
 | dual_ema | 327 | 217 |
 | bunn_bounce | 6432 | 507 |
 | bunn_cont | 839 | 412 |
+
+**Result (2026-09-07, phase 1):** the new engine reproduces every row above exactly — same
+entry bars, entry prices, stops, exit bars and exit reasons for all 14,899 entries across the
+8 presets. Two engine details were needed to get `bunn_cont` from 737/839 to 839/839:
+`ema_cross` is an instant (non-consuming) step, and a hold reset lets the chain run on the
+same bar.
 
 The per-entry dump (`barIndex, entryPrice, stop, exitBar, exitReason, fanBar, impulseBar,
 reactionBar` per ticker) lived in the session scratchpad and is **not** kept. Regenerate
