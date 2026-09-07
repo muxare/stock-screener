@@ -116,7 +116,7 @@ export function FanBacktestModal() {
         </div>
 
         <div style={{
-          flex: 1, minHeight: 0, display: 'flex', flexWrap: 'wrap',
+          flex: 1, minHeight: 0, display: 'flex', flexWrap: 'nowrap',
           overflow: inspecting ? 'auto' : 'hidden',
         }}>
           {inspecting ? (
@@ -138,7 +138,7 @@ export function FanBacktestModal() {
           ) : (
             <>
           <div style={{
-            flex: '1 1 520px', minWidth: 0, overflowY: 'auto',
+            flex: '1 1 520px', minWidth: 0, minHeight: 0, overflowY: 'auto',
             padding: '18px 24px', display: 'flex', flexDirection: 'column', gap: 16,
           }}>
           <StrategyBuilder def={def} disabled={bt.running} />
@@ -529,7 +529,7 @@ export function FanBacktestModal() {
           <Disclosure note="Simulation is naive: stop wins ties with the target on the same bar; trail/breakeven update after the bar; no costs or gaps. Stops sit 0.25 ATR under the swing. The swing account sizes 1R from the initial stop, exits before same-day entries, and does not re-arm a name when a fill is skipped for cash or slots." />
           </div>
           <div style={{
-            flex: '1 1 460px', minWidth: 320, maxWidth: 560,
+            flex: '1 1 460px', minWidth: 320, maxWidth: 560, minHeight: 0,
             overflowY: 'auto', padding: '18px 20px 18px 18px',
             borderLeft: '1px solid #f0f1f2', background: '#fcfcfd',
           }}>
