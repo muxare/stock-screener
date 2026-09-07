@@ -13,7 +13,13 @@ import type {
   DatabaseEntry,
 } from './lib/client/marketClient';
 import type { StrategyDef, ExitSpec } from './lib/strategy/types';
-import { resolveStrategy } from './lib/strategy/presets';
+import { presetById, resolveStrategy } from './lib/strategy/presets';
+import {
+  browserStorage,
+  loadStrategies,
+  saveStrategies,
+  type StrategyStorage,
+} from './lib/strategy/storage';
 import {
   applyFanFilters,
   DEFAULT_FAN_FILTERS,
@@ -139,6 +145,10 @@ export interface ScreenerState {
   setFilter: <K extends keyof FanFilters>(key: K, value: FanFilters[K]) => void;
   resetFilters: () => void;
   setSignalStrategy: (strategy: string) => void;
+  /** Insert or replace a saved custom strategy and persist the list. */
+  saveStrategy: (def: StrategyDef) => void;
+  /** Forget a saved strategy; anything selecting it falls back. */
+  deleteStrategy: (id: string) => void;
   runSignals: () => Promise<void>;
   selectStock: (t: string) => void;
   closeDetail: () => void;
@@ -173,7 +183,10 @@ export interface ScreenerState {
   closeFanTradeReview: () => void;
 }
 
-export function makeScreenerState(client: MarketClient = httpMarketClient()): StateCreator<ScreenerState> {
+export function makeScreenerState(
+  client: MarketClient = httpMarketClient(),
+  storage: StrategyStorage | null = browserStorage(),
+): StateCreator<ScreenerState> {
   let screenGen = 0;
   let screenAbort: AbortController | null = null;
   let signalsGen = 0;
@@ -208,7 +221,7 @@ export function makeScreenerState(client: MarketClient = httpMarketClient()): St
 
     init: () => {
       if (get().ready) return;
-      set({ ready: true });
+      set({ ready: true, strategies: loadStrategies(storage) });
       void get().bootstrap();
       void get().runScreen();
       if (import.meta.env.DEV) {
@@ -277,6 +290,29 @@ export function makeScreenerState(client: MarketClient = httpMarketClient()): St
         return;
       }
       void get().runSignals();
+    },
+    saveStrategy: (def) => {
+      const saved: StrategyDef = structuredClone(def);
+      delete saved.builtin;
+      const list = get().strategies;
+      const at = list.findIndex((d) => d.id === saved.id);
+      const next = at >= 0 ? list.map((d, k) => (k === at ? saved : d)) : [...list, saved];
+      saveStrategies(storage, next);
+      set({ strategies: next });
+      // The scan is running the definition, not the name: re-run when the
+      // selected strategy is the one that just changed.
+      if (get().signalStrategy === saved.id) void get().runSignals();
+    },
+    deleteStrategy: (id) => {
+      const list = get().strategies;
+      const next = list.filter((d) => d.id !== id);
+      if (next.length === list.length) return;
+      saveStrategies(storage, next);
+      set({ strategies: next });
+      set((s) => (s.fanBacktest.config.strategy.id === id
+        ? { fanBacktest: { ...s.fanBacktest, config: { ...s.fanBacktest.config, strategy: presetById('tag50') } } }
+        : {}));
+      if (get().signalStrategy === id) get().setSignalStrategy('');
     },
     runSignals: async () => {
       const strategy = get().signalStrategy;

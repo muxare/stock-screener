@@ -4,6 +4,8 @@ import { makeScreenerState, type ScreenerState } from './store';
 import type { MarketClient, ScreenResp, SignalsRequest, SignalsResp, FanSignalRow } from './lib/client/marketClient';
 import { DEFAULT_FAN_BACKTEST_CONFIG, type FanEntryEvent, type FanBacktestResult } from './lib/fanBacktest';
 import type { InstrumentBars } from './lib/market';
+import { STRATEGIES_KEY, memoryStorage, type StrategyStorage } from './lib/strategy/storage';
+import { newCustomStrategy } from './lib/strategy/presets';
 
 function deferred<T>() {
   let resolve!: (v: T) => void;
@@ -76,8 +78,8 @@ function fakeClient(overrides: Partial<MarketClient> = {}): FakeClient {
   };
 }
 
-function makeStore(client: MarketClient) {
-  return create<ScreenerState>(makeScreenerState(client));
+function makeStore(client: MarketClient, storage: StrategyStorage | null = null) {
+  return create<ScreenerState>(makeScreenerState(client, storage));
 }
 
 describe('runScreen generation guard', () => {
@@ -328,6 +330,77 @@ describe('strategy editing in the backtest modal', () => {
     expect(after.trade.stop).toEqual(before.trade.stop);
     store.getState().setStrategyDef({ ...before, id: 'x', name: 'X' });
     expect(store.getState().fanBacktest.config.strategy.id).toBe('x');
+  });
+});
+
+describe('saved strategies', () => {
+  it('loads them from storage on init', () => {
+    const mine = { ...newCustomStrategy('Mine'), id: 'custom-1' };
+    const storage = memoryStorage(JSON.stringify([mine, { id: 'custom-broken', steps: [] }]));
+    const store = makeStore(fakeClient(), storage);
+    store.getState().init();
+    expect(store.getState().strategies.map((d) => d.id)).toEqual(['custom-1']);
+  });
+
+  it('saveStrategy appends, then replaces, and persists the list', () => {
+    const storage = memoryStorage();
+    const store = makeStore(fakeClient(), storage);
+    const mine = { ...newCustomStrategy('Mine'), id: 'custom-1' };
+    store.getState().saveStrategy(mine);
+    store.getState().saveStrategy({ ...mine, name: 'Renamed' });
+    store.getState().saveStrategy({ ...newCustomStrategy('Other'), id: 'custom-2' });
+    expect(store.getState().strategies.map((d) => d.name)).toEqual(['Renamed', 'Other']);
+    const persisted = JSON.parse(storage.getItem(STRATEGIES_KEY) ?? '[]') as { id: string; name: string }[];
+    expect(persisted.map((d) => d.id)).toEqual(['custom-1', 'custom-2']);
+  });
+
+  it('saveStrategy drops the builtin flag so the scan sends the definition', () => {
+    const store = makeStore(fakeClient());
+    store.getState().saveStrategy({ ...DEFAULT_FAN_BACKTEST_CONFIG.strategy, id: 'custom-1', name: 'From a preset' });
+    expect(store.getState().strategies[0].builtin).toBeUndefined();
+  });
+
+  it('deleteStrategy forgets it, resets the modal to tag50 and turns the signal scan off', () => {
+    const storage = memoryStorage();
+    const store = makeStore(fakeClient(), storage);
+    const mine = { ...newCustomStrategy('Mine'), id: 'custom-1' };
+    store.getState().saveStrategy(mine);
+    store.getState().setStrategyDef(mine);
+    store.setState({ signalStrategy: 'custom-1' });
+
+    store.getState().deleteStrategy('custom-1');
+    expect(store.getState().strategies).toEqual([]);
+    expect(JSON.parse(storage.getItem(STRATEGIES_KEY) ?? 'null')).toEqual([]);
+    expect(store.getState().fanBacktest.config.strategy.id).toBe('tag50');
+    expect(store.getState().signalStrategy).toBe('');
+    expect(store.getState().signals).toEqual([]);
+  });
+
+  it('deleteStrategy leaves everything alone for an unknown id', () => {
+    const store = makeStore(fakeClient());
+    const mine = { ...newCustomStrategy('Mine'), id: 'custom-1' };
+    store.getState().saveStrategy(mine);
+    store.getState().setStrategyDef(mine);
+    store.getState().deleteStrategy('nope');
+    expect(store.getState().strategies).toHaveLength(1);
+    expect(store.getState().fanBacktest.config.strategy.id).toBe('custom-1');
+  });
+
+  it('re-runs the scan when the strategy it is running is saved again', async () => {
+    const calls: SignalsRequest[] = [];
+    const client = fakeClient({
+      signals: vi.fn(async (body: SignalsRequest): Promise<SignalsResp> => {
+        calls.push(body);
+        return { universe: 1, elapsedMs: 1, strategy: 'custom-1', strategyName: 'Mine', rows: [] };
+      }),
+    });
+    const store = makeStore(client);
+    const mine = { ...newCustomStrategy('Mine'), id: 'custom-1' };
+    store.getState().saveStrategy(mine);
+    store.getState().setSignalStrategy('custom-1');
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    store.getState().saveStrategy({ ...mine, name: 'Mine v2' });
+    await vi.waitFor(() => expect(calls).toHaveLength(2));
   });
 });
 

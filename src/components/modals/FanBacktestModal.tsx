@@ -3,8 +3,7 @@ import { useScreener } from '../../store';
 import { HButton } from '../ui/Hoverable';
 import { Disclosure } from '../ui/Disclosure';
 import { fanEntryIndex } from '../../lib/fanBacktest';
-import { presets, presetById } from '../../lib/strategy/presets';
-import type { Step, StrategyDef } from '../../lib/strategy/types';
+import { StrategyBuilder } from './StrategyBuilder';
 import { AVG_VOL_PRESETS, MARKET_CAP_PRESETS, EMA200_RISING_PRESETS } from '../../lib/filters';
 import { FanTradeReview } from './FanTradeReview';
 import { FanExampleChart } from './FanExampleChart';
@@ -23,33 +22,6 @@ const card: React.CSSProperties = {
   background: '#fafbfb', border: '1px solid #eef0f1', borderRadius: 10, padding: '12px 14px',
 };
 const nf = (v: number, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '—');
-const PRESETS = presets();
-
-/** Append / remove the trailing 18–50 MACD guard step. */
-function withMacdGuard(def: StrategyDef, on: boolean): StrategyDef {
-  const steps: Step[] = def.steps.filter((st) => st.type !== 'macd_favorable');
-  if (on) {
-    const ids = new Set(steps.map((st) => st.id));
-    let id = 'macd';
-    for (let k = 2; ids.has(id); k++) id = `macd${k}`;
-    const guard: Step = { id, type: 'macd_favorable' };
-    steps.push(guard);
-  }
-  return { ...def, steps };
-}
-
-function trackerOf(def: StrategyDef): (Step & { type: 'pullback'; mode: 'swing' }) | null {
-  const t = def.steps.find((st) => st.type === 'pullback' && st.mode === 'swing');
-  return t && t.type === 'pullback' && t.mode === 'swing' ? t : null;
-}
-
-function withRearm(def: StrategyDef, on: boolean): StrategyDef {
-  return {
-    ...def,
-    steps: def.steps.map((st) => (st.type === 'pullback' && st.mode === 'swing' ? { ...st, rearmOnNewHigh: on } : st)),
-  };
-}
-
 function Stat({ k, v, sub }: { k: string; v: string; sub?: string }) {
   return (
     <div style={card}>
@@ -85,8 +57,6 @@ export function FanBacktestModal() {
   const bt = useScreener((s) => s.fanBacktest);
   const close = useScreener((s) => s.closeFanBacktest);
   const setCfg = useScreener((s) => s.setFanBacktestConfig);
-  const setDef = useScreener((s) => s.setStrategyDef);
-  const patchExit = useScreener((s) => s.patchExit);
   const run = useScreener((s) => s.runFanBacktest);
   const closeReview = useScreener((s) => s.closeFanTradeReview);
   const stepReview = useScreener((s) => s.stepFanTradeReview);
@@ -108,9 +78,6 @@ export function FanBacktestModal() {
   const usd2 = (v: number) => `${v < 0 ? '-' : ''}$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const def = bt.config.strategy;
   const exit = def.trade.exit;
-  const hint = def.description;
-  const macdOn = exit.macdExit || def.steps.some((st) => st.type === 'macd_favorable');
-  const tracker = trackerOf(def);
   const reason = (s: string) => s.replace(/_/g, ' ');
   const inspectIdx = inspecting && r ? fanEntryIndex(r.entries, inspecting) : -1;
   const pageStart = safePage * PAGE_SIZE;
@@ -174,107 +141,7 @@ export function FanBacktestModal() {
             flex: '1 1 520px', minWidth: 0, overflowY: 'auto',
             padding: '18px 24px', display: 'flex', flexDirection: 'column', gap: 16,
           }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 0.8fr 0.8fr', gap: 12 }}>
-            <div>
-              <label style={label}>Strategy</label>
-              <select
-                value={PRESETS.some((p) => p.id === def.id) ? def.id : '__custom'}
-                disabled={bt.running}
-                onChange={(e) => {
-                  if (e.target.value === '__custom') return;
-                  // Keep the exit management the user has dialled in; the preset brings its steps, entry and stop.
-                  const next = presetById(e.target.value);
-                  setDef({ ...next, trade: { ...next.trade, exit: { ...exit, fanExit: next.trade.exit.fanExit } } });
-                }}
-                style={field}
-              >
-                {PRESETS.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-                {!PRESETS.some((p) => p.id === def.id) && <option value="__custom">{def.name}</option>}
-              </select>
-            </div>
-            <div>
-              <label style={label}>Target</label>
-              <select
-                value={
-                  exit.trailPivot ? 'pivot'
-                    : exit.targetWindow ? 'window'
-                      : exit.trailEma === 50 ? 'trail50'
-                        : String(exit.targetR)
-                }
-                disabled={bt.running}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (v === 'trail50') patchExit({ trailPivot: false, targetWindow: false, trailEma: 50 });
-                  else if (v === 'window') patchExit({ trailPivot: false, trailEma: null, targetWindow: true });
-                  else if (v === 'pivot') patchExit({ trailEma: null, targetWindow: false, trailPivot: true });
-                  else patchExit({ trailPivot: false, targetWindow: false, trailEma: null, targetR: Number(v) });
-                }}
-                style={field}
-              >
-                <option value="2">2R</option>
-                <option value="3">3R</option>
-                <option value="4">4R</option>
-                <option value="window">2.5–3R window</option>
-                <option value="trail50">Trail 50-EMA</option>
-                <option value="pivot">Trail pivots</option>
-              </select>
-            </div>
-            <div>
-              <label style={label}>Max hold</label>
-              <select
-                value={exit.maxHoldBars == null ? '' : String(exit.maxHoldBars)}
-                disabled={bt.running}
-                onChange={(e) => patchExit({ maxHoldBars: e.target.value === '' ? null : Number(e.target.value) })}
-                style={field}
-              >
-                <option value="10">10 bars</option>
-                <option value="15">15 bars</option>
-                <option value="20">20 bars</option>
-                <option value="40">40 bars</option>
-                <option value="">Until exit</option>
-              </select>
-            </div>
-          </div>
-
-          {hint && <div style={{ fontSize: 12.5, color: '#6b7280', marginTop: -8 }}>{hint}</div>}
-
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#5b6168' }}>
-            <input
-              type="checkbox"
-              checked={macdOn}
-              disabled={bt.running}
-              onChange={(e) => {
-                const on = e.target.checked;
-                const next = withMacdGuard(def, on);
-                setDef({ ...next, trade: { ...next.trade, exit: { ...next.trade.exit, macdExit: on } } });
-              }}
-            />
-            {exit.trailEma || exit.trailPivot
-              ? '18–50 MACD window (entry filter only; does not cut a trailed trade)'
-              : '18–50 MACD window (entry filter + exit when line < signal)'}
-          </label>
-
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#5b6168' }}>
-            <input
-              type="checkbox"
-              checked={tracker?.rearmOnNewHigh === true}
-              disabled={bt.running || !tracker}
-              onChange={(e) => setDef(withRearm(def, e.target.checked))}
-            />
-            Continuation pullbacks (re-arm after a new swing high)
-          </label>
-
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#5b6168' }}>
-            <input
-              type="checkbox"
-              checked={exit.breakevenAtR != null && exit.breakevenAtR > 0}
-              disabled={bt.running}
-              onChange={(e) => patchExit({ breakevenAtR: e.target.checked ? 1 : null })}
-            />
-            Move stop to breakeven at 1R
-          </label>
+          <StrategyBuilder def={def} disabled={bt.running} />
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
             <div>

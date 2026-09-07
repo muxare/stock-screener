@@ -1,10 +1,10 @@
 # Strategy builder — implementation plan
 
-Status (2026-09-07): **Phases 1–3 landed** on `feat/strategy-builder` — engine, presets, parser,
-trade simulator, server/client/store plumbing, minimal modal, one mark per step on the trade
-review chart, and the generated example (`strategy/example.ts` + a generalized
-`FanExampleChart`). Parity with the old engine is exact for all 8 presets (see "Parity baseline").
-Resume at "Phase 4" below.
+Status (2026-09-07): **complete — all four phases landed** on `feat/strategy-builder`: engine,
+presets, parser, trade simulator, server/client/store plumbing, one mark per step on the trade
+review chart, the generated example (`strategy/example.ts` + a generalized `FanExampleChart`), and
+the builder UI with localStorage persistence. Parity with the old engine is exact for all 8 presets
+(see "Parity baseline"). The diary entry is `docs/development-diary.md`, 2026-09-07.
 
 ## Context
 
@@ -294,10 +294,19 @@ false on the trigger bar" — a pullback into the 50 always leaves the 18–50 h
 which is the documented guard-vs-fill-bar non-parity, so the pane says so rather than drawing a
 trade the engine would not take.
 
-**Phase 4 — builder UI, persistence, docs.** `StrategyBuilder.tsx`, `storage.ts`, store
-actions, `FilterBar` options, development-diary entry (`## 2026-09-xx — Strategy
-builder replaces the fixed fan strategies`, mermaid `StrategyDef → parse → engine →
-{/backtest, /signals, example}` flow, "How to test").
+**Phase 4 — builder UI, persistence, docs.** ✅ landed 2026-09-07. `StrategyBuilder.tsx` replaces the
+strategy select block in `FanBacktestModal.tsx` (picker with Save / Save as / Reset / Delete, step
+cards generated from each type's `paramSchema`, add-step menu, Entry / Stop / Exit rows that absorbed
+the modal's Target, Max hold, breakeven and MACD controls); `storage.ts` (`stockScreener.strategies.v1`,
+injectable storage, every entry re-parsed on load, preset ids and duplicates dropped); store
+`saveStrategy` / `deleteStrategy` and `makeScreenerState(client, storage)` loading the list in `init`;
+`FilterBar` already listed saved strategies from phase 1. Two behaviours the plan left open were
+settled here: a preset is never overwritten (an edited preset is marked *edited* and only **Save as**
+keeps it), and deleting the selected strategy resets the modal to `tag50` and the filter bar to the
+fan lists. Removing a step that the stop anchored on (`mark_low`) falls back to `setup_low` so the
+def stays parseable. Verified in the browser: all 8 presets draw an example with no failure, a
+composed 3-step strategy backtests (7 entries), survives a reload, scans as a definition through
+`/signals`, and deletes cleanly; a step that cannot fire names itself in the right pane.
 
 ## Parity baseline (captured before any engine change)
 

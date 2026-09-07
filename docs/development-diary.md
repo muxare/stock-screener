@@ -1,5 +1,60 @@
 # Development diary
 
+## 2026-09-07 — Strategy builder replaces the fixed fan strategies
+
+### What changed
+A strategy is no longer one of eight hardcoded ids with its own detector in `fanBacktest.ts`. It is a
+**`StrategyDef`**: an ordered state machine of parameterized steps plus three editable trade rows
+(entry / stop / exit). The eight former strategies are built-in presets made of steps, and one engine
+serves the backtest, the live signal scan and the schematic example. This entry closes the four-phase
+plan in `docs/strategy-builder-plan.md`.
+
+- `src/lib/strategy/` — `types.ts` (the model), `primitives.ts` (predicates moved verbatim out of
+  `fanBacktest.ts`), `steps.ts` (the step-type registry: kind, holdability, defaults, a param schema
+  that drives *both* the parser's coercion and the builder's controls, and `compile`), `engine.ts`
+  (walks the steps bar by bar and records one mark per step), `trade.ts` (the R simulator, driven by
+  an `ExitSpec`), `presets.ts`, `parse.ts` (shared by server and localStorage), `example.ts`
+  (synthesises a sketch and runs the **real** engine over it) and `storage.ts`.
+- The backtest modal's strategy `<select>` is now `StrategyBuilder.tsx`: preset / saved picker with
+  Save · Save as · Reset · Delete, step cards (type, generated params, hold, max wait, reorder,
+  remove), an add-step menu, and the Entry / Stop / Exit rows — the Target, Max hold, breakeven and
+  MACD controls moved in from the modal. Custom strategies are saved in localStorage under
+  `stockScreener.strategies.v1` and are listed next to the presets in the filter bar; the signal scan
+  sends a preset as its id and a saved strategy as its definition.
+- Steps are typed by **kind**, which is what makes the machine composable: `candle` consumes a bar,
+  `instant` fires on the same bar as the step before it, `guard` must hold on the bar the previous
+  step fired, `tracker` fires once and then follows the swing high. A step marked *hold* is an
+  invariant — when it breaks, the machine resets to step 1.
+- Parity is exact: the new engine reproduces the old one's 14,899 entries across all eight presets —
+  same entry bar, price, stop, exit bar and exit reason.
+
+```mermaid
+flowchart LR
+  B[StrategyBuilder] -->|StrategyDef| S[(localStorage)]
+  B --> P[parseStrategyDef]
+  S --> P
+  H["POST /backtest · /signals"] --> P
+  P --> E[strategy/engine]
+  E --> BT[fanBacktest: scan · stats · cash book]
+  E --> SG[fanSignals: open entries]
+  E --> EX[strategy/example: schematic + per-step checks]
+```
+
+### How to test
+- `npm run typecheck`, `npm run test`, `npm run lint`
+- `npm run dev`, then **Backtest**: every preset draws an example with one mark per step and a ✓ list;
+  pick *New strategy…*, edit the steps, watch the schematic redraw, **Save**, reload — it is still in
+  the picker and in the filter bar's *Entry strategy* list; selecting it there scans the universe with
+  its definition; **Delete** falls back to the fan lists. Editing a preset marks it *edited* and can
+  only be kept via **Save as**. Add a step that cannot fire (e.g. *high below the 200-EMA* after a
+  50-EMA tag) and the right pane names the step that never completed.
+- ```bash
+  curl -s localhost:8787/backtest -H 'content-type: application/json' -d '{"strategy":"tag50","horizons":[5]}' | tail -1 | head -c 200
+  curl -s localhost:8787/backtest -H 'content-type: application/json' -d '{"strategy":{"steps":[]}}'   # 400 JSON
+  ```
+
+---
+
 ## 2026-09-04 — Retire the rule engine and the DAG layer
 
 ### What changed
