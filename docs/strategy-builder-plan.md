@@ -1,9 +1,10 @@
 # Strategy builder — implementation plan
 
-Status (2026-09-07): **Phases 1–2 landed** on `feat/strategy-builder` — engine, presets, parser,
-trade simulator, server/client/store plumbing, minimal modal, and one mark per step on the trade
-review chart. Parity with the old engine is exact for all 8 presets (see "Parity baseline").
-Resume at "Phase 3" below.
+Status (2026-09-07): **Phases 1–3 landed** on `feat/strategy-builder` — engine, presets, parser,
+trade simulator, server/client/store plumbing, minimal modal, one mark per step on the trade
+review chart, and the generated example (`strategy/example.ts` + a generalized
+`FanExampleChart`). Parity with the old engine is exact for all 8 presets (see "Parity baseline").
+Resume at "Phase 4" below.
 
 ## Context
 
@@ -282,8 +283,16 @@ fields from `def.trade.exit`) so it compiles until phase 3.
 `event.marks` (dashed line + glyph per kind + label), setup band from first candle mark
 to entry, legend built from marks; clamp in `tradeChartRange`.
 
-**Phase 3 — generated example.** `example.ts` + generalized `FanExampleChart.tsx`;
-delete `fanExample.ts` and `fanExample.test.ts`.
+**Phase 3 — generated example.** ✅ landed 2026-09-07. `example.ts` + generalized
+`FanExampleChart.tsx`; `fanExample.ts` and `fanExample.test.ts` deleted. The sketch grows a
+236-bar warm-up ramp (+0.15%/bar) and then one sketcher per step type, and the real engine runs
+over it twice: the first pass stops after the fill so the entry / stop / target are known, then
+the sketch is cut back to the fill bar and an exit run shaped by the `ExitSpec` is appended.
+`runStrategy` gained `reached` (the deepest step that ever fired) so the pane can name the step
+that never completed. Known gap: `bunn_bounce` with the MACD checkbox on reports "the guard was
+false on the trigger bar" — a pullback into the 50 always leaves the 18–50 histogram negative,
+which is the documented guard-vs-fill-bar non-parity, so the pane says so rather than drawing a
+trade the engine would not take.
 
 **Phase 4 — builder UI, persistence, docs.** `StrategyBuilder.tsx`, `storage.ts`, store
 actions, `FilterBar` options, development-diary entry (`## 2026-09-xx — Strategy

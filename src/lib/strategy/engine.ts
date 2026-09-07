@@ -47,6 +47,8 @@ export interface StrategyTraceEntry {
 export interface StrategyRun {
   entries: FanEntryEvent[];
   trace: StrategyTraceEntry[];
+  /** Deepest step that ever fired and the bar it fired on. `stepIndex` is -1 when nothing fired. */
+  reached: { stepIndex: number; bar: number };
 }
 
 interface Tracker {
@@ -110,8 +112,9 @@ export function runStrategy(
   const start = scanStart(def);
   const entries: FanEntryEvent[] = [];
   const trace: StrategyTraceEntry[] = [];
+  const reached = { stepIndex: -1, bar: -1 };
   // Leave one bar after the fill so the trade can be managed.
-  if (L < start + 2 || def.steps.length === 0) return { entries, trace };
+  if (L < start + 2 || def.steps.length === 0) return { entries, trace, reached };
 
   const e18 = ema(c, 18);
   const e50 = ema(c, 50);
@@ -315,6 +318,7 @@ export function runStrategy(
         break;
       }
       marks.push(markOf(cur, i));
+      if (cur.index >= reached.stepIndex) { reached.stepIndex = cur.index; reached.bar = i; }
       if (cur.kind === 'candle') candleUsed = true;
       if (cur.tracker) {
         tracker = {
@@ -338,7 +342,7 @@ export function runStrategy(
     }
   }
 
-  return { entries, trace };
+  return { entries, trace, reached };
 }
 
 export function findStrategyEntries(
