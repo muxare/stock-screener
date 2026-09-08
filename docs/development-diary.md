@@ -1,5 +1,57 @@
 # Development diary
 
+## 2026-09-08 — Screener parity phase 1: columns and sorting
+
+### What changed
+The screener tables stop being two hand-written CSS grids with a frozen column set. One
+`ScreenTable` now renders both the fan lists and the entries list, driven by a **field
+registry**, and every row carries an **indicator snapshot** so RSI, Stoch RSI, volatility
+and performance are screenable instead of chart-only. Phase 1 of
+`docs/screener-parity-plan.md`.
+
+- `src/lib/screen/snapshot.ts` — `IndicatorSnapshot` (volume, RSI 14, Stoch %K/%D, 1M/3M
+  performance, ATR%, 52-week high/low) built from the closes, volumes and highs/lows the
+  subject already holds. `FanRow` and `FanSignalRow` both gain `snapshot`, so `/screen` and
+  `/signals` carry it with no extra round trip. **NaN means "not computable"** — never a
+  placeholder 50 — so short histories sort last instead of looking neutral. Stoch RSI stays
+  missing until its whole 14-bar RSI window is real (2 × the period), which is where the old
+  `?? 50` fallback used to fabricate a zero.
+- `src/lib/screen/fields.ts` — one declaration per field drives the header label, width,
+  alignment, cell format, sort value and help topic. Units live in the field's `kind`:
+  `percent` is already in percent units (`changePct`), `ratio` is a fraction rendered as a
+  percent (`worstGap`, perf, ATR%), `compact` is 1.2M / 3.4B. Adding a column is adding a row
+  to the list; `GRID` / `SIG_GRID` are gone and the grid template is computed from the
+  visible columns.
+- `src/lib/screen/sort.ts` — `sortRows` over an injected accessor, so the entries list's own
+  columns (entry, stop, R, target window, age) sort through the same code as the fields.
+  Missing values sink to the bottom in **both** directions; ties break on the ticker.
+- `src/components/table/ScreenTable.tsx` + `ColumnChooser.tsx` — 34 px rows (was 44), a
+  sticky header that sorts on click, an `extra` block for the signal-only columns placed
+  after `Chg`, and a ⚙ checklist per list. Wider column sets scroll sideways inside the
+  panel. Column and sort state live in `store.ts` per view (`fan`, `entries`); the defaults
+  and the toggle are pure functions in `lib/screen/columns.ts`.
+- `atr14` moved from `strategy/primitives.ts` to `indicators.ts` (re-exported, so the engine's
+  imports are unchanged) — the snapshot needed it without importing the strategy layer.
+  `fmtCompact` moved to `lib/screen/format.ts`, likewise re-exported from `lib/filters.ts`.
+- New help cards: `rsi`, `stoch-rsi`, `volume`, `rel-vol`, `perf`, `atr-pct`, `week52`,
+  `column-chooser`. The `Stoch RSI` alias moved from the backtest panel's card to the
+  indicator's, where it belongs.
+- Removed the unused `@tanstack/react-table` dependency.
+
+The filter bar, the six dropdowns and the two-panel layout are untouched — those are phases
+2 and 3.
+
+### How to test
+- `npm run test` — new `lib/screen/{snapshot,sort,fields}.test.ts`, snapshot assertions in
+  `server/screen.test.ts` and `lib/fanSignals.test.ts`, sort/column state in `src/store.test.ts`
+- `npm run dev` — sort the fan list by Rel vol, then by RSI; the arrow shows on both panels
+  (they share the fan view's sort); hide the EMA columns from the ⚙ and Gap / RSI / Stoch
+  come into view; the header stays pinned while the list scrolls
+- `curl -s -X POST http://localhost:8787/screen -H 'content-type: application/json' -d '{}'`
+  — every row carries `snapshot`
+
+---
+
 ## 2026-09-07 — Strategy builder replaces the fixed fan strategies
 
 ### What changed

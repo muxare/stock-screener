@@ -5,6 +5,7 @@ import { runFanScreen } from './screen.ts';
 import { handleScreen } from './handlers.ts';
 import { createScreenServer } from './index.ts';
 import { classifyCloses } from '../src/lib/fan.ts';
+import { EMPTY_SNAPSHOT } from '../src/lib/screen/snapshot.ts';
 
 const store = createUniverseStore(syntheticProvider(7));
 
@@ -47,6 +48,22 @@ describe('EMA-fan screen over the full universe', () => {
     }
     for (let i = 1; i < res.near.length; i++) {
       expect(res.near[i - 1].worstGap).toBeGreaterThanOrEqual(res.near[i].worstGap);
+    }
+  });
+
+  it('carries an indicator snapshot on every row', () => {
+    const res = handleScreen(store.get());
+    const rows = [...res.matches, ...res.near];
+    expect(rows.length).toBeGreaterThan(0);
+    const keys = Object.keys(EMPTY_SNAPSHOT).sort() as (keyof typeof EMPTY_SNAPSHOT)[];
+    for (const r of rows) {
+      expect(Object.keys(r.snapshot).sort()).toEqual(keys);
+      // The synthetic universe has full OHLCV and long histories, so every
+      // number is real, not a warm-up NaN.
+      for (const k of keys) expect(Number.isFinite(r.snapshot[k]), `${r.ticker}.${k}`).toBe(true);
+      expect(r.snapshot.rsi14).toBeGreaterThanOrEqual(0);
+      expect(r.snapshot.rsi14).toBeLessThanOrEqual(100);
+      expect(r.snapshot.hi52).toBeGreaterThanOrEqual(r.snapshot.lo52);
     }
   });
 });

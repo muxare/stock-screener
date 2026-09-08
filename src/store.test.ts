@@ -6,6 +6,8 @@ import { DEFAULT_FAN_BACKTEST_CONFIG, type FanEntryEvent, type FanBacktestResult
 import type { InstrumentBars } from './lib/market';
 import { STRATEGIES_KEY, memoryStorage, type StrategyStorage } from './lib/strategy/storage';
 import { newCustomStrategy } from './lib/strategy/presets';
+import { EMPTY_SNAPSHOT } from './lib/screen/snapshot';
+import { DEFAULT_COLUMNS } from './lib/screen/columns';
 
 function deferred<T>() {
   let resolve!: (v: T) => void;
@@ -21,7 +23,7 @@ function screenResp(tickers: string[]): ScreenResp {
     matches: tickers.map((t) => ({
       ticker: t, name: t, sector: 'Tech', price: 1, changePct: 0,
       ema18: 4, ema50: 3, ema100: 2, ema200: 1, ema200Ago: { 21: 0.8, 63: 0.6, 105: 0.4 },
-      worstGap: 0.1, sparkline: [1, 2],
+      worstGap: 0.1, sparkline: [1, 2], snapshot: EMPTY_SNAPSHOT,
       avgVol20: 500_000, relVol: 1, marketCap: 1e9,
     })),
     near: [],
@@ -118,8 +120,8 @@ describe('fan filters', () => {
     const store = makeStore(client);
     store.setState({
       matches: [
-        { ticker: 'A', name: 'A', sector: 'Tech', price: 50, changePct: 0, ema18: 4, ema50: 3, ema100: 2, ema200: 1, ema200Ago: { 21: 0.8, 63: 0.6, 105: 0.4 }, worstGap: 0.1, sparkline: [], avgVol20: 2e6, relVol: 1, marketCap: 10e9 },
-        { ticker: 'B', name: 'B', sector: 'Energy', price: 8, changePct: 0, ema18: 4, ema50: 3, ema100: 2, ema200: 1, ema200Ago: { 21: 0.8, 63: 0.6, 105: 0.4 }, worstGap: 0.1, sparkline: [], avgVol20: 80_000, relVol: 1, marketCap: 200e6 },
+        { ticker: 'A', name: 'A', sector: 'Tech', price: 50, changePct: 0, ema18: 4, ema50: 3, ema100: 2, ema200: 1, ema200Ago: { 21: 0.8, 63: 0.6, 105: 0.4 }, worstGap: 0.1, sparkline: [], snapshot: EMPTY_SNAPSHOT, avgVol20: 2e6, relVol: 1, marketCap: 10e9 },
+        { ticker: 'B', name: 'B', sector: 'Energy', price: 8, changePct: 0, ema18: 4, ema50: 3, ema100: 2, ema200: 1, ema200Ago: { 21: 0.8, 63: 0.6, 105: 0.4 }, worstGap: 0.1, sparkline: [], snapshot: EMPTY_SNAPSHOT, avgVol20: 80_000, relVol: 1, marketCap: 200e6 },
       ],
       near: [],
     });
@@ -129,6 +131,46 @@ describe('fan filters', () => {
     expect(store.getState().filteredMatches()).toEqual([]);
     store.getState().resetFilters();
     expect(store.getState().filteredMatches()).toHaveLength(2);
+  });
+});
+
+describe('sort and columns', () => {
+  it('defaults to worst-gap first for the fan lists and freshest for entries', () => {
+    const store = makeStore(fakeClient());
+    expect(store.getState().sort.fan).toEqual({ field: 'worstGap', dir: 'desc' });
+    expect(store.getState().sort.entries).toEqual({ field: 'barsAgo', dir: 'asc' });
+    expect(store.getState().columns.fan).toEqual(DEFAULT_COLUMNS.fan);
+  });
+
+  it('keeps each view\'s sort and columns independent', () => {
+    const store = makeStore(fakeClient());
+    store.getState().setSort('fan', { field: 'rsi14', dir: 'asc' });
+    store.getState().toggleColumn('entries', 'rsi14');
+    expect(store.getState().sort.fan).toEqual({ field: 'rsi14', dir: 'asc' });
+    expect(store.getState().sort.entries).toEqual({ field: 'barsAgo', dir: 'asc' });
+    expect(store.getState().columns.entries).not.toContain('rsi14');
+    expect(store.getState().columns.fan).toContain('rsi14');
+  });
+
+  it('survives a re-run of the screen', async () => {
+    const client = fakeClient();
+    const store = makeStore(client);
+    store.getState().setSort('fan', { field: 'relVol', dir: 'desc' });
+    store.getState().toggleColumn('fan', 'ema18');
+    const p = store.getState().runScreen();
+    client.screenCalls[0].resolve(screenResp(['AAA', 'BBB']));
+    await p;
+    expect(store.getState().sort.fan).toEqual({ field: 'relVol', dir: 'desc' });
+    expect(store.getState().columns.fan).not.toContain('ema18');
+  });
+
+  it('resets a view back to the default column set', () => {
+    const store = makeStore(fakeClient());
+    store.getState().toggleColumn('fan', 'ema18');
+    store.getState().toggleColumn('fan', 'atrPct');
+    expect(store.getState().columns.fan).not.toEqual(DEFAULT_COLUMNS.fan);
+    store.getState().resetColumns('fan');
+    expect(store.getState().columns.fan).toEqual(DEFAULT_COLUMNS.fan);
   });
 });
 
@@ -244,7 +286,7 @@ function signalRow(ticker: string): FanSignalRow {
     strategy: 'tag50', entryDate: '2026-01-05', barsAgo: 1,
     entryPrice: 50, stopPrice: 48, riskPerShare: 2, riskPct: 4,
     targetLoR: 2.5, targetHiR: 3, targetLoPrice: 55, targetHiPrice: 56, openR: 0.3,
-    avgVol20: 1e6, marketCap: 2e9, sparkline: [],
+    avgVol20: 1e6, marketCap: 2e9, sparkline: [], snapshot: EMPTY_SNAPSHOT,
   };
 }
 

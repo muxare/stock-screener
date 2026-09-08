@@ -1,5 +1,9 @@
 import type { Ema200Ago, FanRow } from './fan';
 
+// Moved to screen/format.ts (the table and the filter chips share it); still
+// exported from here for the existing callers.
+export { fmtCompact } from './screen/format';
+
 export interface FanFilters {
   minAvgVol: number;
   minMarketCap: number;
@@ -84,15 +88,4 @@ export function filterFanRows(rows: FanRow[], search: string, f: FanFilters): Fa
   const filtered = applyFanFilters(rows, f);
   if (!q) return filtered;
   return filtered.filter((r) => r.ticker.toLowerCase().includes(q) || r.name.toLowerCase().includes(q));
-}
-
-/** Compact human label: 1.2M, 3.4B, etc. */
-export function fmtCompact(n: number): string {
-  if (!Number.isFinite(n)) return '—';
-  const abs = Math.abs(n);
-  if (abs >= 1e12) return (n / 1e12).toFixed(1).replace(/\.0$/, '') + 'T';
-  if (abs >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
-  if (abs >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
-  if (abs >= 1e3) return (n / 1e3).toFixed(0) + 'K';
-  return String(Math.round(n));
 }

@@ -5,149 +5,81 @@ import { FAN_ENTER_LOOKBACK, FAN_NEAR_MARGIN } from '../lib/fan';
 import { filtersActive, filterFanRows } from '../lib/filters';
 import { filterSignalRows, fmtTargetWindow } from '../lib/fanSignals';
 import { strategyNameOf } from '../lib/strategy/presets';
-import { HDiv } from './ui/Hoverable';
-import { Spark } from './ui/Spark';
+import type { FieldId } from '../lib/screen/fields';
+import type { SortState } from '../lib/screen/sort';
+import type { ScreenView } from '../lib/screen/columns';
+import { ScreenTable, type ExtraColumn } from './table/ScreenTable';
+import { ColumnChooser } from './table/ColumnChooser';
 import { Disclosure } from './ui/Disclosure';
 
-const GRID = '132px 1fr 88px 72px 86px 86px 86px 86px 84px 92px';
-const col = (c: number) => (c >= 0 ? '#06a96b' : '#e23d3d');
 const fin = (v: number) => Number.isFinite(v);
 const nf = (v: number, d: number, suf = '') => (fin(v) ? v.toFixed(d) + suf : '—');
-const gapPct = (g: number) => (fin(g) ? (g * 100).toFixed(2) + '%' : '—');
 
-const HEAD = ['Ticker', 'Name', 'Last', 'Chg', 'EMA18', 'EMA50', 'EMA100', 'EMA200', 'Gap', '40d'];
-const HEAD_HELP: Record<string, string> = {
-  Chg: 'change-pct', EMA18: 'ema', EMA50: 'ema', EMA100: 'ema', EMA200: 'ema', Gap: 'worst-gap', '40d': 'sparkline',
-  Entry: 'entry', Stop: 'stop', 'R (risk)': 'r', 'Target window': 'target-window', Age: 'entry-age',
-};
+/** The entries list's own columns — everything derived from the simulated trade. */
+const SIGNAL_COLUMNS: ExtraColumn<FanSignalRow>[] = [
+  {
+    id: 'entryPrice', label: 'Entry', width: '78px', help: 'entry',
+    sortValue: (r) => r.entryPrice,
+    render: (r) => <span style={{ fontWeight: 600 }}>{nf(r.entryPrice, 2)}</span>,
+  },
+  {
+    id: 'stopPrice', label: 'Stop', width: '78px', help: 'stop',
+    sortValue: (r) => r.stopPrice,
+    render: (r) => <span style={{ color: '#b3261a' }}>{nf(r.stopPrice, 2)}</span>,
+  },
+  {
+    id: 'riskPerShare', label: 'R (risk)', width: '104px', help: 'r',
+    sortValue: (r) => r.riskPct,
+    render: (r) => (
+      <>{nf(r.riskPerShare, 2)}<span style={{ color: '#98a0a8' }}> · {nf(r.riskPct, 1)}%</span></>
+    ),
+  },
+  {
+    id: 'targetWindow', label: 'Target window', width: '176px', help: 'target-window',
+    sortValue: (r) => r.targetLoPrice,
+    render: (r) => <span style={{ color: '#06865a', fontWeight: 600 }}>{fmtTargetWindow(r)}</span>,
+  },
+  {
+    id: 'barsAgo', label: 'Age', width: '56px', help: 'entry-age',
+    sortValue: (r) => r.barsAgo,
+    render: (r) => <span style={{ color: '#8b9298' }}>{r.barsAgo === 0 ? 'today' : `${r.barsAgo}d`}</span>,
+  },
+];
 
-function FanTable({
-  rows,
-  selected,
-  onSelect,
-  empty,
+/** The ⚙ + the sort hint shared by every list header. */
+function ListHeader({
+  view,
+  helpId,
+  title,
+  subtitle,
 }: {
-  rows: FanRow[];
-  selected: string | null;
-  onSelect: (t: string) => void;
-  empty: string;
+  view: ScreenView;
+  helpId: string;
+  title: string;
+  subtitle: React.ReactNode;
 }) {
-  if (rows.length === 0) {
-    return (
-      <div style={{ padding: '36px 20px', color: '#98a0a8', fontSize: 13, textAlign: 'center' }}>{empty}</div>
-    );
-  }
+  const columns = useScreener((s) => s.columns[view]);
+  const toggleColumn = useScreener((s) => s.toggleColumn);
+  const resetColumns = useScreener((s) => s.resetColumns);
   return (
-    <div>
-      <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: 0, padding: '0 16px', height: 34, alignItems: 'center', borderBottom: '1px solid #eef0f1', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#98a0a8' }}>
-        {HEAD.map((h, i) => (
-          <div key={h} data-help={HEAD_HELP[h]} style={{ textAlign: i === 0 || i === 1 ? 'left' : 'right' }}>{h}</div>
-        ))}
+    <header style={{ padding: '12px 14px 9px', borderBottom: '1px solid #f0f1f2', display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div data-help={helpId} style={{ fontSize: 15, fontWeight: 700 }}>{title}</div>
+        <div style={{ fontSize: 12, color: '#8b9298', marginTop: 3 }}>{subtitle}</div>
       </div>
-      {rows.map((r) => {
-        const active = selected === r.ticker;
-        return (
-          <HDiv
-            key={r.ticker}
-            onClick={() => onSelect(r.ticker)}
-            title={`${r.ticker} — click for candlestick chart`}
-            style={{
-              display: 'grid',
-              gridTemplateColumns: GRID,
-              gap: 0,
-              padding: '0 16px',
-              height: 44,
-              alignItems: 'center',
-              cursor: 'pointer',
-              background: active ? '#eafaf3' : '#fff',
-              borderBottom: '1px solid #f4f5f6',
-              fontSize: 13,
-              fontVariantNumeric: 'tabular-nums',
-            }}
-            hoverStyle={{ background: active ? '#eafaf3' : '#f7f8f8' }}
-          >
-            <div style={{ fontWeight: 700 }}>{r.ticker}</div>
-            <div style={{ color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</div>
-            <div style={{ textAlign: 'right' }}>{nf(r.price, 2)}</div>
-            <div style={{ textAlign: 'right', color: col(r.changePct), fontWeight: 600 }}>{nf(r.changePct, 2, '%')}</div>
-            <div style={{ textAlign: 'right' }}>{nf(r.ema18, 2)}</div>
-            <div style={{ textAlign: 'right' }}>{nf(r.ema50, 2)}</div>
-            <div style={{ textAlign: 'right' }}>{nf(r.ema100, 2)}</div>
-            <div style={{ textAlign: 'right' }}>{nf(r.ema200, 2)}</div>
-            <div style={{ textAlign: 'right', color: r.worstGap >= 0 ? '#06865a' : '#b06a00', fontWeight: 600 }}>{gapPct(r.worstGap)}</div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}><Spark values={r.sparkline} /></div>
-          </HDiv>
-        );
-      })}
-    </div>
+      <ColumnChooser
+        columns={columns}
+        onToggle={(id: FieldId) => toggleColumn(view, id)}
+        onReset={() => resetColumns(view)}
+      />
+    </header>
   );
 }
 
-const SIG_GRID = '120px 1fr 74px 62px 78px 78px 104px 176px 56px';
-const SIG_HEAD = ['Ticker', 'Name', 'Last', 'Chg', 'Entry', 'Stop', 'R (risk)', 'Target window', 'Age'];
-
-function SignalTable({
-  rows,
-  selected,
-  onSelect,
-  empty,
-}: {
-  rows: FanSignalRow[];
-  selected: string | null;
-  onSelect: (t: string) => void;
-  empty: string;
-}) {
-  if (rows.length === 0) {
-    return (
-      <div style={{ padding: '36px 20px', color: '#98a0a8', fontSize: 13, textAlign: 'center' }}>{empty}</div>
-    );
-  }
-  return (
-    <div>
-      <div style={{ display: 'grid', gridTemplateColumns: SIG_GRID, gap: 0, padding: '0 16px', height: 34, alignItems: 'center', borderBottom: '1px solid #eef0f1', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#98a0a8' }}>
-        {SIG_HEAD.map((h, i) => (
-          <div key={h} data-help={HEAD_HELP[h]} style={{ textAlign: i === 0 || i === 1 ? 'left' : 'right' }}>{h}</div>
-        ))}
-      </div>
-      {rows.map((r) => {
-        const active = selected === r.ticker;
-        const age = r.barsAgo === 0 ? 'today' : `${r.barsAgo}d`;
-        return (
-          <HDiv
-            key={r.ticker}
-            onClick={() => onSelect(r.ticker)}
-            title={`${r.ticker} — entry ${r.entryDate ?? 'latest bar'}, open ${r.openR >= 0 ? '+' : ''}${nf(r.openR, 2)}R. Click for the chart.`}
-            style={{
-              display: 'grid',
-              gridTemplateColumns: SIG_GRID,
-              gap: 0,
-              padding: '0 16px',
-              height: 44,
-              alignItems: 'center',
-              cursor: 'pointer',
-              background: active ? '#eafaf3' : '#fff',
-              borderBottom: '1px solid #f4f5f6',
-              fontSize: 13,
-              fontVariantNumeric: 'tabular-nums',
-            }}
-            hoverStyle={{ background: active ? '#eafaf3' : '#f7f8f8' }}
-          >
-            <div style={{ fontWeight: 700 }}>{r.ticker}</div>
-            <div style={{ color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</div>
-            <div style={{ textAlign: 'right' }}>{nf(r.price, 2)}</div>
-            <div style={{ textAlign: 'right', color: col(r.changePct), fontWeight: 600 }}>{nf(r.changePct, 2, '%')}</div>
-            <div style={{ textAlign: 'right', fontWeight: 600 }}>{nf(r.entryPrice, 2)}</div>
-            <div style={{ textAlign: 'right', color: '#b3261a' }}>{nf(r.stopPrice, 2)}</div>
-            <div style={{ textAlign: 'right' }}>
-              {nf(r.riskPerShare, 2)}<span style={{ color: '#98a0a8' }}> · {nf(r.riskPct, 1)}%</span>
-            </div>
-            <div style={{ textAlign: 'right', color: '#06865a', fontWeight: 600 }}>{fmtTargetWindow(r)}</div>
-            <div style={{ textAlign: 'right', color: '#8b9298' }}>{age}</div>
-          </HDiv>
-        );
-      })}
-    </div>
-  );
+function useViewSort(view: ScreenView): [SortState, (next: SortState) => void] {
+  const sort = useScreener((s) => s.sort[view]);
+  const setSort = useScreener((s) => s.setSort);
+  return [sort, (next) => setSort(view, next)];
 }
 
 function SignalList() {
@@ -162,6 +94,8 @@ function SignalList() {
   const universeSize = useScreener((s) => s.universeSize);
   const selectStock = useScreener((s) => s.selectStock);
   const runSignals = useScreener((s) => s.runSignals);
+  const columns = useScreener((s) => s.columns.entries);
+  const [sort, onSort] = useViewSort('entries');
 
   const rows = useMemo(
     () => filterSignalRows(signalsAll, search, filters.sector, filters.minPrice),
@@ -190,18 +124,28 @@ function SignalList() {
 
       <div style={{ flex: 1, minHeight: 0, padding: 12 }}>
         <section style={{ height: '100%', background: '#fff', borderRadius: 12, border: '1px solid #e7e8ea', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-          <header style={{ padding: '14px 16px 10px', borderBottom: '1px solid #f0f1f2' }}>
-            <div data-help="live-entry" style={{ fontSize: 15, fontWeight: 700 }}>Entries · {label}</div>
-            <div style={{ fontSize: 12, color: '#8b9298', marginTop: 3 }}>
-              {countLabel}
-              {' · '}<span data-help="r">1R stop</span>, <span data-help="target-window">2.5–3R exit window</span>
-            </div>
-          </header>
+          <ListHeader
+            view="entries"
+            helpId="live-entry"
+            title={`Entries · ${label}`}
+            subtitle={
+              <>
+                {countLabel}
+                {' · '}<span data-help="r">1R stop</span>, <span data-help="target-window">2.5–3R exit window</span>
+              </>
+            }
+          />
           <div style={{ flex: 1, overflow: 'auto' }}>
-            <SignalTable
+            <ScreenTable<FanSignalRow>
               rows={rows}
+              columns={columns}
+              extra={SIGNAL_COLUMNS}
+              extraAfter="changePct"
+              sort={sort}
+              onSort={onSort}
               selected={selected}
               onSelect={selectStock}
+              rowTitle={(r) => `${r.ticker} — entry ${r.entryDate ?? 'latest bar'}, open ${r.openR >= 0 ? '+' : ''}${nf(r.openR, 2)}R. Click for the chart.`}
               empty={loading ? 'Scanning…' : clientFiltered ? 'No open entries pass the current filters.' : `No names currently have an open ${label} entry.`}
             />
           </div>
@@ -227,6 +171,8 @@ export function FanLists() {
   const universeSize = useScreener((s) => s.universeSize);
   const retry = useScreener((s) => s.retry);
   const selectStock = useScreener((s) => s.selectStock);
+  const columns = useScreener((s) => s.columns.fan);
+  const [sort, onSort] = useViewSort('fan');
 
   const matches = useMemo(
     () => filterFanRows(matchesAll, search, filters),
@@ -249,6 +195,20 @@ export function FanLists() {
 
   if (signalStrategy !== '') return <SignalList />;
 
+  const table = (rows: FanRow[], empty: string) => (
+    <div style={{ flex: 1, overflow: 'auto' }}>
+      <ScreenTable<FanRow>
+        rows={rows}
+        columns={columns}
+        sort={sort}
+        onSort={onSort}
+        selected={selected}
+        onSelect={selectStock}
+        empty={empty}
+      />
+    </div>
+  );
+
   return (
     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: '#f4f5f6' }}>
       {screenError && (
@@ -260,39 +220,33 @@ export function FanLists() {
 
       <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, padding: 12 }}>
         <section style={{ background: '#fff', borderRadius: 12, border: '1px solid #e7e8ea', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-          <header style={{ padding: '14px 16px 10px', borderBottom: '1px solid #f0f1f2' }}>
-            <div data-help="fan" style={{ fontSize: 15, fontWeight: 700 }}>EMA fan</div>
-            <div style={{ fontSize: 12, color: '#8b9298', marginTop: 3 }}>
-              {screenLoading ? 'Screening…' : matchLabel}
-              {' · '}<span data-help="fan">18 &gt; 50 &gt; 100 &gt; 200</span>
-            </div>
-          </header>
-          <div style={{ flex: 1, overflow: 'auto' }}>
-            <FanTable
-              rows={matches}
-              selected={selected}
-              onSelect={selectStock}
-              empty={filtered ? 'No matches pass the current filters.' : 'No names currently stacked 18 > 50 > 100 > 200.'}
-            />
-          </div>
+          <ListHeader
+            view="fan"
+            helpId="fan"
+            title="EMA fan"
+            subtitle={
+              <>
+                {screenLoading ? 'Screening…' : matchLabel}
+                {' · '}<span data-help="fan">18 &gt; 50 &gt; 100 &gt; 200</span>
+              </>
+            }
+          />
+          {table(matches, filtered ? 'No matches pass the current filters.' : 'No names currently stacked 18 > 50 > 100 > 200.')}
         </section>
 
         <section style={{ background: '#fff', borderRadius: 12, border: '1px solid #e7e8ea', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-          <header style={{ padding: '14px 16px 10px', borderBottom: '1px solid #f0f1f2' }}>
-            <div data-help="fan-near" style={{ fontSize: 15, fontWeight: 700 }}>Close to fan</div>
-            <div style={{ fontSize: 12, color: '#8b9298', marginTop: 3 }}>
-              {screenLoading ? 'Screening…' : nearLabel}
-              {' · '}<span data-help="fan-near">within {(FAN_NEAR_MARGIN * 100).toFixed(1)}% and improving over {FAN_ENTER_LOOKBACK} bars</span>
-            </div>
-          </header>
-          <div style={{ flex: 1, overflow: 'auto' }}>
-            <FanTable
-              rows={near}
-              selected={selected}
-              onSelect={selectStock}
-              empty={filtered ? 'No near names pass the current filters.' : 'No names are approaching the fan.'}
-            />
-          </div>
+          <ListHeader
+            view="fan"
+            helpId="fan-near"
+            title="Close to fan"
+            subtitle={
+              <>
+                {screenLoading ? 'Screening…' : nearLabel}
+                {' · '}<span data-help="fan-near">within {(FAN_NEAR_MARGIN * 100).toFixed(1)}% and improving over {FAN_ENTER_LOOKBACK} bars</span>
+              </>
+            }
+          />
+          {table(near, filtered ? 'No near names pass the current filters.' : 'No names are approaching the fan.')}
         </section>
       </div>
 

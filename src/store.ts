@@ -26,6 +26,13 @@ import {
   type FanFilters,
 } from './lib/filters';
 import {
+  DEFAULT_COLUMNS,
+  toggleColumn as toggleColumnIn,
+  type ScreenView,
+} from './lib/screen/columns';
+import type { FieldId } from './lib/screen/fields';
+import type { SortState } from './lib/screen/sort';
+import {
   DEFAULT_FAN_BACKTEST_CONFIG,
   fanEntryIndex,
   type FanBacktestConfig,
@@ -37,7 +44,8 @@ import {
 export type { FanRow, FanSignalRow, ImportConfigOption, ImportDataEntry, DevImportReport, DatabaseEntry, FanFilters };
 export type { FanBacktestConfig, FanBacktestProgress, FanBacktestResult, FanEntryEvent };
 export type { StrategyDef, ExitSpec };
-export { DEFAULT_FAN_FILTERS, DEFAULT_FAN_BACKTEST_CONFIG };
+export type { ScreenView, FieldId, SortState };
+export { DEFAULT_FAN_FILTERS, DEFAULT_FAN_BACKTEST_CONFIG, DEFAULT_COLUMNS };
 
 export type DisplayStatus = 'loading' | 'loaded' | 'error';
 
@@ -103,6 +111,12 @@ const EMPTY_DB: DbSelectorState = {
   switching: false, error: null,
 };
 
+/** Worst-gap first for the fan lists, freshest entry first for the entries list. */
+export const DEFAULT_SORT: Record<ScreenView, SortState> = {
+  fan: { field: 'worstGap', dir: 'desc' },
+  entries: { field: 'barsAgo', dir: 'asc' },
+};
+
 function matchesQuery(row: FanRow, q: string): boolean {
   if (!q) return true;
   const n = q.toLowerCase();
@@ -123,6 +137,10 @@ export interface ScreenerState {
   sectors: string[];
   search: string;
   filters: FanFilters;
+  /** Visible columns per view; the `near` list shares the fan view's. */
+  columns: Record<ScreenView, FieldId[]>;
+  /** Column sort per view. */
+  sort: Record<ScreenView, SortState>;
   /** Saved custom strategies (presets are not stored here). */
   strategies: StrategyDef[];
   /** '' = fan lists; a strategy id (preset or saved) switches the screener to the live-entries view. */
@@ -144,6 +162,9 @@ export interface ScreenerState {
   onSearch: (v: string) => void;
   setFilter: <K extends keyof FanFilters>(key: K, value: FanFilters[K]) => void;
   resetFilters: () => void;
+  setSort: (view: ScreenView, sort: SortState) => void;
+  toggleColumn: (view: ScreenView, id: FieldId) => void;
+  resetColumns: (view: ScreenView) => void;
   setSignalStrategy: (strategy: string) => void;
   /** Insert or replace a saved custom strategy and persist the list. */
   saveStrategy: (def: StrategyDef) => void;
@@ -207,6 +228,8 @@ export function makeScreenerState(
     sectors: [],
     search: '',
     filters: { ...DEFAULT_FAN_FILTERS },
+    columns: { fan: [...DEFAULT_COLUMNS.fan], entries: [...DEFAULT_COLUMNS.entries] },
+    sort: { fan: { ...DEFAULT_SORT.fan }, entries: { ...DEFAULT_SORT.entries } },
     strategies: [],
     signalStrategy: '',
     signals: [],
@@ -280,6 +303,13 @@ export function makeScreenerState(
       set({ filters: { ...DEFAULT_FAN_FILTERS } });
       if (get().signalStrategy) void get().runSignals();
     },
+    setSort: (view, sort) => set((s) => ({ sort: { ...s.sort, [view]: sort } })),
+    toggleColumn: (view, id) => set((s) => ({
+      columns: { ...s.columns, [view]: toggleColumnIn(s.columns[view], id) },
+    })),
+    resetColumns: (view) => set((s) => ({
+      columns: { ...s.columns, [view]: [...DEFAULT_COLUMNS[view]] },
+    })),
     setSignalStrategy: (strategy) => {
       set({ signalStrategy: strategy });
       if (!strategy) {

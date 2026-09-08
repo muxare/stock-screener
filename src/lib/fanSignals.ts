@@ -20,6 +20,7 @@ import {
   type FanEntryEvent,
 } from './fanBacktest.ts';
 import type { StrategyDef } from './strategy/types.ts';
+import { buildSnapshot, type IndicatorSnapshot } from './screen/snapshot.ts';
 
 /** Displayed exit window, in R multiples of the initial risk. */
 export const SIGNAL_TARGET_LO_R = BUNN_WINDOW_LO; // 2.5
@@ -60,6 +61,8 @@ export interface FanSignalRow {
   avgVol20: number;
   marketCap: number | null;
   sparkline: number[];
+  /** Same last-bar snapshot the fan rows carry, so both tables share columns. */
+  snapshot: IndicatorSnapshot;
 }
 
 /**
@@ -138,6 +141,12 @@ export function signalRowFromEntry(
     avgVol20: s.avgVol20 ?? 0,
     marketCap: s.marketCap ?? null,
     sparkline: s.sparkline ?? [],
+    snapshot: buildSnapshot({
+      closes: s.closes,
+      volumes: s.volumes,
+      highs: s.highs,
+      lows: s.lows,
+    }),
   };
 }
 

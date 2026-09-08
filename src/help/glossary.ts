@@ -53,6 +53,16 @@ Press T while a card is showing to pin it. A pinned card stays where it is, can 
     body: `Narrows every list to tickers or company names containing the text. It applies on top of the [[filters]] and never changes what the [[fan|fan screen]] itself computed.`,
   },
   {
+    id: 'column-chooser',
+    title: 'Columns',
+    kind: 'ui',
+    aliases: ['column chooser'],
+    body: `The ⚙ over a list picks which columns it shows. Every column is a field the row already carries — [[rel-vol]], [[rsi]], [[perf|performance]], [[market-cap]] and the rest — so turning one on costs nothing and re-runs no [[fan|screen]].
+
+Click a header to sort by that column; click it again to reverse. Names with no value for the sorted column (too little history, a dataset without volume) always sink to the bottom, whichever way it is sorted. Choices are per list and last for the session.`,
+    related: ['filters', 'search'],
+  },
+  {
     id: 'data-source',
     title: 'Data source',
     kind: 'data',
@@ -129,6 +139,67 @@ The [[stop]] row uses it as a pad: an ATR pad of 0.25 places the stop a quarter 
     title: '40-day sparkline',
     kind: 'indicator',
     body: `The last 40 closes drawn as a tiny line so you can see the shape of the recent move without opening the chart. Click the row for the full candlestick chart with the four [[ema|EMAs]].`,
+  },
+  {
+    id: 'rsi',
+    title: 'RSI(14)',
+    kind: 'indicator',
+    aliases: ['RSI', 'RSI(14)', 'RSI 14'],
+    body: `Relative strength index over 14 bars, on Wilder smoothing: the share of the recent move that was up, scaled 0–100. Above 70 is conventionally "overbought", below 30 "oversold", but in a stacked [[fan]] a reading in the 50s and 60s is simply what a healthy trend looks like.
+
+The column is the reading on the latest bar. Names with fewer than 15 bars of history show — rather than a fabricated 50.`,
+    related: ['stoch-rsi', 'fan'],
+  },
+  {
+    id: 'stoch-rsi',
+    title: 'Stoch RSI (%K / %D)',
+    kind: 'indicator',
+    aliases: ['Stoch RSI', 'stochastic RSI', 'Stoch %K', 'Stoch %D'],
+    body: `Where the current [[rsi|RSI]] sits inside its own 14-bar range, smoothed twice (14, 3, 3) and scaled 0–100. It moves faster than RSI, so it reaches its extremes far more often: %K under 20 marks a pullback inside the move, over 80 a stretched one.
+
+%K is the faster line, %D its 3-bar average. The [[backtest]] buckets fills by the same numbers under [[indicators-at-entry]].`,
+    related: ['rsi', 'indicators-at-entry'],
+  },
+  {
+    id: 'volume',
+    title: 'Volume',
+    kind: 'indicator',
+    body: `Shares traded on the latest bar. On its own it says little — a big name always trades more than a small one — so compare it with [[avg-volume|its own 20-day average]] through [[rel-vol]].`,
+    related: ['rel-vol', 'avg-volume'],
+  },
+  {
+    id: 'rel-vol',
+    title: 'Relative volume',
+    kind: 'indicator',
+    aliases: ['Rel vol', 'relative volume'],
+    body: `Latest-bar [[volume]] divided by the [[avg-volume|20-day average]]. 1.0 is an ordinary day; 2.0 means twice the usual interest. It is the quickest read on whether anything is actually happening in a name today, independent of its size.`,
+    related: ['volume', 'avg-volume'],
+  },
+  {
+    id: 'perf',
+    title: 'Performance (1M / 3M)',
+    kind: 'indicator',
+    aliases: ['Perf 1M', 'Perf 3M'],
+    body: `Percent move of the close against the close 21 bars ago (about a month) and 63 bars ago (about three). It ranks names inside the [[fan]] by how much of the move has already happened — a fan that has just formed shows far less than one that has run for a quarter.
+
+Shorter histories show — rather than a partial figure.`,
+    related: ['fan', 'change-pct'],
+  },
+  {
+    id: 'atr-pct',
+    title: 'Volatility (ATR %)',
+    kind: 'indicator',
+    aliases: ['ATR %', 'Volatility'],
+    body: `[[atr|ATR(14)]] as a percent of the latest close, so noisiness compares across prices: 2% means the average day covers about 2% of the price. It sets the scale of any [[stop]] you would place, and the [[r|R]] you would be risking.`,
+    related: ['atr', 'stop', 'r'],
+  },
+  {
+    id: 'week52',
+    title: '52-week high / low',
+    kind: 'indicator',
+    aliases: ['52w high', '52w low', '52-week high'],
+    body: `The highest high and lowest low of the last 252 trading days — the calendar year of bars. Datasets that carry only closes use those instead. Distance from the high is the usual sanity check on a [[fan]] that has already run.`,
+    related: ['fan', 'perf'],
   },
 
   // ---------------------------------------------------------------- fan screen
@@ -718,7 +789,7 @@ End equity, return and [[max-drawdown]] describe that account; [[taken-skipped]]
     id: 'indicators-at-entry',
     title: 'MACD / Stoch RSI at entry',
     kind: 'backtest',
-    aliases: ['Stoch RSI', 'MACD / Stoch RSI at entry'],
+    aliases: ['MACD / Stoch RSI at entry'],
     body: `A snapshot of two textbook indicators on each fill bar, bucketed against the trade's realized [[r|R]]: the classic 12/26/9 MACD (not the [[macd-18-50]]) and the stochastic RSI's %K and %D. Use it to see whether entries taken with momentum already stretched fared worse than the rest.`,
     related: ['macd-18-50', 'backtest'],
   },

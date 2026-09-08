@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { applyFanFilters, DEFAULT_FAN_FILTERS, fmtCompact } from './filters';
 import type { Ema200Ago, FanRow } from './fan';
+import { EMPTY_SNAPSHOT } from './screen/snapshot';
 
 function risingAgo(now: number): Ema200Ago {
   return { 21: now - 0.2, 63: now - 0.5, 105: now - 0.8 };
@@ -17,6 +18,7 @@ function row(partial: Partial<FanRow> & Pick<FanRow, 'ticker'>): FanRow {
     ema200Ago: risingAgo(ema200),
     worstGap: 0.1,
     sparkline: [1],
+    snapshot: EMPTY_SNAPSHOT,
     avgVol20: 500_000,
     relVol: 1.2,
     marketCap: 2e9,

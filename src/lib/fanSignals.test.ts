@@ -14,6 +14,7 @@ import {
 import { ema } from './indicators.ts';
 import type { FanEntryEvent } from './fanBacktest.ts';
 import { presetById } from './strategy/presets.ts';
+import { buildSnapshot } from './screen/snapshot.ts';
 
 function rampSeries(flatBars: number, rampBars: number, flat = 10, step = 0.45): number[] {
   return [
@@ -88,6 +89,30 @@ describe('screenFanSignals', () => {
     expect(r.riskPerShare).toBeCloseTo(r.entryPrice - r.stopPrice, 8);
     expect(r.targetLoPrice).toBeCloseTo(r.entryPrice + SIGNAL_TARGET_LO_R * r.riskPerShare, 8);
     expect(r.targetHiPrice).toBeCloseTo(r.entryPrice + SIGNAL_TARGET_HI_R * r.riskPerShare, 8);
+  });
+
+  it('carries the same indicator snapshot the fan rows do', () => {
+    const closes = openOnsetCloses();
+    const rows = screenFanSignals([subject({
+      closes,
+      volumes: closes.map(() => 400_000),
+      highs: closes.map((c) => c + 0.2),
+      lows: closes.map((c) => c - 0.2),
+    })], onsetCfg);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].snapshot).toEqual(buildSnapshot({
+      closes,
+      volumes: closes.map(() => 400_000),
+      highs: closes.map((c) => c + 0.2),
+      lows: closes.map((c) => c - 0.2),
+    }));
+    expect(Number.isFinite(rows[0].snapshot.rsi14)).toBe(true);
+    expect(rows[0].snapshot.volume).toBe(400_000);
+  });
+
+  it('leaves the ATR-based volatility missing when the subject has no highs/lows', () => {
+    const rows = screenFanSignals([subject()], onsetCfg);
+    expect(rows[0].snapshot.atrPct).toBeNaN();
   });
 
   it('returns nothing once the trend has fully played out (trade resolved)', () => {

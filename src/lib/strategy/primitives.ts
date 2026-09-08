@@ -5,6 +5,10 @@
 import { classifyFanAtIndex, type FanStatus } from '../fan.ts';
 import { ema } from '../indicators.ts';
 
+/** Lives in indicators.ts (the screen snapshot reads it too); re-exported so
+ * the engine and the step registry keep importing every primitive from here. */
+export { atr14 } from '../indicators.ts';
+
 /** Course “two pennies” offset for bounce buy-stops and stop wiggle. */
 export const BUNN_PENNY = 0.02;
 /** Mechanical target-window floor (exit). Cap 3R is unused for fill. */
@@ -142,14 +146,6 @@ export function isMaBounce(o: number[], h: number[], l: number[], c: number[], m
   const range = h[i] - l[i];
   if (!(range > 0)) return false;
   return l[i] <= ma[i] && c[i] >= ma[i] && c[i] > o[i] && (c[i] - l[i]) / range >= 0.6;
-}
-
-export function atr14(h: number[], l: number[], c: number[]): number[] {
-  const tr = c.map((_, i) => {
-    if (i === 0) return Math.max(h[0] - l[0], 0);
-    return Math.max(h[i] - l[i], Math.abs(h[i] - c[i - 1]), Math.abs(l[i] - c[i - 1]));
-  });
-  return ema(tr, 14);
 }
 
 export function slopeUp(arr: number[], i: number, n = 5): boolean {

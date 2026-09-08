@@ -1,6 +1,6 @@
 # Screener parity — implementation plan
 
-Status (2026-09-08): **proposed**. Closes the gap between Screenr and a TradingView-style
+Status (2026-09-08): **phase 1 landed** (columns and sorting); phases 2–4 proposed. Closes the gap between Screenr and a TradingView-style
 screener (reference: Mikael's "Ema fan fundamental" screen, 2026-09-08). **Fundamental data is
 out of scope** for this plan; everything below is computable from the OHLCV bars already in the
 SQLite datasets. Builds on `feat/strategy-builder`; land that branch first.
@@ -196,7 +196,7 @@ green on `npm run typecheck && npm run test && npm run lint`.
 
 | # | Phase | Delivers | Touch scope |
 |---|---|---|---|
-| 1 | **Columns and sorting** | `IndicatorSnapshot` on both row types; `fields.ts`; `ScreenTable` with sortable sticky header, 34 px rows, column chooser, volume / rel vol / avg vol / cap / sector / RSI / Stoch K columns; remove `@tanstack/react-table` | `lib/fan.ts`, `lib/fanSignals.ts`, `lib/indicators.ts`, `lib/screen/*`, `components/table/*`, `FanLists.tsx`, `store.ts` (sort/columns only), `help/glossary.ts` |
+| 1 ✅ | **Columns and sorting** | `IndicatorSnapshot` on both row types; `fields.ts`; `ScreenTable` with sortable sticky header, 34 px rows, column chooser, volume / rel vol / avg vol / cap / sector / RSI / Stoch K columns; remove `@tanstack/react-table` | `lib/fan.ts`, `lib/fanSignals.ts`, `lib/indicators.ts`, `lib/screen/*`, `components/table/*`, `FanLists.tsx`, `store.ts` (sort/columns only), `help/glossary.ts` |
 | 2 | **Filter model and chips** | `Clause` model, chip bar with ranges and free numeric input, indicator filters, `signalFloorsOf` feeding `/signals`, migration of the five presets | `lib/screen/filters.ts`, `components/filters/*`, `FilterBar.tsx`, `store/screenSlice.ts`, `fanSignals.ts` (`filterSignalRows` → clauses) |
 | 3 | **Layout** | View tabs with a single full-width table; docked resizable detail panel; narrow-screen fallback | `AppScreener.tsx`, `ScreenView.tsx`, `detail/DetailPanels.tsx`, `FanDetail.tsx` (width only) |
 | 4 | **Saved screens** | `SavedScreen` storage, screen menu, dirty/Save, default screen at startup | `lib/screen/storage.ts`, `components/filters/ScreenMenu.tsx`, `store/screenSlice.ts`, `TopBar.tsx` |
