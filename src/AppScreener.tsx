@@ -2,8 +2,8 @@ import { useEffect } from 'react';
 import { useScreener } from './store';
 import { TopBar } from './components/TopBar';
 import { FilterBar } from './components/FilterBar';
-import { FanLists } from './components/FanLists';
-import { DetailOverlay } from './components/detail/DetailPanels';
+import { ScreenView } from './components/ScreenView';
+import { DetailDock } from './components/detail/DetailPanels';
 import { DevImportModal } from './components/modals/DevImportModal';
 import { FanBacktestModal } from './components/modals/FanBacktestModal';
 import { HelpProvider } from './help/HelpProvider';
@@ -19,9 +19,9 @@ export function AppScreener() {
       <TopBar />
       <FilterBar />
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-        <FanLists />
+        <ScreenView />
+        <DetailDock />
       </div>
-      <DetailOverlay />
       <DevImportModal />
       <FanBacktestModal />
       {!ready && (

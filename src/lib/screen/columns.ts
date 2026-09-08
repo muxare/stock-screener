@@ -5,8 +5,22 @@
 
 import { ALL_FIELDS, type FieldId } from './fields.ts';
 
-/** The screener's row sets. `near` shares the fan view's columns and sort. */
+/** The screener's *table shapes* — the column set and sort a list uses. */
 export type ScreenView = 'fan' | 'entries';
+
+/**
+ * The screener's *row sets* — the visible tab. A different axis from
+ * `ScreenView`: `near` is its own list of rows but is shaped like `fan`, so the
+ * two share columns and sort. Do not merge them.
+ */
+export type ScreenTab = 'fan' | 'near' | 'entries';
+
+export const SCREEN_TABS: readonly ScreenTab[] = ['fan', 'near', 'entries'];
+
+/** Which table shape a tab's rows are drawn with. */
+export function tableViewOf(tab: ScreenTab): ScreenView {
+  return tab === 'entries' ? 'entries' : 'fan';
+}
 
 /** Declaration order in fields.ts, so a re-enabled column returns to its place. */
 const ORDER = new Map(ALL_FIELDS.map((f, i) => [f.id, i]));

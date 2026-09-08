@@ -1,6 +1,7 @@
 # Screener parity — implementation plan
 
-Status (2026-09-08): **phase 1 landed** (columns and sorting); phases 2–4 proposed. Closes the gap between Screenr and a TradingView-style
+Status (2026-09-08): **phases 1–3 landed** (columns and sorting; filter clauses and chips;
+view tabs and the docked chart); phase 4 proposed. Closes the gap between Screenr and a TradingView-style
 screener (reference: Mikael's "Ema fan fundamental" screen, 2026-09-08). **Fundamental data is
 out of scope** for this plan; everything below is computable from the OHLCV bars already in the
 SQLite datasets. Builds on `feat/strategy-builder`; land that branch first.
@@ -89,31 +90,139 @@ Phase 1 landed on `feat/screener-parity-phase1`. Where it differs from the sketc
   `week52` (extra) are in. Still owed: `filter-chip` (phase 2), `detail-dock` (phase 3),
   `saved-screen` (phase 4).
 
-### Decisions to confirm before phase 2 (recommended answers in bold)
+### What phase 2 actually built (read before starting phase 3 or 4)
 
-- **One full-width table with view tabs** (EMA fan / Close to fan / Entries) instead of the
+Phase 2 landed on `feat/screener-parity-phase2`. Where it differs from the sketch below,
+**this section wins**.
+
+- **`lib/screen/filters.ts`** — the clause model as designed. `ScreenFilters` is
+  `{ clauses: Clause[] }` in **insertion order** (the order chips were added), not registry
+  order; one clause per field, and `setClause` replaces rather than appends a second.
+  `lib/filters.ts` is **gone** — `FanFilters`, `DEFAULT_FAN_FILTERS`, `filtersActive`,
+  `applyFanFilters` and `filterFanRows` no longer exist, and the four preset arrays
+  (`AVG_VOL_PRESETS` …) moved here, still shaped as `{label, value}` selects because
+  `FanBacktestModal` uses them as selects.
+- **`FilterRow`** = `ScreenRowLike` plus an optional `ema200Ago`. The `bars` clause **passes
+  a row that has no `ema200Ago`** instead of dropping it — that is how entries rows survive
+  the slope chip, since the engine already enforced the slope at the fill. Anything that
+  later gives signal rows an `ema200Ago` changes that behaviour silently.
+- **Clause values are stored in native units**, always. `parseFieldInput` / `formatFieldInput`
+  (over `toNative` / `fromNative`, keyed on `FieldDef.kind`) are the only conversion, and
+  `unitHint` supplies the editor's `%` / `e.g. 400K, 1.2B` label. Phase 4 therefore persists
+  native numbers and needs no unit handling of its own.
+- **`clausesActive` is not a dirty check.** It answers "does this set trim the lists relative
+  to the default", so the default slope clause and any clause with no bounds set both count
+  as *inactive*. Phase 4's `Save` must compare against the saved copy, not call this.
+- **The re-scan rule is computed, not listed.** `createScreenSlice(set, get, onFloorsChanged)`
+  compares `signalFloorsOf` before and after every filter change and calls back only when
+  `floorsEqual` says a floor moved. The old hand-maintained `scanKeys` array is gone, so a
+  new filterable field needs no wiring — and phase 4 loading a saved screen through
+  `setFilters` re-scans exactly when it should.
+- **`store/screenSlice.ts`** owns `search`, `filters`, `columns`, `sort`,
+  `filteredMatches` / `filteredNear`, and `DEFAULT_SORT` (which **moved out of `store.ts`**,
+  though `store.ts` still re-exports it). It reads `matches` / `near` through `get` as
+  declared deps it does not own. `view` (phase 3) and `screens` / `activeScreenId` /
+  `dockWidth` (phase 4) go in here too; `store.ts` should gain nothing but the slice import.
+- **`filteredMatches` / `filteredNear` are still unused by the UI.** `FanLists.tsx` computes
+  its own `filterRows(...)` in a `useMemo` because it also needs the unfiltered totals for
+  the "n of m shown" line. Phase 3 renames that file — pick one of the two paths then rather
+  than carrying both.
+- **`fields.ts` gained `setSectorOptions`**, a module-level source wired once at the bottom of
+  `store.ts` to the app store's `sectors`. A test store does not set it, so `options()` is
+  empty under test — do not build a phase-4 test that depends on sector choices.
+- **`filterSignalRows(rows, search, filters)`** — the third parameter is now the whole
+  `ScreenFilters`; it is a thin wrapper over `filterRows`.
+- **`components/filters/`** — `FilterChip.tsx` (chip + the three editors), `FieldPicker.tsx`
+  (the `+`, with a type-ahead) and `useDismiss.ts` (outside-click / Esc, plus the shared
+  `POPOVER` and `LABEL` styles). `ColumnChooser` kept its own copy of the dismiss logic;
+  fold it in only if phase 3 touches it anyway.
+- **The filter bar wraps.** With half a dozen chips the row runs to a second line, so the
+  bar's height is no longer fixed — phase 3's full-width table must size from the flex
+  parent, not from a constant header height.
+- **Help** — `filter-chip` is in, and the `filters` card now explains the floors/client-side
+  split. Still owed: `detail-dock` (phase 3), `saved-screen` (phase 4).
+
+### What phase 3 actually built (read before starting phase 4)
+
+Where phase 3 differs from the sketch below, **this section wins**.
+
+- **A third axis, and it is not `ScreenView`.** `lib/screen/columns.ts` now declares
+  `ScreenTab` = `'fan' | 'near' | 'entries'` (the *row set*, i.e. the visible tab) beside
+  `ScreenView` = `'fan' | 'entries'` (the *table shape*), with `tableViewOf(tab)` between
+  them. `SavedScreen.view` in phase 4 is a `ScreenTab`; `columns` / `sort` stay keyed by
+  `ScreenView`, so a saved screen persists **both** — the tab and the shape's column list.
+- **`components/FanLists.tsx` → `components/ScreenView.tsx`**, one component and one
+  `ScreenTable`. The component is `ScreenView` and the *type* `ScreenView` is imported there
+  as `TableView`; that alias is the only place the two names collide.
+- **The visible tab is derived, not trusted.** `view === 'entries'` with no strategy renders
+  the fan tab. Phase 4 can therefore load a saved screen whose strategy no longer exists
+  without a blank list — but it should still restore `signalStrategy` before `view`.
+- **`store.ts` owns the coupling, not the slice.** `setSignalStrategy` moves the tab
+  (to `entries` when a strategy is picked, back to `fan` when one is cleared while on it).
+  It is the one place phase 4's "load a saved screen" must not fight: set the strategy first,
+  then the view, or the strategy setter will overwrite the view you just restored.
+- **`filteredMatches` / `filteredNear` are still unused.** Phase 2 flagged the duplication
+  and phase 3 was the moment to pick — it kept the component's `useMemo`, because the tabs
+  need the *unfiltered* totals for the "n of m shown" line and the filtered rows for the tab
+  counts, and the slice getters give only the latter. Either delete them in phase 4 or give
+  them the totals too; do not leave three ways to filter a list.
+- **Search now counts as filtering** in the fan lists' count line (it always did in the
+  entries list). One `narrowed` flag drives the "n of m shown" wording and the empty-list
+  wording for all three tabs.
+- **`lib/screen/dock.ts`** (new, not in the sketch) — `DOCK_MIN` 420, `DOCK_DEFAULT` 560,
+  `DOCK_BREAKPOINT` 1100, a private list minimum of 520, `clampDockWidth(width, viewportW?)`
+  and `isNarrow(viewportW)`. The clamp runs twice: on every drag frame and again at render,
+  so phase 4 can restore a width saved on a 2500 px display onto a 1300 px one without
+  checking anything itself. A non-numeric width falls back to the default.
+- **The drag handle uses mouse events, not pointer events.** `preventDefault` on `pointerdown`
+  does not stop the drag from selecting the table text behind it; `mousedown` does. Moves are
+  coalesced to one `requestAnimationFrame` per frame because the canvas redraws on each width
+  change, and `body.style.userSelect` is restored on mouseup.
+- **Escape is shared.** The dock closes on Escape unless a help card is open — the dock's
+  listener is registered before `HelpProvider`'s (child effects run first), so it cannot rely
+  on `defaultPrevented` and checks for `[data-help-card]` in the DOM instead. Anything else
+  that wants Escape has the same problem.
+- **`FanDetail` was not touched.** Its canvas already sizes from `wrap.clientWidth` under a
+  `ResizeObserver`, and 420 px is above its own 320 px floor.
+- **Help** — `detail-dock` is in, on the drag handle. The tabs carry the `fan`, `fan-near`
+  and `live-entry` ids that used to sit on the two panel titles. Still owed: `saved-screen`
+  (phase 4).
+
+### Decisions to confirm (recommended answers in bold)
+
+All of these are now **settled and shipped** — the last four in phase 2, the first two in
+phase 3.
+
+- ✅ **One full-width table with view tabs** (EMA fan / Close to fan / Entries) instead of the
   side-by-side split. Rationale: TradingView density, room for ~15 columns, one table
-  component instead of two. The split cannot fit the new columns.
-- **Docked detail panel** (right, resizable, ~560 px, non-modal) instead of the overlay
+  component instead of two. The split cannot fit the new columns. *(Shipped. The density
+  argument held for width and not for height — see phase 3's notes.)*
+- ✅ **Docked detail panel** (right, resizable, ~560 px, non-modal) instead of the overlay
   drawer. The list stays visible and clickable; clicking another row swaps the symbol.
+  *(Shipped, with the narrow-screen fallback below 1100 px.)*
 - **Sorting and column choice are client-side** over the full row set the server already
   returns. No server changes for sorting.
-- **Filter evaluation stays client-side** for fan rows. For `/signals` the server keeps its
+- ✅ **Filter evaluation stays client-side** for fan rows. For `/signals` the server keeps its
   floors; the client derives them from the new filter clauses (min of `avgVol20`,
-  `marketCap`, `ema200RisingBars`) and applies the rest after the scan.
+  `marketCap`, `ema200RisingBars`) and applies the rest after the scan. *(Shipped, and the
+  derivation is `signalFloorsOf`; the re-scan trigger is a `floorsEqual` comparison, not a
+  list of keys.)*
 - **No `@tanstack/react-table`.** A ~80-line sort/column module is enough; remove the
   unused dependency in phase 1.
 - **Saved screens in localStorage**, same pattern as strategies. No server persistence.
-- **A range clause drops rows whose value is missing**, whichever bound is set. Raised by
+  *(Still phase 4's to build, but phase 2 fixed what gets saved: clauses hold native units,
+  and `ScreenFilters` is a plain `{ clauses }` object that survives `JSON.stringify` intact.)*
+- ✅ **A range clause drops rows whose value is missing**, whichever bound is set. Raised by
   phase 1: `snapshot` fields are NaN when the history is too short, so "RSI 14 50–65" over a
   freshly listed name has nothing to compare. Dropping matches today's market-cap behaviour
   (already documented in the `market-cap` help card) and matches TradingView. The chip must
   say so — a count that shrinks for an invisible reason is the confusing case. Sorting keeps
   the opposite convention deliberately: missing sinks to the bottom but stays in the list.
-- **Percent conversion is per `kind`, not per field.** `ratio` fields (`worstGap`, `perf1m`,
+- ✅ **Percent conversion is per `kind`, not per field.** `ratio` fields (`worstGap`, `perf1m`,
   `perf3m`, `atrPct`) hold fractions and a chip entered as `2.5` compares against `0.025`;
   `percent` fields (`changePct`) are *already* in percent units and `2.5` compares against
-  `2.5`. Getting this backwards on `changePct` is the likeliest phase-2 bug.
+  `2.5`. Getting this backwards on `changePct` is the likeliest phase-2 bug. *(Shipped;
+  `filters.test.ts` asserts both directions on both kinds.)*
 
 ## Design
 
@@ -199,6 +308,10 @@ interface ScreenFilters { clauses: Clause[] }
   process, `null` after JSON). `clausesActive` must count such a clause as active so the
   "n of m shown" line explains the shrink.
 
+**Built in phase 2** as designed — see "What phase 2 actually built" for the three things the
+sketch did not pin down: clause order, the `ema200Ago`-less row, and what `clausesActive`
+does *not* mean.
+
 ### 4. Filter bar UI — `src/components/FilterBar.tsx` rewrite, new `components/filters/`
 
 TradingView layout: a row of chips, each `Label  op  value ×`, and a `+` chip that opens
@@ -207,6 +320,17 @@ multi-select for sector, or the three lookbacks for the 200-EMA slope), quick-va
 buttons, and Apply. Entry-strategy select stays first; the explanatory sentence on the
 right becomes the screen name + Save (phase 4). `Clear filters` resets to
 `DEFAULT_FILTERS`. Every chip keeps its `data-help` id so the hover cards still work.
+
+**Built in phase 2**, with three notes for phase 4:
+
+- The explanatory sentence on the right is **still a sentence** — turning it into the screen
+  name + Save is phase 4's job, and that corner is where `ScreenMenu` goes.
+- A chip added from the `+` opens its editor immediately (`autoOpen` / `onOpened` on
+  `FilterChip`, `justAdded` in `FilterBar`), so adding and setting a filter is one gesture.
+  Loading a saved screen must not trip that — it goes through `setFilters`, which does not
+  touch `justAdded`.
+- Quick values live in `QUICK_RANGES` (a `FieldId` → buttons map in `filters.ts`), keyed by
+  field rather than hard-coded in the editor. A new filterable field simply has none.
 
 ### 5. Table — new `src/components/table/ScreenTable.tsx`, `src/lib/screen/sort.ts`
 
@@ -238,6 +362,12 @@ rather than the sticky column header.
   chart reflows when the dock is dragged; the `PRICE_H` / pane heights stay.
 - Mobile / narrow (< 1100 px): dock falls back to the current overlay behaviour.
 
+**Built in phase 3** as designed. Three things the sketch did not pin down: the tab is a
+`ScreenTab` and not the existing `ScreenView`; the drag needs mouse events rather than
+pointer events to avoid selecting the table text; and the geometry (both minimums, the
+breakpoint) lives in `lib/screen/dock.ts` so the store, the handle and the tests share it.
+The ⚙ stayed in the list section header, as phase 1 asked.
+
 ### 7. Saved screens — new `src/lib/screen/storage.ts`, store slice, `components/filters/ScreenMenu.tsx`
 
 ```ts
@@ -268,8 +398,14 @@ same way the strategy list is today. `filteredMatches` / `filteredNear` move to 
 and use `applyClauses` + `sortRows`.
 
 Phase 1 put `sort` and `columns` (~30 lines) directly in `store.ts`, since the slice earns
-its keep only once the clauses arrive. **Phase 2 creates `screenSlice.ts` and moves those
+its keep only once the clauses arrive. **Phase 2 created `screenSlice.ts` and moved those
 two in with it** rather than leaving state split across both files.
+
+**Built in phase 2.** `store.ts` went 583 → 490 lines and now spreads the slice at the top of
+its state object; the slice's `set` / `get` are the store's own, typed against
+`ScreenSlice & { matches, near }`, so adding phase-3/4 state is adding a field to
+`ScreenSlice` and an initial value in `createScreenSlice`. `filteredMatches` / `filteredNear`
+moved in but use `filterRows`, not `sortRows` — sorting is still the table's job.
 
 ## Phases
 
@@ -279,8 +415,8 @@ green on `npm run typecheck && npm run test && npm run lint`.
 | # | Phase | Delivers | Touch scope |
 |---|---|---|---|
 | 1 ✅ | **Columns and sorting** | `IndicatorSnapshot` on both row types; `fields.ts`; `ScreenTable` with sortable sticky header, 34 px rows, column chooser, volume / rel vol / avg vol / cap / sector / RSI / Stoch K columns; remove `@tanstack/react-table` | `lib/fan.ts`, `lib/fanSignals.ts`, `lib/indicators.ts`, `lib/screen/*`, `components/table/*`, `FanLists.tsx`, `store.ts` (sort/columns only), `help/glossary.ts` |
-| 2 | **Filter model and chips** | `Clause` model, chip bar with ranges and free numeric input, indicator filters, `signalFloorsOf` feeding `/signals`, migration of the five presets | `lib/screen/filters.ts`, `lib/screen/format.ts` (`parseCompact`), `lib/screen/fields.ts` (`options` for sector), `components/filters/*`, `FilterBar.tsx`, `store/screenSlice.ts` (created here; `sort`/`columns` move in from `store.ts`), `fanSignals.ts` (`filterSignalRows` → clauses) |
-| 3 | **Layout** | View tabs with a single full-width table; docked resizable detail panel; narrow-screen fallback | `AppScreener.tsx`, `ScreenView.tsx`, `detail/DetailPanels.tsx`, `FanDetail.tsx` (width only) |
+| 2 ✅ | **Filter model and chips** | `Clause` model, chip bar with ranges and free numeric input, indicator filters, `signalFloorsOf` feeding `/signals`, migration of the five presets | `lib/screen/filters.ts`, `lib/screen/format.ts` (`parseCompact`), `lib/screen/fields.ts` (`options` for sector), `components/filters/*`, `FilterBar.tsx`, `store/screenSlice.ts` (created here; `sort`/`columns` move in from `store.ts`), `fanSignals.ts` (`filterSignalRows` → clauses) |
+| 3 ✅ | **Layout** | View tabs with a single full-width table; docked resizable detail panel; narrow-screen fallback | `AppScreener.tsx`, `ScreenView.tsx`, `detail/DetailPanels.tsx`, `FanDetail.tsx` (width only) |
 | 4 | **Saved screens** | `SavedScreen` storage, screen menu, dirty/Save, default screen at startup | `lib/screen/storage.ts`, `lib/screen/columns.ts` (`sanitizeColumns`), `components/filters/ScreenMenu.tsx`, `store/screenSlice.ts`, `TopBar.tsx` |
 
 Phase 1 is independent and immediately useful. Phases 2 and 3 can run in parallel after
@@ -294,17 +430,22 @@ phase 1. Phase 4 depends on 2 (it saves clauses).
 - ✅ `lib/screen/fields.test.ts` (added in phase 1, not in the original list): every declared
   `help` id resolves to a glossary topic, each `kind` formats exactly once, missing values
   come back `null`, and the column defaults/toggle round-trip.
-- `lib/screen/filters.test.ts`: every clause kind, open-ended ranges, percent and compact
+- ✅ `lib/screen/filters.test.ts`: every clause kind, open-ended ranges, percent and compact
   unit parsing (`300M`, `1.2B`, `2.5` → `0.025`), `signalFloorsOf`, default filters equal
-  today's behaviour (port `filters.test.ts`).
+  today's behaviour (ported from `filters.test.ts`, which is gone with `lib/filters.ts`).
 - ✅ `lib/screen/sort.test.ts`: numeric / string / null ordering, direction toggle, stable for
   ties.
+- ✅ `lib/screen/dock.test.ts` (added in phase 3, not in the original list): the dock width
+  clamp against both minimums, a non-numeric width, and the overlay breakpoint boundary.
+  `lib/screen/fields.test.ts` gained `tableViewOf`; `src/store.test.ts` gained the default
+  tab, the entry-strategy select moving it, and the dock-width clamp.
 - `lib/screen/storage.test.ts`: round-trip, corrupt JSON, unknown field id dropped, default
   flag unique, **a saved sort key that no longer resolves falls back to the view default**.
 - ✅ `server/screen.test.ts` and `lib/fanSignals.test.ts`: rows carry `snapshot`. (There is
   no `server/signals.test.ts`; the signal scan is tested at the library level.)
-- `src/store.test.ts`: `/signals` body carries floors derived from clauses (phase 2). ✅ Sort
-  and column state survive a `runScreen`.
+- ✅ `src/store.test.ts`: `/signals` body carries floors derived from clauses, and a
+  client-side clause (sector / price / RSI) does not re-run the scan. Sort and column state
+  survive a `runScreen`.
 - `help/glossary.test.ts`: every new `data-help` id resolves.
 
 ## Verification
@@ -314,12 +455,19 @@ phase 1. Phase 4 depends on 2 (it saves clauses).
   the ⚙ and Gap / RSI / Stoch come into view; header stays pinned while scrolling. Rows per
   screen went ~22 → ~30, not the "roughly doubles" estimated here: 34 px rows help, but the
   side-by-side split still caps it. The full doubling needs phase 3's full-width table.
-- After phase 2: reproduce the TradingView screen as chips — Price 20–100, Avg vol ≥ 400K,
-  RSI 14 50–65, Stoch K ≤ 20 — and compare the count with the same filters on TradingView
-  for a shared dataset; `curl` the `/signals` body and confirm `minAvgVol: 400000`.
-- After phase 3: click a row, chart docks on the right, the table remains scrollable and a
-  second click swaps the symbol; drag the divider; resize the window under 1100 px and the
-  overlay returns.
+- ✅ After phase 2 with `npm run dev`: the chips compose (Price 20–100 + RSI 14 40–50 took the
+  synthetic fan list to "3 of 14 shown" then "2 of 14"), `400K` parses, the sector chip lists
+  the dataset's own sectors, and changing the slope chip fires exactly one `/signals` request
+  while adding a sector chip fires none. Still owed once a shared dataset is loaded: compare
+  the count for Price 20–100 / Avg vol ≥ 400K / RSI 50–65 / Stoch K ≤ 20 against TradingView.
+- ✅ After phase 3 with `npm run dev`: clicking a row docks the chart on the right, the table
+  stays scrollable, a second click swaps the symbol in place, and dragging the divider
+  redraws the chart at the new width. The Entries tab lights up when a strategy is selected
+  and the tab follows the select both ways. Below 1100 px the overlay returns and Esc closes
+  it. Rows per screen did **not** double (27 at 34 px in a 1216 px-tall window, the same as
+  the split gave per panel) — the split's panels were side by side, so they were already
+  full height. What the full-width table buys is the whole column set without the sideways
+  scroll.
 - After phase 4: save the screen as "Ema fan technical", reload, it is listed and loads with
   the same chips, sort and columns; mark it default; edit a chip and `Save` lights up.
 
@@ -335,14 +483,26 @@ phase 1. Phase 4 depends on 2 (it saves clauses).
   new indicator field needs the same question asked of it, or a chip will silently match
   names on a warm-up artefact.
 - **Filter migration breaks the help ids**: keep the old `data-help` ids on the new chips
-  (`min-price`, `avg-volume`, …) and add new ones only for new fields.
+  (`min-price`, `avg-volume`, …) and add new ones only for new fields. *(Handled in phase 2:
+  a chip reads `FieldDef.help`, so the ids came across without a lookup table;
+  `glossary.test.ts` still asserts every id resolves.)*
 - **Docked panel and the canvas chart**: the drag handle changes the dock width on every
   mouse move; the existing `ResizeObserver` redraws the canvas each time. Throttle with
-  `requestAnimationFrame` if the drag stutters.
+  `requestAnimationFrame` if the drag stutters. *(Phase 3 throttles unconditionally — one
+  width per frame — rather than waiting to see whether it stutters.)*
 - **Store growth**: enforced by putting all new state in `store/screenSlice.ts`; `store.ts`
-  should only get the slice import.
+  should only get the slice import. *(Phase 2: 583 → 490 lines. Phase 3 added `view` and
+  `dockWidth` to the slice and no state to `store.ts` — only the one line in
+  `setSignalStrategy` that moves the tab. Phase 4's `screens` / `activeScreenId` must not
+  reopen it.)*
 - **Percent-unit confusion** in clauses: the chip shows `%` and the `FieldDef.kind` owns
-  the conversion in one place; tests cover both directions.
+  the conversion in one place; tests cover both directions. *(Closed in phase 2.)*
+
+- **A new filterable field is a new way to drop rows silently.** Marking `filterable: true`
+  on a field in the registry is now enough to put it in the `+` picker, with no other code —
+  which also means a field whose value is often missing will quietly shrink the lists the
+  first time someone filters on it. Ask the warm-up question (above) of any field before
+  turning the flag on.
 
 ## Out of scope (deliberately)
 

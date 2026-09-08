@@ -20,18 +20,11 @@ import {
   saveStrategies,
   type StrategyStorage,
 } from './lib/strategy/storage';
-import {
-  applyFanFilters,
-  DEFAULT_FAN_FILTERS,
-  type FanFilters,
-} from './lib/filters';
-import {
-  DEFAULT_COLUMNS,
-  toggleColumn as toggleColumnIn,
-  type ScreenView,
-} from './lib/screen/columns';
-import type { FieldId } from './lib/screen/fields';
+import { signalFloorsOf, type Clause, type ScreenFilters } from './lib/screen/filters';
+import { DEFAULT_COLUMNS, type ScreenView } from './lib/screen/columns';
+import { setSectorOptions, type FieldId } from './lib/screen/fields';
 import type { SortState } from './lib/screen/sort';
+import { createScreenSlice, DEFAULT_SORT, type ScreenSlice } from './store/screenSlice';
 import {
   DEFAULT_FAN_BACKTEST_CONFIG,
   fanEntryIndex,
@@ -41,11 +34,12 @@ import {
   type FanEntryEvent,
 } from './lib/fanBacktest';
 
-export type { FanRow, FanSignalRow, ImportConfigOption, ImportDataEntry, DevImportReport, DatabaseEntry, FanFilters };
+export type { FanRow, FanSignalRow, ImportConfigOption, ImportDataEntry, DevImportReport, DatabaseEntry };
+export type { Clause, ScreenFilters, ScreenSlice };
 export type { FanBacktestConfig, FanBacktestProgress, FanBacktestResult, FanEntryEvent };
 export type { StrategyDef, ExitSpec };
 export type { ScreenView, FieldId, SortState };
-export { DEFAULT_FAN_FILTERS, DEFAULT_FAN_BACKTEST_CONFIG, DEFAULT_COLUMNS };
+export { DEFAULT_FAN_BACKTEST_CONFIG, DEFAULT_COLUMNS, DEFAULT_SORT };
 
 export type DisplayStatus = 'loading' | 'loaded' | 'error';
 
@@ -111,23 +105,7 @@ const EMPTY_DB: DbSelectorState = {
   switching: false, error: null,
 };
 
-/** Worst-gap first for the fan lists, freshest entry first for the entries list. */
-export const DEFAULT_SORT: Record<ScreenView, SortState> = {
-  fan: { field: 'worstGap', dir: 'desc' },
-  entries: { field: 'barsAgo', dir: 'asc' },
-};
-
-function matchesQuery(row: FanRow, q: string): boolean {
-  if (!q) return true;
-  const n = q.toLowerCase();
-  return row.ticker.toLowerCase().includes(n) || row.name.toLowerCase().includes(n);
-}
-
-function filterRows(rows: FanRow[], q: string, filters: FanFilters): FanRow[] {
-  return applyFanFilters(rows, filters).filter((r) => matchesQuery(r, q));
-}
-
-export interface ScreenerState {
+export interface ScreenerState extends ScreenSlice {
   ready: boolean;
   matches: FanRow[];
   near: FanRow[];
@@ -135,12 +113,6 @@ export interface ScreenerState {
   screenError: string | null;
   universeSize: number;
   sectors: string[];
-  search: string;
-  filters: FanFilters;
-  /** Visible columns per view; the `near` list shares the fan view's. */
-  columns: Record<ScreenView, FieldId[]>;
-  /** Column sort per view. */
-  sort: Record<ScreenView, SortState>;
   /** Saved custom strategies (presets are not stored here). */
   strategies: StrategyDef[];
   /** '' = fan lists; a strategy id (preset or saved) switches the screener to the live-entries view. */
@@ -159,12 +131,6 @@ export interface ScreenerState {
   bootstrap: () => Promise<void>;
   retry: () => Promise<void>;
   runScreen: () => Promise<void>;
-  onSearch: (v: string) => void;
-  setFilter: <K extends keyof FanFilters>(key: K, value: FanFilters[K]) => void;
-  resetFilters: () => void;
-  setSort: (view: ScreenView, sort: SortState) => void;
-  toggleColumn: (view: ScreenView, id: FieldId) => void;
-  resetColumns: (view: ScreenView) => void;
   setSignalStrategy: (strategy: string) => void;
   /** Insert or replace a saved custom strategy and persist the list. */
   saveStrategy: (def: StrategyDef) => void;
@@ -175,8 +141,6 @@ export interface ScreenerState {
   closeDetail: () => void;
   ensureDisplayed: (ticker: string) => Promise<void>;
   retryDisplayed: (ticker: string) => void;
-  filteredMatches: () => FanRow[];
-  filteredNear: () => FanRow[];
 
   probeDevImport: () => Promise<void>;
   openDevImport: () => void;
@@ -219,6 +183,9 @@ export function makeScreenerState(
   let displayGen = 0;
 
   return (set, get) => ({
+    ...createScreenSlice(set, get, () => {
+      if (get().signalStrategy) void get().runSignals();
+    }),
     ready: false,
     matches: [],
     near: [],
@@ -226,10 +193,6 @@ export function makeScreenerState(
     screenError: null,
     universeSize: 0,
     sectors: [],
-    search: '',
-    filters: { ...DEFAULT_FAN_FILTERS },
-    columns: { fan: [...DEFAULT_COLUMNS.fan], entries: [...DEFAULT_COLUMNS.entries] },
-    sort: { fan: { ...DEFAULT_SORT.fan }, entries: { ...DEFAULT_SORT.entries } },
     strategies: [],
     signalStrategy: '',
     signals: [],
@@ -290,28 +253,13 @@ export function makeScreenerState(
       }
     },
 
-    onSearch: (v) => set({ search: v }),
-    setFilter: (key, value) => {
-      set((s) => ({ filters: { ...s.filters, [key]: value } }));
-      // vol / cap / 200-EMA slope are server-side scan inputs; re-run the
-      // live-entries screen when they change while it is active. Sector / price
-      // / search are applied client-side and need no re-run.
-      const scanKeys: (keyof FanFilters)[] = ['minAvgVol', 'minMarketCap', 'ema200RisingBars'];
-      if (get().signalStrategy && scanKeys.includes(key)) void get().runSignals();
-    },
-    resetFilters: () => {
-      set({ filters: { ...DEFAULT_FAN_FILTERS } });
-      if (get().signalStrategy) void get().runSignals();
-    },
-    setSort: (view, sort) => set((s) => ({ sort: { ...s.sort, [view]: sort } })),
-    toggleColumn: (view, id) => set((s) => ({
-      columns: { ...s.columns, [view]: toggleColumnIn(s.columns[view], id) },
-    })),
-    resetColumns: (view) => set((s) => ({
-      columns: { ...s.columns, [view]: [...DEFAULT_COLUMNS[view]] },
-    })),
     setSignalStrategy: (strategy) => {
-      set({ signalStrategy: strategy });
+      // The tab follows the select: picking a strategy shows its entries,
+      // clearing it drops back to the fan list rather than an empty tab.
+      set((s) => ({
+        signalStrategy: strategy,
+        view: strategy ? 'entries' : s.view === 'entries' ? 'fan' : s.view,
+      }));
       if (!strategy) {
         signalsGen++;
         signalsAbort?.abort();
@@ -362,9 +310,7 @@ export function makeScreenerState(
         const resp = await client.signals({
           // Presets travel as their id; a saved strategy carries its definition.
           strategy: def.builtin ? def.id : def,
-          minAvgVol: filters.minAvgVol,
-          minMarketCap: filters.minMarketCap,
-          ema200RisingBars: filters.ema200RisingBars,
+          ...signalFloorsOf(filters),
         }, ac.signal);
         if (gen !== signalsGen || get().signalStrategy !== strategy) return;
         set({ signals: resp.rows, signalsLoading: false });
@@ -376,15 +322,6 @@ export function makeScreenerState(
     },
     selectStock: (t) => { set({ selected: t }); void get().ensureDisplayed(t); },
     closeDetail: () => set({ selected: null }),
-
-    filteredMatches: () => {
-      const { search, filters, matches } = get();
-      return filterRows(matches, search.trim(), filters);
-    },
-    filteredNear: () => {
-      const { search, filters, near } = get();
-      return filterRows(near, search.trim(), filters);
-    },
 
     ensureDisplayed: async (ticker) => {
       if (!ticker || get().displayed[ticker]) return;
@@ -515,12 +452,7 @@ export function makeScreenerState(
           error: null,
           progress: null,
           result: s.fanBacktest.running ? null : s.fanBacktest.result,
-          config: {
-            ...s.fanBacktest.config,
-            minAvgVol: s.filters.minAvgVol,
-            minMarketCap: s.filters.minMarketCap,
-            ema200RisingBars: s.filters.ema200RisingBars,
-          },
+          config: { ...s.fanBacktest.config, ...signalFloorsOf(s.filters) },
         },
       }));
     },
@@ -581,3 +513,6 @@ export function makeScreenerState(
 }
 
 export const useScreener = create<ScreenerState>(makeScreenerState());
+
+// The sector chip's choices are whatever the loaded dataset reported.
+setSectorOptions(() => useScreener.getState().sectors);

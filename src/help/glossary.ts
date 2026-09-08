@@ -63,6 +63,16 @@ Click a header to sort by that column; click it again to reverse. Names with no 
     related: ['filters', 'search'],
   },
   {
+    id: 'detail-dock',
+    title: 'Detail panel',
+    kind: 'ui',
+    aliases: ['detail panel', 'chart panel'],
+    body: `The candlestick chart docks beside the list instead of covering it, so you can keep scanning while you chart: click another row and the panel swaps symbol in place. Drag its left edge to widen it — the chart redraws at the new width — and press Esc or ✕ to close.
+
+Below 1100 px wide there is no room for both, so the panel goes back to covering the list and a click outside closes it. Nothing in the panel changes what the [[fan|screen]] matched; it is the same [[universe|instrument]] history drawn in full.`,
+    related: ['fan', 'column-chooser'],
+  },
+  {
     id: 'data-source',
     title: 'Data source',
     kind: 'data',
@@ -251,10 +261,22 @@ A [[fan]] match always shows a positive gap. A [[fan-near]] name shows a small n
     title: 'Filters',
     kind: 'screen',
     aliases: ['filters', 'filter bar'],
-    body: `The filter bar trims both lists after the [[fan]] screen has run; it never changes which names are in the fan, only which are shown. Clear filters restores the defaults, where only the [[ema200-slope]] is on.
+    body: `The filter bar trims both lists after the [[fan]] screen has run; it never changes which names are in the fan, only which are shown. It is an open row of [[filter-chip|chips]] — one per field — plus a + that adds any other. Clear filters restores the defaults, where only the [[ema200-slope]] is on.
 
-The same volume, cap and slope floors are offered again in the [[backtest]] so the history matches what the lists show.`,
-    related: ['avg-volume', 'market-cap', 'min-price', 'sector', 'ema200-slope'],
+Volume, cap and slope are the three the [[live-entry|entries]] scan is given up front, because that scan is expensive; every other chip is applied to the rows it returns. The same three floors are offered again in the [[backtest]] so the history matches what the lists show.`,
+    related: ['filter-chip', 'avg-volume', 'market-cap', 'min-price', 'sector', 'ema200-slope'],
+  },
+  {
+    id: 'filter-chip',
+    title: 'Filter chips',
+    kind: 'screen',
+    aliases: ['filter chip', 'chip', 'chips'],
+    body: `Each chip is one field and its allowed range. Click it to type a minimum, a maximum, or both — leave a box empty for an open end — or take one of the quick values. The + chip adds any field the table can show, so anything you can put in a [[column-chooser|column]] you can also filter on, including [[rsi]], [[stoch-rsi|Stoch %K]], [[rel-vol]], [[perf|performance]] and [[atr-pct|volatility]].
+
+Units follow the field. A percent field is typed as a percent — [[atr-pct|volatility]] 3 means 3%, not 0.03. Volume and [[market-cap|cap]] accept 400K or 1.2B.
+
+**A name with no value for a filtered field is dropped**, whichever bound is set. Short histories have no [[rsi|RSI]] and no [[stoch-rsi|Stoch RSI]] yet, and some datasets have no cap, so a chip can shrink a list for a reason that is not on screen — the "n of m shown" count is there to say it happened. Sorting deliberately does the opposite: a missing value sinks to the bottom but stays in the list.`,
+    related: ['filters', 'column-chooser', 'ema200-slope'],
   },
   {
     id: 'entry-strategy',

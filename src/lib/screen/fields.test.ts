@@ -9,7 +9,7 @@ import {
   type FieldId,
   type ScreenRowLike,
 } from './fields.ts';
-import { DEFAULT_COLUMNS, orderColumns, toggleColumn } from './columns.ts';
+import { DEFAULT_COLUMNS, SCREEN_TABS, orderColumns, tableViewOf, toggleColumn } from './columns.ts';
 import { EMPTY_SNAPSHOT } from './snapshot.ts';
 import { TOPICS } from '../../help/glossary.ts';
 
@@ -100,5 +100,17 @@ describe('column defaults', () => {
   it('will not hide a pinned column or show a filter-only field', () => {
     expect(toggleColumn(DEFAULT_COLUMNS.fan, 'ticker')).toContain('ticker');
     expect(toggleColumn(DEFAULT_COLUMNS.fan, 'ema200Rising' as FieldId)).not.toContain('ema200Rising');
+  });
+});
+
+describe('tabs and table shapes', () => {
+  it('draws the near list with the fan list\'s columns and sort', () => {
+    expect(tableViewOf('fan')).toBe('fan');
+    expect(tableViewOf('near')).toBe('fan');
+    expect(tableViewOf('entries')).toBe('entries');
+  });
+
+  it('has a defined column set behind every tab', () => {
+    for (const tab of SCREEN_TABS) expect(DEFAULT_COLUMNS[tableViewOf(tab)].length).toBeGreaterThan(0);
   });
 });

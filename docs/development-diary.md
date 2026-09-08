@@ -1,5 +1,117 @@
 # Development diary
 
+## 2026-09-08 — Screener parity phase 3: view tabs and the docked chart
+
+### What changed
+The side-by-side split and the modal chart drawer are gone. The screener is now **one
+full-width table under three view tabs**, with the candlestick chart **docked beside the
+list** instead of covering it. Phase 3 of `docs/screener-parity-plan.md`.
+
+- `src/components/ScreenView.tsx` (was `FanLists.tsx`) — one component, one `ScreenTable`.
+  Tabs are **EMA fan · Close to fan · Entries**, each with its filtered count; Entries is
+  dead (and shows `—`) until an entry strategy is chosen. All three row sets are filtered on
+  every render, so switching tab is a repaint, never a re-screen. The card header keeps the
+  count sentence, the list's own rule and the ⚙; the "n of m shown" line now counts the
+  search box as filtering too, which the fan lists previously ignored.
+- **Two axes, deliberately not merged.** `ScreenView` (`'fan' | 'entries'`) stays the *table
+  shape* — the column set and sort, which `near` shares with `fan`. The new `ScreenTab`
+  (`'fan' | 'near' | 'entries'`) in `lib/screen/columns.ts` is the *row set*, i.e. the
+  visible tab, and `tableViewOf(tab)` maps one to the other. Phase 4's `SavedScreen.view` is
+  a `ScreenTab`.
+- `src/components/detail/DetailPanels.tsx` — `DetailOverlay` became **`DetailDock`**: a
+  resizable flex sibling of the table (no backdrop), so the list stays visible and clicking
+  another row swaps the symbol in place. Drag the left edge to resize; the chart's existing
+  `ResizeObserver` redraws it, and pointer moves are coalesced to one width per frame. Esc
+  or ✕ closes — unless a help card is up, which owns Escape first.
+- `src/lib/screen/dock.ts` (new) — `clampDockWidth` / `isNarrow` and the three constants.
+  The dock is at least 420 px and never squeezes the table below 520 px, so a width dragged
+  on a wide screen still fits a narrow one; **below 1100 px the panel falls back to the old
+  full-height overlay** with its click-outside backdrop. Kept pure so the drag handler, the
+  store and the tests share one rule.
+- `src/store/screenSlice.ts` — gains `view` and `dockWidth` (plus `setView` / `setDockWidth`).
+  `store.ts` gained no new state: its `setSignalStrategy` now moves the tab, since picking a
+  strategy should show its entries and clearing it should not leave an empty tab selected.
+  A tab that outlives what enabled it (a deleted strategy, a saved screen in phase 4) is
+  corrected at render — the visible tab is derived, not trusted.
+- Help: new `detail-dock` card on the drag handle; the tabs carry the existing `fan`,
+  `fan-near` and `live-entry` ids that used to sit on the two panel titles.
+
+**The plan's "rows per screen roughly doubles" expectation was wrong, and this is the place
+to say so.** The old split was two *side-by-side* panels, so each already ran the full height
+of the window: 27 rows at 34 px in a 1216 px-tall viewport, before and after. What the
+full-width table actually buys is width — the whole 15-column set is visible at once instead
+of scrolling sideways inside a half-width panel — and one list at a time with its own tab
+rather than two lists competing for the same glance. Vertical density is now a row-height
+question, not a layout one.
+
+### How to test
+- `npm run test` — new `lib/screen/dock.test.ts` (clamping, the list minimum, a NaN width,
+  the breakpoint boundary); `lib/screen/fields.test.ts` covers `tableViewOf`; `store.test.ts`
+  covers the default tab, the strategy select moving it, and the dock-width clamp
+- `npm run dev` — click a row: the chart docks right and the table stays scrollable; click
+  another row and the symbol swaps in place; drag the divider and the chart redraws; switch
+  tabs and the fan/near lists share their columns and sort while Entries brings its own;
+  pick a strategy and the tab follows, clear it and it goes back
+- Under 1100 px wide the panel goes back to covering the list — verify by narrowing the
+  window (temporarily raising `DOCK_BREAKPOINT` is the quick way on a large display)
+
+---
+
+## 2026-09-08 — Screener parity phase 2: filter clauses and chips
+
+### What changed
+The six fixed dropdowns are gone. Filters are now an **open list of clauses**, one per field,
+rendered as TradingView-style chips with free numeric ranges and a `+` that adds any
+filterable field in the registry. Phase 2 of `docs/screener-parity-plan.md`.
+
+- `src/lib/screen/filters.ts` (replaces `src/lib/filters.ts`) — the `Clause` model:
+  `range` (either bound optional) on any numeric field, `in` for the sector, `bars` for the
+  200-EMA slope. `applyClauses` / `filterRows` evaluate it, `clausesActive` tells the "n of m
+  shown" line whether to speak, and `signalFloorsOf` projects the three floors the `/signals`
+  scan still takes server-side. `DEFAULT_FILTERS` is the 1-month slope test alone, so the
+  out-of-the-box behaviour is unchanged.
+- **Units follow the field's `kind`, in one place.** A `ratio` field holds a fraction and its
+  chip is typed in percent — volatility `3` is stored as `0.03`; a `percent` field is already
+  in percent units, so `changePct` `2.5` stays `2.5`. `parseCompact` (new, in
+  `screen/format.ts` beside its inverse `fmtCompact`) reads `400K` / `1.2B`.
+- **A range clause drops rows whose value is missing**, whichever bound is set — NaN in
+  process, `null` after JSON, identically. A freshly listed name has no RSI to compare, and
+  silently keeping it would be the wrong answer. Sorting keeps the opposite convention on
+  purpose: missing sinks to the bottom but stays in the list. The `filter-chip` help card
+  says so, because a count that shrinks for an invisible reason is the confusing case.
+- `src/store/screenSlice.ts` (new) — `search`, `filters`, `columns`, `sort` and
+  `filteredMatches` / `filteredNear` moved out of `store.ts`, which keeps only the data and
+  async layer plus the slice import. The slice compares `signalFloorsOf` before and after
+  every filter change and re-runs the entries scan **only when a floor actually moved**, so a
+  sector or RSI chip is applied client-side with no round trip — the old hand-maintained
+  `scanKeys` list is gone.
+- `src/components/filters/` — `FilterChip.tsx` (the chip plus its editor: two bounds, quick
+  values, a sector checklist, the three slope lookbacks), `FieldPicker.tsx` (the `+`, with a
+  type-ahead) and `useDismiss.ts`. `FilterBar.tsx` keeps the entry-strategy select and
+  becomes the chip row. The old dropdown presets survive as one-click quick values; the
+  backtest modal still uses the preset arrays as selects.
+- Sector choices come from the loaded dataset: `fields.ts` gained `setSectorOptions`, wired
+  once to the store's facts, so `FieldDef.options` is no longer a declared-but-unimplemented
+  hole.
+- Help: new `filter-chip` card; the `filters` card now explains which three chips the entries
+  scan is given up front and why. Existing `data-help` ids (`min-price`, `avg-volume`,
+  `market-cap`, `sector`, `ema200-slope`) ride on the chips that replaced their dropdowns.
+
+The layout is still the two-panel split and the modal chart — that is phase 3.
+
+### How to test
+- `npm run test` — new `lib/screen/filters.test.ts` (every clause kind, open-ended ranges,
+  both percent conventions, `300M` / `1.2B` parsing, `signalFloorsOf`, and that the default
+  set reproduces the old dropdown behaviour); `src/store.test.ts` asserts the `/signals` body
+  carries floors derived from clauses and that a client-side clause does not re-scan
+- `npm run dev` — add Price 20–100, RSI 14 40–50 and Avg vol ≥ 400K as chips and watch the
+  count go "3 of 14 shown"; pick an entry strategy, change the slope chip (one `/signals`
+  request) then add a sector chip (none)
+- `curl -s -X POST http://localhost:8787/signals -H 'content-type: application/json'
+  -d '{"strategy":"tag50","minAvgVol":400000,"minMarketCap":0,"ema200RisingBars":21}'`
+
+---
+
 ## 2026-09-08 — Screener parity phase 1: columns and sorting
 
 ### What changed

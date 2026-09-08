@@ -33,3 +33,21 @@ export function fmtPercent(v: unknown, digits = 2): string {
 export function fmtRatio(v: unknown, digits = 2): string {
   return isNum(v) ? (v * 100).toFixed(digits) + '%' : DASH;
 }
+
+const COMPACT_SUFFIX: Record<string, number> = { k: 1e3, m: 1e6, b: 1e9, t: 1e12 };
+
+/**
+ * Inverse of `fmtCompact`, and the one parser every filter chip types into:
+ * "300M" → 300000000, "1.2b" → 1200000000, "1,250" → 1250, "20" → 20.
+ * Returns null for anything that is not a number — including the empty string,
+ * which a chip reads as "this bound is not set".
+ */
+export function parseCompact(text: string): number | null {
+  const s = text.trim().replace(/[\s,_]/g, '').replace(/^\$/, '');
+  if (!s) return null;
+  const m = /^(-?(?:\d+\.?\d*|\.\d+))([kmbt])?$/i.exec(s);
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n)) return null;
+  return m[2] ? n * COMPACT_SUFFIX[m[2].toLowerCase()] : n;
+}

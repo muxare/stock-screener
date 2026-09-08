@@ -8,6 +8,7 @@ import { STRATEGIES_KEY, memoryStorage, type StrategyStorage } from './lib/strat
 import { newCustomStrategy } from './lib/strategy/presets';
 import { EMPTY_SNAPSHOT } from './lib/screen/snapshot';
 import { DEFAULT_COLUMNS } from './lib/screen/columns';
+import { DOCK_DEFAULT, DOCK_MIN } from './lib/screen/dock';
 
 function deferred<T>() {
   let resolve!: (v: T) => void;
@@ -125,9 +126,9 @@ describe('fan filters', () => {
       ],
       near: [],
     });
-    store.getState().setFilter('minAvgVol', 250_000);
+    store.getState().setClause({ field: 'avgVol20', kind: 'range', min: 250_000 });
     expect(store.getState().filteredMatches().map((r) => r.ticker)).toEqual(['A']);
-    store.getState().setFilter('sector', 'Energy');
+    store.getState().setClause({ field: 'sector', kind: 'in', values: ['Energy'] });
     expect(store.getState().filteredMatches()).toEqual([]);
     store.getState().resetFilters();
     expect(store.getState().filteredMatches()).toHaveLength(2);
@@ -171,6 +172,39 @@ describe('sort and columns', () => {
     expect(store.getState().columns.fan).not.toEqual(DEFAULT_COLUMNS.fan);
     store.getState().resetColumns('fan');
     expect(store.getState().columns.fan).toEqual(DEFAULT_COLUMNS.fan);
+  });
+});
+
+describe('the visible tab and the detail dock', () => {
+  it('starts on the fan tab with the default dock width', () => {
+    const store = makeStore(fakeClient());
+    expect(store.getState().view).toBe('fan');
+    expect(store.getState().dockWidth).toBe(DOCK_DEFAULT);
+  });
+
+  it('follows the entry-strategy select onto the entries tab and back', () => {
+    const store = makeStore(fakeClient({ signals: vi.fn(async (): Promise<SignalsResp> => (
+      { universe: 1, elapsedMs: 1, strategy: 'tag50', strategyName: 'Tag 50', rows: [] }
+    )) }));
+    store.getState().setSignalStrategy('tag50');
+    expect(store.getState().view).toBe('entries');
+    store.getState().setSignalStrategy('');
+    expect(store.getState().view).toBe('fan');
+  });
+
+  it('leaves a fan-side tab alone when the strategy is cleared', () => {
+    const store = makeStore(fakeClient());
+    store.getState().setView('near');
+    store.getState().setSignalStrategy('');
+    expect(store.getState().view).toBe('near');
+  });
+
+  it('clamps a dragged dock width to the panel minimum', () => {
+    const store = makeStore(fakeClient());
+    store.getState().setDockWidth(900);
+    expect(store.getState().dockWidth).toBe(900);
+    store.getState().setDockWidth(120);
+    expect(store.getState().dockWidth).toBe(DOCK_MIN);
   });
 });
 
@@ -321,12 +355,14 @@ describe('live entry signals', () => {
     const store = makeStore(client);
     store.getState().setSignalStrategy('tag50');
     await vi.waitFor(() => expect(calls).toHaveLength(1));
-    store.getState().setFilter('minAvgVol', 250_000);
+    store.getState().setClause({ field: 'avgVol20', kind: 'range', min: 250_000 });
     await vi.waitFor(() => expect(calls).toHaveLength(2));
     expect(calls[1].minAvgVol).toBe(250_000);
-    // sector / min-price are applied client-side, so they must not trigger a scan.
-    store.getState().setFilter('sector', 'Tech');
-    store.getState().setFilter('minPrice', 5);
+    // sector / price / indicator clauses are applied client-side, so they must
+    // not move a floor and must not trigger a scan.
+    store.getState().setClause({ field: 'sector', kind: 'in', values: ['Tech'] });
+    store.getState().setClause({ field: 'price', kind: 'range', min: 5 });
+    store.getState().setClause({ field: 'rsi14', kind: 'range', min: 50, max: 65 });
     await Promise.resolve();
     expect(calls).toHaveLength(2);
   });
@@ -449,9 +485,9 @@ describe('saved strategies', () => {
 describe('openFanBacktest copies screener liquidity filters', () => {
   it('seeds minAvgVol, minMarketCap, and 200-EMA slope from the main filter bar', () => {
     const store = makeStore(fakeClient());
-    store.getState().setFilter('minAvgVol', 250_000);
-    store.getState().setFilter('minMarketCap', 1e9);
-    store.getState().setFilter('ema200RisingBars', 105);
+    store.getState().setClause({ field: 'avgVol20', kind: 'range', min: 250_000 });
+    store.getState().setClause({ field: 'marketCap', kind: 'range', min: 1e9 });
+    store.getState().setClause({ field: 'ema200Rising', kind: 'bars', bars: 105 });
     store.getState().openFanBacktest();
     expect(store.getState().fanBacktest.config.minAvgVol).toBe(250_000);
     expect(store.getState().fanBacktest.config.minMarketCap).toBe(1e9);

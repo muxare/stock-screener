@@ -4,7 +4,7 @@ import { HButton } from '../ui/Hoverable';
 import { Disclosure } from '../ui/Disclosure';
 import { fanEntryIndex } from '../../lib/fanBacktest';
 import { StrategyBuilder } from './StrategyBuilder';
-import { AVG_VOL_PRESETS, MARKET_CAP_PRESETS, EMA200_RISING_PRESETS } from '../../lib/filters';
+import { AVG_VOL_PRESETS, MARKET_CAP_PRESETS, EMA200_RISING_PRESETS } from '../../lib/screen/filters';
 import { FanTradeReview } from './FanTradeReview';
 import { FanExampleChart } from './FanExampleChart';
 

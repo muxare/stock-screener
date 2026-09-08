@@ -21,6 +21,7 @@ import {
 } from './fanBacktest.ts';
 import type { StrategyDef } from './strategy/types.ts';
 import { buildSnapshot, type IndicatorSnapshot } from './screen/snapshot.ts';
+import { filterRows, type ScreenFilters } from './screen/filters.ts';
 
 /** Displayed exit window, in R multiples of the initial risk. */
 export const SIGNAL_TARGET_LO_R = BUNN_WINDOW_LO; // 2.5
@@ -184,18 +185,17 @@ export function fmtTargetWindow(row: FanSignalRow): string {
   return `${row.targetLoPrice.toFixed(2)}–${row.targetHiPrice.toFixed(2)} (${r})`;
 }
 
-/** Client-side facets the engine does not apply: sector, min price, search. */
+/**
+ * The clauses the scan could not apply itself. `signalFloorsOf` already sent
+ * volume / cap / slope to the server, so re-testing them here is a no-op; every
+ * other chip — sector, price, RSI, Stoch, performance — lands here. Signal rows
+ * carry no `ema200Ago`, so the slope clause passes them through (the engine
+ * enforced it at the fill).
+ */
 export function filterSignalRows(
   rows: FanSignalRow[],
   search: string,
-  sector: string,
-  minPrice: number,
+  filters: ScreenFilters,
 ): FanSignalRow[] {
-  const q = search.trim().toLowerCase();
-  return rows.filter((r) => {
-    if (sector && r.sector !== sector) return false;
-    if (minPrice > 0 && (!Number.isFinite(r.price) || r.price < minPrice)) return false;
-    if (q && !r.ticker.toLowerCase().includes(q) && !r.name.toLowerCase().includes(q)) return false;
-    return true;
-  });
+  return filterRows(rows, search, filters);
 }

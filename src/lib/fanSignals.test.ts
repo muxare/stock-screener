@@ -15,6 +15,7 @@ import { ema } from './indicators.ts';
 import type { FanEntryEvent } from './fanBacktest.ts';
 import { presetById } from './strategy/presets.ts';
 import { buildSnapshot } from './screen/snapshot.ts';
+import type { Clause, ScreenFilters } from './screen/filters.ts';
 
 function rampSeries(flatBars: number, rampBars: number, flat = 10, step = 0.45): number[] {
   return [
@@ -193,9 +194,16 @@ describe('filterSignalRows', () => {
     { ...({} as FanSignalRow), ticker: 'BIG', name: 'Big', sector: 'Tech', price: 100 },
     { ...({} as FanSignalRow), ticker: 'MID', name: 'Mid', sector: 'Health', price: 8 },
   ];
-  it('filters by sector, min price, and search', () => {
-    expect(filterSignalRows(rows, '', 'Tech', 0).map((r) => r.ticker)).toEqual(['BIG']);
-    expect(filterSignalRows(rows, '', '', 10).map((r) => r.ticker)).toEqual(['BIG']);
-    expect(filterSignalRows(rows, 'mid', '', 0).map((r) => r.ticker)).toEqual(['MID']);
+  const only = (c: Clause): ScreenFilters => ({ clauses: [c] });
+
+  it('applies the sector, price and search facets the scan could not', () => {
+    expect(filterSignalRows(rows, '', only({ field: 'sector', kind: 'in', values: ['Tech'] })).map((r) => r.ticker)).toEqual(['BIG']);
+    expect(filterSignalRows(rows, '', only({ field: 'price', kind: 'range', min: 10 })).map((r) => r.ticker)).toEqual(['BIG']);
+    expect(filterSignalRows(rows, 'mid', { clauses: [] }).map((r) => r.ticker)).toEqual(['MID']);
+  });
+
+  it('passes signal rows through the 200-EMA slope clause (the scan enforced it)', () => {
+    const out = filterSignalRows(rows, '', only({ field: 'ema200Rising', kind: 'bars', bars: 21 }));
+    expect(out.map((r) => r.ticker)).toEqual(['BIG', 'MID']);
   });
 });

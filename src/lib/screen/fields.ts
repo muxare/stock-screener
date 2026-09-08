@@ -76,8 +76,20 @@ export interface FieldDef {
   digits?: number;
   /** Header tooltip. */
   title?: string;
-  /** enum only: the values a filter may pick from (supplied by the store). */
+  /** enum only: the values a filter may pick from (see `setSectorOptions`). */
   options?: () => string[];
+}
+
+/**
+ * Where an `enum` field's choices come from. The sectors are a property of the
+ * loaded dataset, not of the registry, so the store supplies them once at
+ * start-up and the field just asks. Defaults to none so the registry stays
+ * usable (and testable) with no store around.
+ */
+let sectorSource: () => readonly string[] = () => [];
+
+export function setSectorOptions(fn: () => readonly string[]): void {
+  sectorSource = fn;
 }
 
 const snap = <K extends keyof IndicatorSnapshot>(k: K) => (r: ScreenRowLike) => {
@@ -89,7 +101,7 @@ const numOf = (v: number | null | undefined) => (isNum(v) ? v : null);
 const FIELD_LIST: FieldDef[] = [
   { id: 'ticker', label: 'Ticker', kind: 'text', align: 'left', width: '86px', defaultVisible: true, column: true, filterable: false, pinned: true, get: (r) => r.ticker },
   { id: 'name', label: 'Name', kind: 'text', align: 'left', width: 'minmax(120px, 1fr)', defaultVisible: true, column: true, filterable: false, get: (r) => r.name },
-  { id: 'sector', label: 'Sector', kind: 'enum', help: 'sector', align: 'left', width: '132px', defaultVisible: false, column: true, filterable: true, get: (r) => r.sector || null },
+  { id: 'sector', label: 'Sector', kind: 'enum', help: 'sector', align: 'left', width: '132px', defaultVisible: false, column: true, filterable: true, options: () => [...sectorSource()], get: (r) => r.sector || null },
 
   { id: 'price', label: 'Last', kind: 'price', help: 'min-price', align: 'right', width: '72px', defaultVisible: true, column: true, filterable: true, digits: 2, get: (r) => numOf(r.price) },
   { id: 'changePct', label: 'Chg', kind: 'percent', help: 'change-pct', align: 'right', width: '66px', defaultVisible: true, column: true, filterable: true, get: (r) => numOf(r.changePct) },
