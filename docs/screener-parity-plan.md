@@ -34,12 +34,60 @@ hover help system (`src/help/`).
 - `/signals` takes three server-side floors (`minAvgVol`, `minMarketCap`,
   `ema200RisingBars`) because the scan is expensive; sector/price/search are then applied
   client-side (`filterSignalRows`).
-- `src/lib/indicators.ts` exports `ema`, `sma`, `rsi`, `stochRsi`, `macd`.
-- Tables: `FanTable` / `SignalTable` in `src/components/FanLists.tsx`, CSS-grid rows with a
-  hard-coded `GRID` template. `@tanstack/react-table` is in `package.json` but unused.
+- `src/lib/indicators.ts` exports `ema`, `sma`, `rsi`, `stochRsi`, `macd` and (since
+  phase 1) `atr14`.
 - Persistence pattern: `src/lib/strategy/storage.ts` (injected storage, re-parse on load,
   drop bad entries) with `store.ts` owning the list.
-- `src/store.ts` is 553 lines; new state must go in its own modules.
+- `src/store.ts` is 585 lines; new state must go in its own modules.
+
+*(Superseded by phase 1: the hard-coded `GRID` / `SIG_GRID` tables and the unused
+`@tanstack/react-table` dependency are gone. See "What phase 1 actually built" below.)*
+
+### What phase 1 actually built (read before starting phase 2)
+
+Phase 1 landed on `feat/screener-parity-phase1`. Where it differs from the sketch below,
+**this section wins** — the sketch is what was imagined, this is what exists.
+
+- **`lib/screen/snapshot.ts`** — as designed, plus `stochD`. Two rules the design did not
+  pin down and phase 2 must respect:
+  - `stochK` / `stochD` stay **missing until the whole 14-bar RSI window is real**
+    (`closes.length > 2 × 14`). Earlier than that the window is backfilled warm-up copies
+    and %K collapses to a fake 0 — which is exactly the value a "Stoch K ≤ 20" chip would
+    have matched.
+  - `rsi14` needs `closes.length > 14`; `perf1m` / `perf3m` need the lookback; `atrPct`
+    needs highs **and** lows of matching length; `hi52` / `lo52` fall back to closes.
+- **`lib/screen/fields.ts`** — the registry, with a wider `kind` union than sketched:
+  `text | enum | number | price | percent | ratio | compact | spark | bars`. `FieldDef` is
+  `{ id, label, kind, get, help?, align, width, defaultVisible, column, filterable, pinned?,
+  digits?, title?, options? }`. Two flags, not one: **`column`** (may be shown as a column)
+  and **`filterable`** (may be a chip). `width` is a CSS grid track (`'84px'`,
+  `'minmax(120px, 1fr)'`), not a number. `options` is declared but unimplemented — phase 2
+  wires sectors from store facts into it.
+- **`lib/screen/format.ts`** (new, not in the sketch) — `fmtCompact` moved here out of
+  `lib/filters.ts` (re-exported from there), plus `fmtPercent` / `fmtRatio` / `fmtFixed` /
+  `isNum` / `DASH`. **`parseCompact` belongs here in phase 2**, not in the filter module.
+- **`lib/screen/columns.ts`** (new) — `ScreenView`, `DEFAULT_COLUMNS`, `orderColumns`,
+  `toggleColumn`. Phase 4 adds the `sanitizeColumns` that saved screens need (drop unknown
+  ids, keep pinned); it was deliberately not written on spec.
+- **`lib/screen/sort.ts`** — `SortState.field` is a **`SortKey` (string), not a `FieldId`**,
+  because the entries list's own columns sort through the same code. `sortRows(rows, sort,
+  valueOf, tiebreak)` takes an injected accessor. Phase 4 therefore persists sort keys like
+  `'barsAgo'` and must tolerate a key that no longer resolves.
+- **`components/table/ScreenTable.tsx`** — generic over `T extends ScreenRowLike`; signal-only
+  columns arrive as `extra: ExtraColumn<T>[]` with their own `render` and `sortValue`, placed
+  by `extraAfter="changePct"`. Wide column sets scroll sideways inside the panel (`minWidth`
+  from the tracks) — phase 3's full-width table is what removes the need.
+- **`components/table/ColumnChooser.tsx`** — the ⚙ sits in the **list section header**, not
+  inside the sticky column header row as sketched (the header row is too cramped and scrolls
+  horizontally). Keep it there when phase 3 introduces the view tabs.
+- **Store** — `columns: Record<ScreenView, FieldId[]>` and `sort: Record<ScreenView, SortState>`
+  with `setSort` / `toggleColumn` / `resetColumns`, still in `store.ts` (~30 lines).
+  `ScreenView` is **`'fan' | 'entries'`** — the *table shape*, which `near` shares with `fan`.
+  That is a different axis from phase 3's visible tab and phase 4's `SavedScreen.view`
+  (`'fan' | 'near' | 'entries'`), which is the *row set*. Do not merge the two.
+- **Help** — `rsi`, `stoch-rsi`, `volume`, `rel-vol`, `perf`, `atr-pct`, `column-chooser` and
+  `week52` (extra) are in. Still owed: `filter-chip` (phase 2), `detail-dock` (phase 3),
+  `saved-screen` (phase 4).
 
 ### Decisions to confirm before phase 2 (recommended answers in bold)
 
@@ -56,6 +104,16 @@ hover help system (`src/help/`).
 - **No `@tanstack/react-table`.** A ~80-line sort/column module is enough; remove the
   unused dependency in phase 1.
 - **Saved screens in localStorage**, same pattern as strategies. No server persistence.
+- **A range clause drops rows whose value is missing**, whichever bound is set. Raised by
+  phase 1: `snapshot` fields are NaN when the history is too short, so "RSI 14 50–65" over a
+  freshly listed name has nothing to compare. Dropping matches today's market-cap behaviour
+  (already documented in the `market-cap` help card) and matches TradingView. The chip must
+  say so — a count that shrinks for an invisible reason is the confusing case. Sorting keeps
+  the opposite convention deliberately: missing sinks to the bottom but stays in the list.
+- **Percent conversion is per `kind`, not per field.** `ratio` fields (`worstGap`, `perf1m`,
+  `perf3m`, `atrPct`) hold fractions and a chip entered as `2.5` compares against `0.025`;
+  `percent` fields (`changePct`) are *already* in percent units and `2.5` compares against
+  `2.5`. Getting this backwards on `changePct` is the likeliest phase-2 bug.
 
 ## Design
 
@@ -82,6 +140,11 @@ interface IndicatorSnapshot {
 so `fan.ts` does not import from the strategy layer). Cost: one RSI/StochRSI pass per subject on the `/screen`
 path, ~1500 names, well under the existing EMA cost.
 
+**Built in phase 1** (with `stochD` added and the warm-up rules above). One caveat the
+design missed: **JSON has no NaN**, so a snapshot that crosses `/screen` or `/signals`
+arrives with those slots as `null`. Read them through `fields.ts`, which maps NaN and null
+alike to "missing"; never test a snapshot field for NaN directly on the client.
+
 ### 2. Field registry — new `src/lib/screen/fields.ts`
 
 One table drives filter chips, column headers, sorting and help ids:
@@ -106,6 +169,11 @@ interface FieldDef {
 price, changePct, avgVol20, marketCap, snapshot) plus optional fan fields, so the signal
 table can share every non-EMA column.
 
+**Built in phase 1** — see "What phase 1 actually built" for the shipped `FieldDef`, which
+splits `column` from `filterable` and carries more kinds than the sketch above. `relVol`
+falls back to `snapshot.volume / avgVol20` for rows that do not carry it, so the entries
+list gets the column for free.
+
 ### 3. Filter model — `src/lib/screen/filters.ts` (replaces `src/lib/filters.ts`)
 
 ```ts
@@ -122,8 +190,14 @@ interface ScreenFilters { clauses: Clause[] }
   default behaviour is unchanged.
 - Migration: the five existing dropdowns become five clauses; `MIN_PRICE_PRESETS` etc.
   survive as **quick values** in the chip editor, not as the only choices.
-- Units follow the field kind: `percent` clauses are entered as `2.5` and compared as
-  `0.025`; `compact` accepts `300M`, `1.2B` (`parseCompact`, inverse of `fmtCompact`).
+- Units follow the field kind, and the split matters: **`ratio`** clauses are entered as
+  `2.5` and compared as `0.025` (`worstGap`, `perf1m`, `perf3m`, `atrPct`); **`percent`**
+  clauses are entered as `2.5` and compared as `2.5` (`changePct` is already in percent
+  units). `compact` accepts `300M`, `1.2B` (`parseCompact`, inverse of `fmtCompact` — put it
+  in `screen/format.ts` beside its inverse, not in the filter module).
+- A range clause with either bound set **drops rows whose value is missing** (NaN in
+  process, `null` after JSON). `clausesActive` must count such a clause as active so the
+  "n of m shown" line explains the shrink.
 
 ### 4. Filter bar UI — `src/components/FilterBar.tsx` rewrite, new `components/filters/`
 
@@ -135,6 +209,10 @@ right becomes the screen name + Save (phase 4). `Clear filters` resets to
 `DEFAULT_FILTERS`. Every chip keeps its `data-help` id so the hover cards still work.
 
 ### 5. Table — new `src/components/table/ScreenTable.tsx`, `src/lib/screen/sort.ts`
+
+**Built in phase 1.** The bullets below are what shipped, with two corrections: sort state is
+keyed by `SortKey` (string) rather than `FieldId`, and the ⚙ lives in the list section header
+rather than the sticky column header.
 
 - One component for fan rows and signal rows: `columns: FieldId[]`, `rows`, `sort`,
   `onSort`, `selected`, `onSelect`, `extra?: ColumnDef[]` for the signal-only columns
@@ -189,6 +267,10 @@ New state (`filters: ScreenFilters`, `sort`, `columns`, `view`, `screens`, `acti
 same way the strategy list is today. `filteredMatches` / `filteredNear` move to the slice
 and use `applyClauses` + `sortRows`.
 
+Phase 1 put `sort` and `columns` (~30 lines) directly in `store.ts`, since the slice earns
+its keep only once the clauses arrive. **Phase 2 creates `screenSlice.ts` and moves those
+two in with it** rather than leaving state split across both files.
+
 ## Phases
 
 Each phase is one PR on a branch off `feat/strategy-builder` (or `main` once that merges),
@@ -197,35 +279,41 @@ green on `npm run typecheck && npm run test && npm run lint`.
 | # | Phase | Delivers | Touch scope |
 |---|---|---|---|
 | 1 ✅ | **Columns and sorting** | `IndicatorSnapshot` on both row types; `fields.ts`; `ScreenTable` with sortable sticky header, 34 px rows, column chooser, volume / rel vol / avg vol / cap / sector / RSI / Stoch K columns; remove `@tanstack/react-table` | `lib/fan.ts`, `lib/fanSignals.ts`, `lib/indicators.ts`, `lib/screen/*`, `components/table/*`, `FanLists.tsx`, `store.ts` (sort/columns only), `help/glossary.ts` |
-| 2 | **Filter model and chips** | `Clause` model, chip bar with ranges and free numeric input, indicator filters, `signalFloorsOf` feeding `/signals`, migration of the five presets | `lib/screen/filters.ts`, `components/filters/*`, `FilterBar.tsx`, `store/screenSlice.ts`, `fanSignals.ts` (`filterSignalRows` → clauses) |
+| 2 | **Filter model and chips** | `Clause` model, chip bar with ranges and free numeric input, indicator filters, `signalFloorsOf` feeding `/signals`, migration of the five presets | `lib/screen/filters.ts`, `lib/screen/format.ts` (`parseCompact`), `lib/screen/fields.ts` (`options` for sector), `components/filters/*`, `FilterBar.tsx`, `store/screenSlice.ts` (created here; `sort`/`columns` move in from `store.ts`), `fanSignals.ts` (`filterSignalRows` → clauses) |
 | 3 | **Layout** | View tabs with a single full-width table; docked resizable detail panel; narrow-screen fallback | `AppScreener.tsx`, `ScreenView.tsx`, `detail/DetailPanels.tsx`, `FanDetail.tsx` (width only) |
-| 4 | **Saved screens** | `SavedScreen` storage, screen menu, dirty/Save, default screen at startup | `lib/screen/storage.ts`, `components/filters/ScreenMenu.tsx`, `store/screenSlice.ts`, `TopBar.tsx` |
+| 4 | **Saved screens** | `SavedScreen` storage, screen menu, dirty/Save, default screen at startup | `lib/screen/storage.ts`, `lib/screen/columns.ts` (`sanitizeColumns`), `components/filters/ScreenMenu.tsx`, `store/screenSlice.ts`, `TopBar.tsx` |
 
 Phase 1 is independent and immediately useful. Phases 2 and 3 can run in parallel after
 phase 1. Phase 4 depends on 2 (it saves clauses).
 
 ## Tests
 
-- `lib/screen/snapshot.test.ts`: RSI / Stoch / ATR% / perf on a ramp series; NaN when the
+- ✅ `lib/screen/snapshot.test.ts`: RSI / Stoch / ATR% / perf on a ramp series; NaN when the
   history is shorter than the period; golden values against the detail-chart computation
   (same `indicators.ts` calls, so equal by construction).
+- ✅ `lib/screen/fields.test.ts` (added in phase 1, not in the original list): every declared
+  `help` id resolves to a glossary topic, each `kind` formats exactly once, missing values
+  come back `null`, and the column defaults/toggle round-trip.
 - `lib/screen/filters.test.ts`: every clause kind, open-ended ranges, percent and compact
   unit parsing (`300M`, `1.2B`, `2.5` → `0.025`), `signalFloorsOf`, default filters equal
   today's behaviour (port `filters.test.ts`).
-- `lib/screen/sort.test.ts`: numeric / string / null ordering, direction toggle, stable for
+- ✅ `lib/screen/sort.test.ts`: numeric / string / null ordering, direction toggle, stable for
   ties.
 - `lib/screen/storage.test.ts`: round-trip, corrupt JSON, unknown field id dropped, default
-  flag unique.
-- `server/screen.test.ts`, `server/signals.test.ts`: rows carry `snapshot`.
-- `src/store.test.ts`: `/signals` body carries floors derived from clauses; sort and column
-  state survive a `runScreen`.
+  flag unique, **a saved sort key that no longer resolves falls back to the view default**.
+- ✅ `server/screen.test.ts` and `lib/fanSignals.test.ts`: rows carry `snapshot`. (There is
+  no `server/signals.test.ts`; the signal scan is tested at the library level.)
+- `src/store.test.ts`: `/signals` body carries floors derived from clauses (phase 2). ✅ Sort
+  and column state survive a `runScreen`.
 - `help/glossary.test.ts`: every new `data-help` id resolves.
 
 ## Verification
 
-- After phase 1 with `npm run dev`: sort the fan table by Rel vol, then by RSI; hide the
-  EMA columns from the chooser; header stays pinned while scrolling; row count per screen
-  roughly doubles.
+- ✅ After phase 1 with `npm run dev`: sort the fan table by Rel vol, then by RSI (the arrow
+  shows on **both** fan panels — they share the `fan` view's sort); hide the EMA columns from
+  the ⚙ and Gap / RSI / Stoch come into view; header stays pinned while scrolling. Rows per
+  screen went ~22 → ~30, not the "roughly doubles" estimated here: 34 px rows help, but the
+  side-by-side split still caps it. The full doubling needs phase 3's full-width table.
 - After phase 2: reproduce the TradingView screen as chips — Price 20–100, Avg vol ≥ 400K,
   RSI 14 50–65, Stoch K ≤ 20 — and compare the count with the same filters on TradingView
   for a shared dataset; `curl` the `/signals` body and confirm `minAvgVol: 400000`.
@@ -238,7 +326,14 @@ phase 1. Phase 4 depends on 2 (it saves clauses).
 ## Risks
 
 - **`/screen` payload growth** (snapshot adds ~9 numbers per row, 1500 rows): negligible,
-  but keep `snapshot` flat, no arrays.
+  but keep `snapshot` flat, no arrays. *(Measured in phase 1: fine.)*
+- **NaN does not survive JSON.** Snapshot fields arrive client-side as `null`. Every clause
+  and every sort must treat NaN and null identically — go through `fields.ts`, never test a
+  snapshot field directly.
+- **Warm-up values that look like real readings.** The reason phase 1 guards Stoch RSI at
+  2 x the period: before that, %K is a genuine-looking `0` computed from backfilled RSI. Any
+  new indicator field needs the same question asked of it, or a chip will silently match
+  names on a warm-up artefact.
 - **Filter migration breaks the help ids**: keep the old `data-help` ids on the new chips
   (`min-price`, `avg-volume`, …) and add new ones only for new fields.
 - **Docked panel and the canvas chart**: the drag handle changes the dock width on every
@@ -254,3 +349,13 @@ phase 1. Phase 4 depends on 2 (it saves clauses).
 Fundamentals (P/E, EPS, dividends, analyst rating, earnings dates), dark theme, watchlists,
 server-side persistence of screens, and URL-encoded screens. The data-quality issue that the
 kaggle dataset has no company names or sectors is an import concern, not a screener one.
+(Phase 1 does render `—` instead of repeating the ticker when `name === ticker`.)
+
+## Known inconsistency, noticed in phase 1
+
+`Stock.hi52` / `lo52` / `pct52w` in `src/lib/market.ts` are computed over the **whole close
+history**, not 52 weeks, despite the name — `Math.max(...closes)`. Nothing reads them today
+(they are set on the model and never displayed), so nothing is wrong on screen, and phase 1
+left them alone. The screener's own `snapshot.hi52` / `lo52` are a true 252-bar window over
+highs and lows. Any later work that wants "% from the 52-week high" must take it from the
+snapshot, or fix `market.ts` first — do not reach for `Stock.hi52`.
