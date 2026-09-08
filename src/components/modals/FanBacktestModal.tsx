@@ -22,9 +22,9 @@ const card: React.CSSProperties = {
   background: '#fafbfb', border: '1px solid #eef0f1', borderRadius: 10, padding: '12px 14px',
 };
 const nf = (v: number, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '—');
-function Stat({ k, v, sub }: { k: string; v: string; sub?: string }) {
+function Stat({ k, v, sub, help }: { k: string; v: string; sub?: string; help?: string }) {
   return (
-    <div style={card}>
+    <div data-help={help} style={card}>
       <div style={{ fontSize: 10, color: '#98a0a8', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700 }}>{k}</div>
       <div style={{ fontSize: 20, fontWeight: 700, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>{v}</div>
       {sub && <div style={{ fontSize: 11, color: '#8b9298', marginTop: 2 }}>{sub}</div>}
@@ -101,7 +101,7 @@ export function FanBacktestModal() {
         }}
       >
         <div style={{ padding: '20px 24px 15px', borderBottom: '1px solid #f0f1f2', flexShrink: 0 }}>
-          <div style={{ fontSize: 17, fontWeight: 700 }}>Fan strategy backtest</div>
+          <div data-help="backtest" style={{ fontSize: 17, fontWeight: 700 }}>Fan strategy backtest</div>
           <div style={{ fontSize: 12.5, color: '#8b9298', marginTop: 3 }}>
             Long-only. 1R under the pullback/50-EMA
             {exit.trailEma === 50
@@ -145,7 +145,7 @@ export function FanBacktestModal() {
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
             <div>
-              <label style={label}>Avg volume (20d)</label>
+              <label data-help="avg-volume" style={label}>Avg volume (20d)</label>
               <select
                 value={String(bt.config.minAvgVol ?? 0)}
                 disabled={bt.running}
@@ -159,7 +159,7 @@ export function FanBacktestModal() {
               </select>
             </div>
             <div>
-              <label style={label}>Market cap</label>
+              <label data-help="market-cap" style={label}>Market cap</label>
               <select
                 value={String(bt.config.minMarketCap ?? 0)}
                 disabled={bt.running}
@@ -173,7 +173,7 @@ export function FanBacktestModal() {
               </select>
             </div>
             <div>
-              <label style={label}>200-EMA slope</label>
+              <label data-help="ema200-slope" style={label}>200-EMA slope</label>
               <select
                 value={String(bt.config.ema200RisingBars ?? 21)}
                 disabled={bt.running}
@@ -192,10 +192,10 @@ export function FanBacktestModal() {
           </div>
 
           <div>
-            <div style={{ ...label, marginBottom: 8 }}>Swing account</div>
+            <div data-help="swing-account" style={{ ...label, marginBottom: 8 }}>Swing account</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 12 }}>
               <div>
-                <label style={label}>Starting cash</label>
+                <label data-help="swing-account" style={label}>Starting cash</label>
                 <select
                   value={String(bt.config.startCash ?? 10_000)}
                   disabled={bt.running}
@@ -210,7 +210,7 @@ export function FanBacktestModal() {
                 </select>
               </div>
               <div>
-                <label style={label}>Risk / trade</label>
+                <label data-help="risk-per-trade" style={label}>Risk / trade</label>
                 <select
                   value={String(bt.config.riskPct ?? 1)}
                   disabled={bt.running}
@@ -225,7 +225,7 @@ export function FanBacktestModal() {
                 </select>
               </div>
               <div>
-                <label style={label}>Max names</label>
+                <label data-help="max-names" style={label}>Max names</label>
                 <select
                   value={String(bt.config.maxPositions ?? 4)}
                   disabled={bt.running}
@@ -240,7 +240,7 @@ export function FanBacktestModal() {
                 </select>
               </div>
               <div>
-                <label style={label}>Window</label>
+                <label data-help="backtest-window" style={label}>Window</label>
                 <select
                   value={String(bt.config.windowMonths ?? 3)}
                   disabled={bt.running}
@@ -276,14 +276,14 @@ export function FanBacktestModal() {
           {r && (
             <>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
-                <Stat k="Entries" v={String(r.totalEntries)} sub={`${r.stocksWithEntries} names`} />
-                <Stat k="Win rate" v={`${nf(r.trades.winRate, 1)}%`} sub={`${r.trades.count} trades`} />
-                <Stat k="Expectancy" v={`${r.trades.avgR >= 0 ? '+' : ''}${nf(r.trades.avgR, 2)}R`} sub={`median ${nf(r.trades.medianR, 2)}R`} />
-                <Stat k="Hit target" v={`${nf(r.trades.hitTargetPct, 1)}%`} sub={`avg hold ${nf(r.trades.avgBarsHeld, 1)} bars`} />
+                <Stat help="backtest-entries" k="Entries" v={String(r.totalEntries)} sub={`${r.stocksWithEntries} names`} />
+                <Stat help="win-rate" k="Win rate" v={`${nf(r.trades.winRate, 1)}%`} sub={`${r.trades.count} trades`} />
+                <Stat help="expectancy" k="Expectancy" v={`${r.trades.avgR >= 0 ? '+' : ''}${nf(r.trades.avgR, 2)}R`} sub={`median ${nf(r.trades.medianR, 2)}R`} />
+                <Stat help="hit-target" k="Hit target" v={`${nf(r.trades.hitTargetPct, 1)}%`} sub={`avg hold ${nf(r.trades.avgBarsHeld, 1)} bars`} />
               </div>
 
               {Object.keys(r.trades.byExitReason).length > 0 && (
-                <div style={{ fontSize: 12, color: '#6b7280' }}>
+                <div data-help="exit-reasons" style={{ fontSize: 12, color: '#6b7280' }}>
                   Exits: {Object.entries(r.trades.byExitReason)
                     .sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))
                     .map(([k, v]) => `${reason(k)} ${v}`)
@@ -302,21 +302,25 @@ export function FanBacktestModal() {
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
                     <Stat
+                      help="swing-account"
                       k="End equity"
                       v={usd(r.account.endEquity)}
                       sub={`from ${usd(r.account.startCash)}`}
                     />
                     <Stat
+                      help={r.account.endReason === 'ruin' ? 'ruin' : 'swing-account'}
                       k="Return"
                       v={pct(r.account.returnPct)}
                       sub={r.account.endReason === 'ruin' ? 'stopped at ruin' : 'window ended'}
                     />
                     <Stat
+                      help="max-drawdown"
                       k="Max DD"
                       v={`${nf(r.account.maxDrawdownPct, 1)}%`}
                       sub="on realized equity"
                     />
                     <Stat
+                      help="taken-skipped"
                       k="Taken"
                       v={String(r.account.taken)}
                       sub={`${r.account.candidates} signals · skipped ${r.account.skipped.total}`}
@@ -324,12 +328,12 @@ export function FanBacktestModal() {
                   </div>
                   {r.account.curve.length > 1 && (
                     <div style={{ ...card, marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                      <div style={{ fontSize: 11, color: '#8b9298' }}>Equity after each exit</div>
+                      <div data-help="equity-curve" style={{ fontSize: 11, color: '#8b9298' }}>Equity after each exit</div>
                       <EquitySpark points={r.account.curve} />
                     </div>
                   )}
                   {r.account.skipped.total > 0 && (
-                    <div style={{ fontSize: 12, color: '#6b7280', marginTop: 8 }}>
+                    <div data-help="taken-skipped" style={{ fontSize: 12, color: '#6b7280', marginTop: 8 }}>
                       Skipped: no cash/size {r.account.skipped.noCash} · max names {r.account.skipped.maxPositions}
                     </div>
                   )}
@@ -398,7 +402,7 @@ export function FanBacktestModal() {
               )}
 
               <div>
-                <div style={{ ...label, marginBottom: 8 }}>Forward returns from entry (naive, ignore stops)</div>
+                <div data-help="forward-returns" style={{ ...label, marginBottom: 8 }}>Forward returns from entry (naive, ignore stops)</div>
                 <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.max(1, r.forwardHorizons.length)}, 1fr)`, gap: 8 }}>
                   {r.forwardHorizons.map((h) => (
                     <div key={h.h} style={card}>
@@ -412,7 +416,7 @@ export function FanBacktestModal() {
 
               {r.factors.some((f) => f.n > 0) && (
                 <div>
-                  <div style={{ ...label, marginBottom: 8 }}>MACD / Stoch RSI at entry vs realized R</div>
+                  <div data-help="indicators-at-entry" style={{ ...label, marginBottom: 8 }}>MACD / Stoch RSI at entry vs realized R</div>
                   <div style={{ border: '1px solid #eef0f1', borderRadius: 10, overflow: 'hidden', fontSize: 12.5 }}>
                     <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 56px 72px 72px', gap: 8, padding: '8px 12px', background: '#f7f8f8', fontWeight: 700, color: '#98a0a8', fontSize: 10.5, textTransform: 'uppercase' }}>
                       <div>Factor</div><div>Bucket</div>

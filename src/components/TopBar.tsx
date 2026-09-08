@@ -21,10 +21,10 @@ export function TopBar() {
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
         <div style={{ width: '28px', height: '28px', borderRadius: '7px', background: '#06a96b', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 800, fontSize: '16px' }}>S</div>
         <span style={{ fontSize: '17px', fontWeight: 700, letterSpacing: '-0.02em' }}>Screenr</span>
-        <span title={dbSelector.activePath || 'Synthetic generated dataset'} style={{ fontSize: '11px', color: '#98a0a8', padding: '3px 7px', background: '#f4f5f6', borderRadius: '5px', letterSpacing: '0.03em', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sourceBadge}</span>
+        <span data-help="data-source" title={dbSelector.activePath || 'Synthetic generated dataset'} style={{ fontSize: '11px', color: '#98a0a8', padding: '3px 7px', background: '#f4f5f6', borderRadius: '5px', letterSpacing: '0.03em', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sourceBadge}</span>
       </div>
 
-      <div style={{ position: 'relative', flex: 1, maxWidth: '340px' }}>
+      <div data-help="search" style={{ position: 'relative', flex: 1, maxWidth: '340px' }}>
         <HInput
           value={search}
           onInput={(e) => onSearch((e.target as HTMLInputElement).value)}
@@ -38,7 +38,7 @@ export function TopBar() {
       <div style={{ flex: 1 }} />
 
       {dbSelector.available && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }} title={dbSelector.error || 'Select the active market-data source'}>
+        <div data-help="data-source" style={{ display: 'flex', alignItems: 'center', gap: '6px' }} title={dbSelector.error || 'Select the active market-data source'}>
           <span style={{ fontSize: '11px', color: '#98a0a8' }}>Data</span>
           <select
             value={dbValue}
@@ -58,6 +58,7 @@ export function TopBar() {
 
       {devImportAvailable && (
         <HButton
+          data-help="dev-import"
           onClick={openDevImport}
           style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 12px', border: '1px solid #e7e8ea', borderRadius: '9px', background: '#fff', color: '#5b6168', fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
           hoverStyle={{ border: '1px solid #06a96b', color: '#06865a' }}
@@ -68,12 +69,23 @@ export function TopBar() {
       )}
 
       <HButton
+        data-help="backtest"
         onClick={openFanBacktest}
         style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 12px', border: '1px solid #e7e8ea', borderRadius: '9px', background: '#fff', color: '#5b6168', fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
         hoverStyle={{ border: '1px solid #06a96b', color: '#06865a' }}
         title="Backtest fan entry signals across the universe"
       >
         <span style={{ fontSize: '13px' }}>⟳</span> Backtest
+      </HButton>
+
+      <HButton
+        data-help="help"
+        type="button"
+        aria-label="Help"
+        style={{ width: 30, height: 30, padding: 0, border: '1px solid #e7e8ea', borderRadius: '50%', background: '#fff', color: '#98a0a8', fontSize: '14px', fontWeight: 700, cursor: 'help', fontFamily: 'inherit' }}
+        hoverStyle={{ border: '1px solid #06a96b', color: '#06865a' }}
+      >
+        ?
       </HButton>
     </div>
   );

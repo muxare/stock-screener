@@ -33,6 +33,7 @@ import type {
   StopSpec,
   StrategyDef,
 } from '../../lib/strategy/types';
+import { stepKindTopic, stepTopic } from '../../help/glossary';
 
 const label: React.CSSProperties = {
   fontSize: 11, color: '#98a0a8', textTransform: 'uppercase', letterSpacing: '0.06em',
@@ -206,6 +207,7 @@ function StepCard({ step, index, count, disabled, forcedMaxWait, onChange, onMov
     <div style={{ ...card, padding: '10px 12px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span
+          data-help={stepKindTopic(kind)}
           title={KIND_HINT[kind]}
           style={{
             fontSize: 10, fontWeight: 700, color: '#fff', background: KIND_COLOR[kind],
@@ -215,6 +217,7 @@ function StepCard({ step, index, count, disabled, forcedMaxWait, onChange, onMov
           {index + 1} · {kind}
         </span>
         <select
+          data-help={stepTopic(step.type)}
           value={step.type}
           disabled={disabled}
           style={{ ...small, flex: 1, minWidth: 0, fontWeight: 600 }}
@@ -244,7 +247,7 @@ function StepCard({ step, index, count, disabled, forcedMaxWait, onChange, onMov
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 10, flexWrap: 'wrap' }}>
-        <label style={check} title={t.holdable
+        <label data-help="hold" style={check} title={t.holdable
           ? 'Once fired, this must stay true; when it breaks the machine resets to step 1.'
           : 'This step type cannot be held.'}>
           <input
@@ -255,7 +258,7 @@ function StepCard({ step, index, count, disabled, forcedMaxWait, onChange, onMov
           />
           Hold as an invariant
         </label>
-        <label style={{ ...check, gap: 6 }} title="Bars this step may wait after the previous one fired. Blank = forever.">
+        <label data-help="max-wait" style={{ ...check, gap: 6 }} title="Bars this step may wait after the previous one fired. Blank = forever.">
           Max wait
           <input
             type="number"
@@ -364,7 +367,7 @@ export function StrategyBuilder({ def, disabled }: { def: StrategyDef; disabled:
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 12 }}>
         <div>
-          <label style={label}>Strategy</label>
+          <label data-help="strategy" style={label}>Strategy</label>
           <select
             value={isPreset || savedEntry ? def.id : '__unsaved'}
             disabled={disabled}
@@ -464,7 +467,7 @@ export function StrategyBuilder({ def, disabled }: { def: StrategyDef; disabled:
       )}
 
       <div>
-        <div style={{ ...label, marginBottom: 8 }}>Steps ({def.steps.length} / {MAX_STEPS})</div>
+        <div data-help="step" style={{ ...label, marginBottom: 8 }}>Steps ({def.steps.length} / {MAX_STEPS})</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {def.steps.map((s, i) => (
             <StepCard
@@ -482,6 +485,7 @@ export function StrategyBuilder({ def, disabled }: { def: StrategyDef; disabled:
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
           <select
+            data-help={stepTopic(addType)}
             value={addType}
             disabled={disabled || def.steps.length >= MAX_STEPS}
             onChange={(e) => setAddType(e.target.value as StepType)}
@@ -504,9 +508,9 @@ export function StrategyBuilder({ def, disabled }: { def: StrategyDef; disabled:
       </div>
 
       <div>
-        <div style={{ ...label, marginBottom: 8 }}>Entry</div>
+        <div data-help="entry" style={{ ...label, marginBottom: 8 }}>Entry</div>
         <div style={{ ...card, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
-          <label style={{ display: 'block' }}>
+          <label data-help={entry.mode === 'buy_stop' ? 'buy-stop' : 'entry'} style={{ display: 'block' }}>
             <span style={sub}>Fill</span>
             <select
               value={entry.mode}
@@ -520,14 +524,14 @@ export function StrategyBuilder({ def, disabled }: { def: StrategyDef; disabled:
           </label>
           {entry.mode === 'buy_stop' && (
             <>
-              <label style={{ display: 'block' }}>
+              <label data-help="buy-stop" style={{ display: 'block' }}>
                 <span style={sub}>Offset above the high</span>
                 <input
                   type="number" min={0} step={0.01} value={String(entry.offset)} disabled={disabled} style={small}
                   onChange={(e) => { const v = Number(e.target.value); if (Number.isFinite(v) && v >= 0) patchEntry({ offset: v }); }}
                 />
               </label>
-              <label style={{ display: 'block' }} title="Bars the resting buy stop may wait for a fill. Blank = until a held step breaks.">
+              <label data-help="buy-stop" style={{ display: 'block' }} title="Bars the resting buy stop may wait for a fill. Blank = until a held step breaks.">
                 <span style={sub}>Max wait (bars)</span>
                 <input
                   type="number" min={0} placeholder="—" value={entry.maxWait == null ? '' : String(entry.maxWait)} disabled={disabled} style={small}
@@ -543,9 +547,9 @@ export function StrategyBuilder({ def, disabled }: { def: StrategyDef; disabled:
       </div>
 
       <div>
-        <div style={{ ...label, marginBottom: 8 }}>Stop</div>
+        <div data-help="stop" style={{ ...label, marginBottom: 8 }}>Stop</div>
         <div style={{ ...card, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
-          <label style={{ display: 'block' }}>
+          <label data-help="stop-anchor" style={{ display: 'block' }}>
             <span style={sub}>Anchor</span>
             <select
               value={stop.anchor}
@@ -564,7 +568,7 @@ export function StrategyBuilder({ def, disabled }: { def: StrategyDef; disabled:
             </select>
           </label>
           {stop.anchor === 'mark_low' && (
-            <label style={{ display: 'block' }}>
+            <label data-help="stop-anchor" style={{ display: 'block' }}>
               <span style={sub}>Step</span>
               <select
                 value={stop.stepId ?? ''}
@@ -579,21 +583,21 @@ export function StrategyBuilder({ def, disabled }: { def: StrategyDef; disabled:
               </select>
             </label>
           )}
-          <label style={{ display: 'block' }} title="ATR(14) fraction padded under the anchor.">
+          <label data-help="atr" style={{ display: 'block' }} title="ATR(14) fraction padded under the anchor.">
             <span style={sub}>ATR pad</span>
             <input
               type="number" min={0} step={0.05} value={String(stop.atrPad)} disabled={disabled} style={small}
               onChange={(e) => { const v = Number(e.target.value); if (Number.isFinite(v) && v >= 0) patchStop({ atrPad: v }); }}
             />
           </label>
-          <label style={{ display: 'block' }}>
+          <label data-help="stop" style={{ display: 'block' }}>
             <span style={sub}>Extra offset</span>
             <input
               type="number" min={0} step={0.01} value={String(stop.offset)} disabled={disabled} style={small}
               onChange={(e) => { const v = Number(e.target.value); if (Number.isFinite(v) && v >= 0) patchStop({ offset: v }); }}
             />
           </label>
-          <label style={{ ...check, paddingTop: 14 }} title="Also push the stop under the 50-EMA at the fill.">
+          <label data-help="stop-anchor" style={{ ...check, paddingTop: 14 }} title="Also push the stop under the 50-EMA at the fill.">
             <input type="checkbox" checked={stop.underEma50} disabled={disabled} onChange={(e) => patchStop({ underEma50: e.target.checked })} />
             Also under the 50-EMA
           </label>
@@ -601,10 +605,10 @@ export function StrategyBuilder({ def, disabled }: { def: StrategyDef; disabled:
       </div>
 
       <div>
-        <div style={{ ...label, marginBottom: 8 }}>Exit</div>
+        <div data-help="exit" style={{ ...label, marginBottom: 8 }}>Exit</div>
         <div style={{ ...card, display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
-            <label style={{ display: 'block' }}>
+            <label data-help={exit.trailPivot ? 'trail-pivot' : exit.trailEma ? 'trail-ema' : exit.targetWindow ? 'target-window' : 'target'} style={{ display: 'block' }}>
               <span style={sub}>Target</span>
               <select
                 value={
@@ -634,7 +638,7 @@ export function StrategyBuilder({ def, disabled }: { def: StrategyDef; disabled:
                 <option value="pivot">Trail pivots</option>
               </select>
             </label>
-            <label style={{ display: 'block' }}>
+            <label data-help="max-hold" style={{ display: 'block' }}>
               <span style={sub}>Max hold</span>
               <select
                 value={exit.maxHoldBars == null ? '' : String(exit.maxHoldBars)}
@@ -649,7 +653,7 @@ export function StrategyBuilder({ def, disabled }: { def: StrategyDef; disabled:
                 <option value="">Until exit</option>
               </select>
             </label>
-            <label style={{ display: 'block' }} title="Flatten when this stack breaks.">
+            <label data-help="fan-exit" style={{ display: 'block' }} title="Flatten when this stack breaks.">
               <span style={sub}>Fan exit</span>
               <select
                 value={exit.fanExit}
@@ -662,7 +666,7 @@ export function StrategyBuilder({ def, disabled }: { def: StrategyDef; disabled:
               </select>
             </label>
           </div>
-          <label style={check}>
+          <label data-help="breakeven" style={check}>
             <input
               type="checkbox"
               checked={exit.breakevenAtR != null && exit.breakevenAtR > 0}
@@ -671,7 +675,7 @@ export function StrategyBuilder({ def, disabled }: { def: StrategyDef; disabled:
             />
             Move stop to breakeven at 1R
           </label>
-          <label style={check}>
+          <label data-help="macd-exit" style={check}>
             <input
               type="checkbox"
               checked={exit.macdExit}
@@ -682,7 +686,7 @@ export function StrategyBuilder({ def, disabled }: { def: StrategyDef; disabled:
               ? 'Exit on an 18–50 MACD flip (ignored while trailing)'
               : 'Exit when the 18–50 MACD line drops below its signal'}
           </label>
-          <div style={{ fontSize: 11.5, color: '#98a0a8', lineHeight: 1.45 }}>
+          <div data-help="step-macd-favorable" style={{ fontSize: 11.5, color: '#98a0a8', lineHeight: 1.45 }}>
             To filter entries on the MACD instead, add an “18–50 MACD favorable” step — it guards the bar the previous step fired on.
           </div>
         </div>

@@ -32,15 +32,17 @@ function FilterSelect({
   onChange,
   options,
   title,
+  help,
 }: {
   label: string;
   value: string | number;
   onChange: (v: string) => void;
   options: { label: string; value: string | number }[];
   title?: string;
+  help?: string;
 }) {
   return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }} title={title}>
+    <label data-help={help} style={{ display: 'flex', flexDirection: 'column', gap: 4 }} title={title}>
       <span style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#98a0a8' }}>{label}</span>
       <select value={String(value)} onChange={(e) => onChange(e.target.value)} style={selectStyle}>
         {options.map((o) => (
@@ -77,6 +79,7 @@ export function FilterBar() {
     <div style={{ display: 'flex', alignItems: 'flex-end', gap: '12px', padding: '10px 20px', background: '#fff', borderBottom: '1px solid #e7e8ea', flexWrap: 'wrap' }}>
       <FilterSelect
         label="Entry strategy"
+        help="entry-strategy"
         value={signalStrategy}
         onChange={(v) => setSignalStrategy(v)}
         options={strategyOptions}
@@ -84,6 +87,7 @@ export function FilterBar() {
       />
       <FilterSelect
         label="Avg volume (20d)"
+        help="avg-volume"
         value={filters.minAvgVol}
         onChange={(v) => setFilter('minAvgVol', Number(v))}
         options={AVG_VOL_PRESETS}
@@ -91,6 +95,7 @@ export function FilterBar() {
       />
       <FilterSelect
         label="Market cap"
+        help="market-cap"
         value={filters.minMarketCap}
         onChange={(v) => setFilter('minMarketCap', Number(v))}
         options={MARKET_CAP_PRESETS}
@@ -98,18 +103,21 @@ export function FilterBar() {
       />
       <FilterSelect
         label="Min price"
+        help="min-price"
         value={filters.minPrice}
         onChange={(v) => setFilter('minPrice', Number(v))}
         options={MIN_PRICE_PRESETS}
       />
       <FilterSelect
         label="Sector"
+        help="sector"
         value={filters.sector}
         onChange={(v) => setFilter('sector', v)}
         options={sectorOptions}
       />
       <FilterSelect
         label="200-EMA slope"
+        help="ema200-slope"
         value={filters.ema200RisingBars}
         onChange={(v) => setFilter('ema200RisingBars', Number(v))}
         options={EMA200_RISING_PRESETS}
@@ -117,6 +125,7 @@ export function FilterBar() {
       />
       {active && (
         <HButton
+          data-help="filters"
           onClick={resetFilters}
           style={{ padding: '7px 12px', border: '1px solid #e7e8ea', borderRadius: '9px', background: '#fafbfb', color: '#6b7280', fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', marginBottom: 1 }}
           hoverStyle={{ border: '1px solid #06a96b', color: '#06865a' }}
@@ -126,7 +135,7 @@ export function FilterBar() {
         </HButton>
       )}
       <div style={{ flex: 1, minWidth: 8 }} />
-      <div style={{ fontSize: '11px', color: '#98a0a8', paddingBottom: 8, maxWidth: 300, lineHeight: 1.4 }}>
+      <div data-help={entriesMode ? 'live-entry' : 'filters'} style={{ fontSize: '11px', color: '#98a0a8', paddingBottom: 8, maxWidth: 300, lineHeight: 1.4 }}>
         {entriesMode
           ? 'Entries: names with a live open trade for this strategy — 1R stop, 2.5–3R exit window. Volume, cap, and 200-EMA slope filter the scan.'
           : filters.minMarketCap > 0

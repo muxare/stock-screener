@@ -16,6 +16,10 @@ const nf = (v: number, d: number, suf = '') => (fin(v) ? v.toFixed(d) + suf : '�
 const gapPct = (g: number) => (fin(g) ? (g * 100).toFixed(2) + '%' : '—');
 
 const HEAD = ['Ticker', 'Name', 'Last', 'Chg', 'EMA18', 'EMA50', 'EMA100', 'EMA200', 'Gap', '40d'];
+const HEAD_HELP: Record<string, string> = {
+  Chg: 'change-pct', EMA18: 'ema', EMA50: 'ema', EMA100: 'ema', EMA200: 'ema', Gap: 'worst-gap', '40d': 'sparkline',
+  Entry: 'entry', Stop: 'stop', 'R (risk)': 'r', 'Target window': 'target-window', Age: 'entry-age',
+};
 
 function FanTable({
   rows,
@@ -37,7 +41,7 @@ function FanTable({
     <div>
       <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: 0, padding: '0 16px', height: 34, alignItems: 'center', borderBottom: '1px solid #eef0f1', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#98a0a8' }}>
         {HEAD.map((h, i) => (
-          <div key={h} style={{ textAlign: i === 0 || i === 1 ? 'left' : 'right' }}>{h}</div>
+          <div key={h} data-help={HEAD_HELP[h]} style={{ textAlign: i === 0 || i === 1 ? 'left' : 'right' }}>{h}</div>
         ))}
       </div>
       {rows.map((r) => {
@@ -102,7 +106,7 @@ function SignalTable({
     <div>
       <div style={{ display: 'grid', gridTemplateColumns: SIG_GRID, gap: 0, padding: '0 16px', height: 34, alignItems: 'center', borderBottom: '1px solid #eef0f1', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#98a0a8' }}>
         {SIG_HEAD.map((h, i) => (
-          <div key={h} style={{ textAlign: i === 0 || i === 1 ? 'left' : 'right' }}>{h}</div>
+          <div key={h} data-help={HEAD_HELP[h]} style={{ textAlign: i === 0 || i === 1 ? 'left' : 'right' }}>{h}</div>
         ))}
       </div>
       {rows.map((r) => {
@@ -187,10 +191,10 @@ function SignalList() {
       <div style={{ flex: 1, minHeight: 0, padding: 12 }}>
         <section style={{ height: '100%', background: '#fff', borderRadius: 12, border: '1px solid #e7e8ea', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
           <header style={{ padding: '14px 16px 10px', borderBottom: '1px solid #f0f1f2' }}>
-            <div style={{ fontSize: 15, fontWeight: 700 }}>Entries · {label}</div>
+            <div data-help="live-entry" style={{ fontSize: 15, fontWeight: 700 }}>Entries · {label}</div>
             <div style={{ fontSize: 12, color: '#8b9298', marginTop: 3 }}>
               {countLabel}
-              {' · '}1R stop, 2.5–3R exit window
+              {' · '}<span data-help="r">1R stop</span>, <span data-help="target-window">2.5–3R exit window</span>
             </div>
           </header>
           <div style={{ flex: 1, overflow: 'auto' }}>
@@ -257,10 +261,10 @@ export function FanLists() {
       <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, padding: 12 }}>
         <section style={{ background: '#fff', borderRadius: 12, border: '1px solid #e7e8ea', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
           <header style={{ padding: '14px 16px 10px', borderBottom: '1px solid #f0f1f2' }}>
-            <div style={{ fontSize: 15, fontWeight: 700 }}>EMA fan</div>
+            <div data-help="fan" style={{ fontSize: 15, fontWeight: 700 }}>EMA fan</div>
             <div style={{ fontSize: 12, color: '#8b9298', marginTop: 3 }}>
               {screenLoading ? 'Screening…' : matchLabel}
-              {' · '}18 &gt; 50 &gt; 100 &gt; 200
+              {' · '}<span data-help="fan">18 &gt; 50 &gt; 100 &gt; 200</span>
             </div>
           </header>
           <div style={{ flex: 1, overflow: 'auto' }}>
@@ -275,10 +279,10 @@ export function FanLists() {
 
         <section style={{ background: '#fff', borderRadius: 12, border: '1px solid #e7e8ea', display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
           <header style={{ padding: '14px 16px 10px', borderBottom: '1px solid #f0f1f2' }}>
-            <div style={{ fontSize: 15, fontWeight: 700 }}>Close to fan</div>
+            <div data-help="fan-near" style={{ fontSize: 15, fontWeight: 700 }}>Close to fan</div>
             <div style={{ fontSize: 12, color: '#8b9298', marginTop: 3 }}>
               {screenLoading ? 'Screening…' : nearLabel}
-              {' · '}within {(FAN_NEAR_MARGIN * 100).toFixed(1)}% and improving over {FAN_ENTER_LOOKBACK} bars
+              {' · '}<span data-help="fan-near">within {(FAN_NEAR_MARGIN * 100).toFixed(1)}% and improving over {FAN_ENTER_LOOKBACK} bars</span>
             </div>
           </header>
           <div style={{ flex: 1, overflow: 'auto' }}>

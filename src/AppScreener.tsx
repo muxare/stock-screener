@@ -6,6 +6,7 @@ import { FanLists } from './components/FanLists';
 import { DetailOverlay } from './components/detail/DetailPanels';
 import { DevImportModal } from './components/modals/DevImportModal';
 import { FanBacktestModal } from './components/modals/FanBacktestModal';
+import { HelpProvider } from './help/HelpProvider';
 
 export function AppScreener() {
   const init = useScreener((s) => s.init);
@@ -13,6 +14,7 @@ export function AppScreener() {
   useEffect(() => { init(); }, [init]);
 
   return (
+    <HelpProvider>
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#f4f5f6', fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif", color: '#15171a', overflow: 'hidden' }}>
       <TopBar />
       <FilterBar />
@@ -28,5 +30,6 @@ export function AppScreener() {
         </div>
       )}
     </div>
+    </HelpProvider>
   );
 }
