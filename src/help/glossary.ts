@@ -8,6 +8,7 @@
 // (lib/strategy/types.ts) and the backtest stats (lib/fanBacktest.ts).
 
 import { buildLinkIndex, explicitLinks, type LinkIndex } from './link.ts';
+import { SUMMON_LABEL } from './trigger.ts';
 
 export type HelpKind =
   | 'indicator' | 'fan' | 'screen' | 'strategy' | 'step' | 'pattern' | 'trade' | 'backtest' | 'data' | 'ui';
@@ -42,9 +43,11 @@ const TOPIC_LIST: HelpTopic[] = [
     id: 'help',
     title: 'Help cards',
     kind: 'ui',
-    body: `Hover anything in Screenr for a moment and a card like this one explains it. Highlighted words inside a card are terms of their own: hover one to open its card on top.
+    body: `Hold ${SUMMON_LABEL} and point at anything in Screenr: a card like this one explains it. Without the key nothing opens, so documentation never lands on top of what you were reading while you work.
 
-Press T while a card is showing to pin it. A pinned card stays where it is, can be dragged by its title bar, and still lets you hover its highlighted terms to keep digging. Press Esc to close the most recent card, or use the × on a pinned one.`,
+Once a card is up the key is redundant — you are already reading documentation — so plain hover keeps working while a card is showing, and for a moment after the last one closes on its own. Highlighted words inside a card are terms of their own: hover one to open its card on top.
+
+Press T while a card is showing to pin it. A pinned card stays where it is, can be dragged by its title bar, and still lets you hover its highlighted terms to keep digging. Press Esc to close the most recent card, or use the × on a pinned one; dismissing a card also ends the plain-hover grace, so the next card needs the key again.`,
     related: ['fan', 'strategy', 'backtest'],
   },
   {

@@ -163,7 +163,7 @@ export function ChartControls({
       </HButton>
       {patterns && <PatternChooser {...patterns} />}
       <div style={{ flex: 1 }} />
-      <span style={{ fontSize: 10.5, color: '#a2a8ae', whiteSpace: 'nowrap' }}>scroll = zoom · drag = pan · shift+drag = zoom range</span>
+      <span style={{ fontSize: 10.5, color: '#a2a8ae', whiteSpace: 'nowrap' }}>scroll = zoom · drag = pan</span>
       <HButton onClick={onZoomOut} aria-label="Zoom out" style={icon(true)} hoverStyle={{ background: '#f7f8f8' }}>
         −
       </HButton>

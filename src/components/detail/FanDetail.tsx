@@ -3,7 +3,7 @@ import type { Stock } from '../../lib/market';
 import { ema, macd, rsi, stochRsi } from '../../lib/indicators';
 import { classifyCloses } from '../../lib/fan';
 import { useChartViewport } from '../../lib/chart/viewport';
-import { barIndexAtX, drawZoomSelection, isInPlot, type ZoomSelection } from '../../lib/chart/interactions';
+import { barCenterX, barIndexAtX, isInPlot } from '../../lib/chart/interactions';
 import { drawMacdPane, drawStochPane } from '../../lib/chart/panes';
 import { drawPatternLayer } from '../../lib/chart/patternLayer';
 import {
@@ -50,7 +50,6 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
   const readoutRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef({ padL: PAD_L, plotW: 1, visible: 1, from: 0, to: 0, bottom: 0 });
   const dragRef = useRef({ active: false, lastX: 0, acc: 0 });
-  const selectionRef = useRef<ZoomSelection>({ active: false, startBar: 0, endBar: 0 });
 
   const [macdOn, setMacdOn] = useState(true);
   const [stochOn, setStochOn] = useState(true);
@@ -89,7 +88,7 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
     [allMarkers, patterns],
   );
 
-  const { view, zoomAtBar, panByBars, setRange, reset, isDefault } = useChartViewport(
+  const { view, zoomAtBar, panByBars, reset, isDefault } = useChartViewport(
     nBars,
     { from: 0, to: Math.max(0, nBars - 1) },
   );
@@ -274,13 +273,13 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
     const drawCrosshair = (mx: number, my: number) => {
       const cvEl = canvasRef.current, ov = overlayRef.current, readout = readoutRef.current;
       if (!cvEl || !ov || !readout) return;
-      const { padL, plotW, visible, from, to, bottom } = layoutRef.current;
-      if (mx < padL || mx > padL + plotW || my < PAD_T || my > bottom) {
+      const layout = layoutRef.current;
+      if (!isInPlot(mx, my, layout, PAD_T)) {
         hideCrosshair();
         return;
       }
-      const i = Math.max(from, Math.min(to, from + Math.round((mx - padL) / (plotW / visible) - 0.5)));
-      const snapX = padL + (i - from + 0.5) * (plotW / visible);
+      const i = barIndexAtX(mx, layout);
+      const snapX = barCenterX(i, layout);
       const dpr = window.devicePixelRatio || 1;
       const ctx = ov.getContext('2d');
       if (!ctx) return;
@@ -290,7 +289,7 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
       ctx.strokeStyle = 'rgba(21,23,26,0.35)';
       ctx.lineWidth = 1;
       ctx.setLineDash([4, 3]);
-      ctx.beginPath(); ctx.moveTo(snapX, PAD_T); ctx.lineTo(snapX, bottom); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(snapX, PAD_T); ctx.lineTo(snapX, layout.bottom); ctx.stroke();
       ctx.setLineDash([]);
       const bar = stock.full;
       const iso = bar.d?.[i] ?? '';
@@ -302,32 +301,10 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
       readout.textContent = lines.join('\n');
     };
 
-    const drawSelection = (mx: number, my: number) => {
-      const ov = overlayRef.current, cvEl = canvasRef.current;
-      if (!ov || !cvEl) return;
-      const layout = layoutRef.current;
-      if (!selectionRef.current.active || !isInPlot(mx, my, layout, PAD_T)) {
-        hideCrosshair();
-        return;
-      }
-      const dpr = window.devicePixelRatio || 1;
-      const ctx = ov.getContext('2d');
-      if (!ctx) return;
-      const cssW = cvEl.getBoundingClientRect().width;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, cssW, chartH);
-      drawZoomSelection(ctx, layout, selectionRef.current.startBar, selectionRef.current.endBar, PAD_T);
-    };
-
     const onMove = (e: MouseEvent) => {
       const rect = cv.getBoundingClientRect();
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
-      if (selectionRef.current.active) {
-        selectionRef.current.endBar = barIndexAtX(mx, layoutRef.current);
-        drawSelection(mx, my);
-        return;
-      }
       if (dragRef.current.active) {
         const { plotW, visible } = layoutRef.current;
         const barsPerPx = visible / Math.max(1, plotW);
@@ -344,32 +321,12 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
     const onDown = (e: MouseEvent) => {
       const rect = cv.getBoundingClientRect();
       const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-      const layout = layoutRef.current;
-      if (e.shiftKey && isInPlot(mx, my, layout, PAD_T)) {
-        const bar = barIndexAtX(mx, layout);
-        selectionRef.current = { active: true, startBar: bar, endBar: bar };
-        hideCrosshair();
-        cv.style.cursor = 'crosshair';
-        drawSelection(mx, my);
-        return;
-      }
       dragRef.current = { active: true, lastX: mx, acc: 0 };
       cv.style.cursor = 'grabbing';
       hideCrosshair();
     };
 
     const endPointer = () => {
-      if (selectionRef.current.active) {
-        const { startBar, endBar } = selectionRef.current;
-        selectionRef.current.active = false;
-        hideCrosshair();
-        cv.style.cursor = 'grab';
-        if (startBar !== endBar) {
-          setRange(Math.min(startBar, endBar), Math.max(startBar, endBar));
-        }
-        return;
-      }
       if (!dragRef.current.active) return;
       dragRef.current.active = false;
       cv.style.cursor = 'grab';
@@ -404,7 +361,7 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
       cv.removeEventListener('wheel', onWheel);
       window.removeEventListener('mouseup', endPointer);
     };
-  }, [stock, series, markers, view.from, view.to, macdOn, stochOn, chartH, nBars, panByBars, zoomAtBar, setRange]);
+  }, [stock, series, markers, view.from, view.to, macdOn, stochOn, chartH, nBars, panByBars, zoomAtBar]);
 
   const center = (view.from + view.to) / 2;
   const patternCounts = useMemo(

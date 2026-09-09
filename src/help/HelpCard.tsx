@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { HELP_INDEX, KIND_LABEL, topicOf, type HelpKind } from './glossary';
 import { parseBody, type Segment } from './link';
 import { clampToViewport, placeNear, type Rect } from './place';
+import { SUMMON_LABEL } from './trigger';
 
 const KIND_COLOR: Record<HelpKind, string> = {
   indicator: '#8ec5ff',
@@ -104,7 +105,7 @@ export function HoverCard({ id, topic, anchor, z, onPin }: {
       <Related topic={topic} />
       <div className="help-card__foot">
         <span><kbd>T</kbd>pin</span>
-        <span>hover a highlighted term for more</span>
+        <span>{SUMMON_LABEL} + point summons a card</span>
       </div>
     </div>
   );

@@ -2,10 +2,17 @@
 //
 // Any element with data-help="<topic-id>" is a hover target. The provider
 // listens once at the document level, so the rest of the app only adds
-// attributes. Hovering a target for a moment opens its card next to it;
-// terms inside a card are targets too, so hovering one opens a child card on
-// top. The open, unpinned cards form a chain: leaving a card (and the target
-// it came from) closes it and everything after it.
+// attributes. Holding the summon modifier (trigger.ts) and pointing at a
+// target opens its card next to it; terms inside a card are targets too, so
+// hovering one opens a child card on top. The open, unpinned cards form a
+// chain: leaving a card (and the target it came from) closes it and everything
+// after it.
+//
+// The modifier is only for the first card. While a card is showing — and for
+// LATCH_GRACE after the last one closes on its own — plain hover works as it
+// always did, because by then you are already reading documentation. An
+// explicit dismissal (Esc, a click outside, a scroll, a resize) ends that grace
+// at once: it means "stop showing me cards".
 //
 // Pressing T pins the deepest hover card where it stands. Pinned cards are
 // independent: draggable, closable, and still hoverable for their terms.
@@ -15,14 +22,21 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { HoverCard, PinnedCard } from './HelpCard';
 import { placeNear, type Rect } from './place';
+import { decideTrigger, isModifierDown, type TriggerDelays, type TriggerState } from './trigger';
 import { topicOf } from './glossary';
 import './help.css';
 
 const PIN_KEY = 't';
 const HOVER_DELAY = 380;
 const NESTED_DELAY = 180;
+/** an explicit request needs no suspicion delay, only enough to not strobe */
+const ARMED_DELAY = 90;
 const LEAVE_GRACE = 170;
+/** how long plain hover keeps working after the last card closes on its own */
+const LATCH_GRACE = 800;
 const HOVER_Z = 10_000;
+
+const DELAYS: TriggerDelays = { hover: HOVER_DELAY, nested: NESTED_DELAY, armed: ARMED_DELAY };
 
 interface HoverEntry {
   id: number;
@@ -43,6 +57,8 @@ interface Pending {
   anchorEl: Element;
   topic: string;
   keepIds: Set<number>;
+  /** the target is a term inside an open card, so it is never gated */
+  insideCard: boolean;
 }
 
 function rectOf(el: Element): Rect {
@@ -66,14 +82,31 @@ export function HelpProvider({ children }: { children: ReactNode }) {
   const enterTimer = useRef<number | null>(null);
   const leaveTimer = useRef<number | null>(null);
   const pending = useRef<Pending | null>(null);
+  const modifierDown = useRef(false);
+  const pointerBusy = useRef(false);
+  /** true while the running enter timer exists only because the modifier is down */
+  const armedTimer = useRef(false);
+  const latchedUntil = useRef(0);
 
-  useEffect(() => { chainRef.current = chain; }, [chain]);
+  // The latch, kept here rather than in the listener so it follows the chain
+  // itself: open while any hover card is up, then a grace once the last one
+  // goes. Pinned cards deliberately do not hold it — a pin is a parked
+  // reference, not an active reading session.
+  useEffect(() => {
+    chainRef.current = chain;
+    if (chain.length) latchedUntil.current = Infinity;
+    else if (latchedUntil.current === Infinity) latchedUntil.current = Date.now() + LATCH_GRACE;
+  }, [chain]);
   useEffect(() => { pinnedRef.current = pinned; }, [pinned]);
 
   useEffect(() => {
-    const clearEnter = () => {
+    const clearTimer = () => {
       if (enterTimer.current != null) window.clearTimeout(enterTimer.current);
       enterTimer.current = null;
+      armedTimer.current = false;
+    };
+    const clearEnter = () => {
+      clearTimer();
       pending.current = null;
     };
     const clearLeave = () => {
@@ -83,6 +116,9 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     const closeHover = () => {
       clearEnter();
       clearLeave();
+      // An explicit dismissal ends the grace too, or the next hover would
+      // reopen exactly what was just waved away.
+      latchedUntil.current = 0;
       if (chainRef.current.length) setChain([]);
     };
 
@@ -98,7 +134,56 @@ export function HelpProvider({ children }: { children: ReactNode }) {
       return entry;
     };
 
+    /** Start the open timer for `p`, if the current state says it may open at all. */
+    const arm = (p: Pending) => {
+      const state: TriggerState = {
+        insideCard: p.insideCard,
+        chainOpen: chainRef.current.length > 0,
+        helpMode: false,
+        modifierDown: modifierDown.current,
+        pointerBusy: pointerBusy.current,
+        latchedUntil: latchedUntil.current,
+        now: Date.now(),
+      };
+      const d = decideTrigger(state, DELAYS);
+      if (!d.open) return;
+      // Whether the modifier alone is holding this timer up, so releasing it
+      // cancels a card that has not appeared yet without touching one that has.
+      armedTimer.current = !decideTrigger({ ...state, modifierDown: false }, DELAYS).open;
+      enterTimer.current = window.setTimeout(() => {
+        enterTimer.current = null;
+        armedTimer.current = false;
+        pending.current = null;
+        if (p.anchorEl.matches(':hover')) open(p);
+      }, d.delay);
+    };
+
+    /**
+     * Follow the modifier from whatever event carries it — keydown, keyup, and
+     * mouse events too, which is what recovers the state when the key went down
+     * before the window had focus.
+     */
+    const syncModifier = (e: KeyboardEvent | MouseEvent) => {
+      const down = isModifierDown(e);
+      if (down === modifierDown.current) return;
+      modifierDown.current = down;
+      if (down) {
+        // The pointer is usually already parked on the thing before the hand
+        // reaches for the key, so arm what is already pending.
+        const p = pending.current;
+        if (p && enterTimer.current == null && p.anchorEl.matches(':hover')) arm(p);
+      } else if (armedTimer.current) {
+        // Released before the card appeared. An open card is never closed by
+        // this: moving the pointer into a card must not destroy it.
+        clearTimer();
+      }
+    };
+
     const onOver = (e: MouseEvent) => {
+      syncModifier(e);
+      // `buttons` is authoritative on every move, so a mouseup missed outside
+      // the window cannot leave the layer wedged shut.
+      pointerBusy.current = e.buttons !== 0;
       const t = e.target;
       if (!(t instanceof Element)) return;
       const cardEl = t.closest('[data-help-card]');
@@ -130,13 +215,11 @@ export function HelpProvider({ children }: { children: ReactNode }) {
       if (pending.current && pending.current.anchorEl === anchorEl && !same) return;
       clearEnter();
       if (!anchorEl || !topic || same || !topicOf(topic)) return;
-      const p: Pending = { anchorEl, topic, keepIds };
+      // The pending target is recorded even when nothing opens: it is what the
+      // modifier — or T — summons without the pointer having to move again.
+      const p: Pending = { anchorEl, topic, keepIds, insideCard: cardId != null };
       pending.current = p;
-      enterTimer.current = window.setTimeout(() => {
-        enterTimer.current = null;
-        pending.current = null;
-        if (anchorEl.matches(':hover')) open(p);
-      }, cardId != null ? NESTED_DELAY : HOVER_DELAY);
+      arm(p);
     };
 
     const pinTop = () => {
@@ -160,6 +243,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     };
 
     const onKey = (e: KeyboardEvent) => {
+      syncModifier(e);
       if (e.key === 'Escape') {
         if (chainRef.current.length || pending.current) { closeHover(); e.preventDefault(); return; }
         if (pinnedRef.current.length) {
@@ -176,9 +260,16 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     };
 
     const onDown = (e: MouseEvent) => {
+      pointerBusy.current = true;
+      syncModifier(e);
+      clearEnter();
       const t = e.target;
       if (t instanceof Element && t.closest('[data-help-card]')) return;
       closeHover();
+    };
+    const onUp = (e: MouseEvent) => {
+      pointerBusy.current = false;
+      syncModifier(e);
     };
     const onScroll = (e: Event) => {
       const t = e.target;
@@ -191,14 +282,18 @@ export function HelpProvider({ children }: { children: ReactNode }) {
 
     document.addEventListener('mouseover', onOver);
     document.addEventListener('keydown', onKey);
+    document.addEventListener('keyup', syncModifier);
     document.addEventListener('mousedown', onDown);
+    window.addEventListener('mouseup', onUp);
     document.addEventListener('scroll', onScroll, true);
     document.addEventListener('mouseout', onLeaveWindow);
     window.addEventListener('resize', closeHover);
     return () => {
       document.removeEventListener('mouseover', onOver);
       document.removeEventListener('keydown', onKey);
+      document.removeEventListener('keyup', syncModifier);
       document.removeEventListener('mousedown', onDown);
+      window.removeEventListener('mouseup', onUp);
       document.removeEventListener('scroll', onScroll, true);
       document.removeEventListener('mouseout', onLeaveWindow);
       window.removeEventListener('resize', closeHover);

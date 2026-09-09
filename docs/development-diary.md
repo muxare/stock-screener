@@ -1,5 +1,71 @@
 # Development diary
 
+## 2026-09-09 — Shift summons the help card; Shift-drag zoom retired
+
+### What changed
+The first help card now has to be **asked for**. Holding **Shift** and pointing at anything
+carrying `data-help` opens its card in ~90 ms; without the key nothing opens, however long
+you dwell. Phases 0 and 1 of `docs/help-hover-trigger-plan.md`, in one branch because phase 0
+exists only to free the key.
+
+**Phase 0 — Shift-drag zoom-to-range is gone.** Wheel-to-zoom and drag-to-pan already covered
+the job between them, and one modifier meaning two things — a chart gesture in the plot and a
+documentation gesture everywhere else — was not survivable once help cards are wanted *inside*
+the chart (phase 4 of the plan). What is actually lost is precision in a single gesture:
+jumping straight to an exact bar span instead of a few wheel notches and a pan.
+
+- `src/lib/chart/interactions.ts` — `drawZoomSelection` and `ZoomSelection` deleted.
+  `barIndexAtX`, `barCenterX` and `isInPlot` stay, and `FanDetail`'s crosshair now calls all
+  three instead of re-deriving the same three expressions inline.
+- `src/lib/chart/viewport.ts` — `setRange` deleted with its only two callers. `zoomAtBar`,
+  `panByBars` and `reset` are a complete viewport API; an uncalled setter is not.
+- `src/components/detail/FanDetail.tsx`, `src/components/modals/FanTradeReview.tsx` — the
+  `selectionRef`, the `e.shiftKey` branch in `onDown`, `drawSelection` and the selection branch
+  in `endPointer`, in both copies. `FanTradeReview`'s overlay canvas went with them: the
+  marquee was the only thing ever drawn on it.
+- `src/components/ui/ChartControls.tsx` — the hint is now `scroll = zoom · drag = pan`.
+
+**Phase 1 — the trigger is a pure function.** `HOVER_DELAY = 380 ms` was inside the range of
+ordinary pointer travel, so a card was as likely to be interrupting a question as answering
+one — and it opens 330 px of opaque panel *downward over the content below the anchor*.
+
+- `src/help/trigger.ts` (new) — `decideTrigger(state, delays)`, modelled on `place.ts`
+  ("Pure, so it is testable"). Rules in order: a mouse button down opens nothing and arms
+  nothing; a term inside a card is never gated (180 ms); help mode, an open chain or a live
+  latch mean plain hover (380 ms); the modifier means 90 ms; otherwise closed but *armable*.
+  `SUMMON_MODIFIER` is one constant, and `SUMMON_LABEL` is where the on-screen copy comes
+  from, so changing the key changes the footer and the `help` card with it.
+- **Why Shift and not Ctrl/Cmd**, recorded in the module: Ctrl+click is the secondary click on
+  macOS and every help target is a live control; Ctrl/Cmd+wheel is browser zoom; and Ctrl/Cmd+T
+  opens a browser tab, which would fight the pin key — silently, since `onKey` already ignores
+  `T` with those modifiers. `Shift+T` is unbound, and `onKey` lowercases, so pinning works with
+  the key still held and needed no change at all.
+- `src/help/HelpProvider.tsx` — the latch. `latchedUntil` is `Infinity` while a card is
+  showing and `now + 800 ms` once the last one closes on its own, so you can leave a card, look
+  at what it described and hover a neighbour without reaching for Shift again. `Esc`, a click
+  outside, a scroll or a resize sets it to `0`: an explicit dismissal means *stop showing me
+  cards*. Pinned cards deliberately do not hold it open — a pin is a parked reference, not a
+  reading session.
+- The pending target is now recorded even when nothing opens, which is the path that matters:
+  the pointer is usually already parked on the thing before the hand reaches for the key, so
+  the keypress arms what is already pending rather than waiting for another mouse move.
+  Releasing the key cancels a card that has not appeared yet and never closes one that has.
+- Modifier state is read from `e.shiftKey` on keydown, keyup *and* mouse events rather than by
+  matching `e.key` — that gets both Shift keys for free and recovers the state when the key
+  went down before the window had focus. `buttons !== 0` on every `mouseover` re-derives
+  "pointer busy", so a `mouseup` missed outside the window cannot wedge the layer shut.
+- `src/help/trigger.test.ts` (new) — the matrix: cold, latched, expired, nested, help mode, and
+  pointer-busy with the modifier held (a Shift-held chart pan must flash nothing).
+
+### How to test
+`npm run dev`, then: sweep the pointer across the TopBar, the filter row and the table for ten
+seconds — no card. Point at "Backtest" and press Shift — card in about a tenth of a second;
+press `T` while still holding Shift and it pins, with no browser side effect. Release Shift,
+move into the card, hover a highlighted term — the child card opens as before. Close with `Esc`
+and hover a different chip — nothing, because the dismissal cleared the latch; let a card close
+by walking away instead and hover a neighbour within ~0.8 s — it opens without Shift. On the
+detail chart: scroll zooms, drag pans, and holding Shift through a pan flashes nothing.
+
 ## 2026-09-08 — Price-action patterns on the candlestick chart
 
 ### What changed

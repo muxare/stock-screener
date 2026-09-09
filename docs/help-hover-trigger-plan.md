@@ -1,14 +1,15 @@
 # Help cards — how the first card should be summoned
 
-Status (2026-09-09): **proposal, nothing built**. Written from Mikael's note that the
+Status (2026-09-09): **phases 0 and 1 built; 2-4 open**. Written from Mikael's note that the
 first card arrives too eagerly and covers the thing you were looking at, and his
 suggestion to gate it behind Shift; revised the same day after three follow-ups — which
 modifier (Ctrl/Cmd considered and rejected, see idea A), the wish to hover marks *on the
 chart* for their documentation (phase 4, which is why the modifier cannot be switched off
 over a canvas), and **Mikael's decision to retire Shift-drag zoom-to-range in favour of
 wheel-zoom and drag-pan, which frees Shift outright** (phase 0). Phase 1 answers the
-original complaint; everything else builds on it. **All open questions are closed
-(see Decisions at the end) — the plan is ready to build, phase 0 first.**
+original complaint; everything else builds on it. All open questions were closed the same
+day (see Decisions at the end). **Phases 0 and 1 landed 2026-09-09 on
+`feat/help-summon-modifier` — see the diary entry of that date. Phases 2-4 are open.**
 
 ## Context — what the trigger does today
 
@@ -207,7 +208,7 @@ of what you were reading. Phase 4 = **help on the chart itself** — hover a pat
 or an indicator pane for what it is and why it fired; it is the phase that earns the
 trigger work, and the reason the trigger must work over a canvas.
 
-## Phase 0 — free the Shift key
+## Phase 0 — free the Shift key — **landed 2026-09-09**
 
 Retire Shift-drag zoom-to-range. Wheel-to-zoom and drag-to-pan stay and between them do
 the same job, so Shift belongs to the documentation layer alone. Small, self-contained,
@@ -225,7 +226,9 @@ is free, but small against a modifier that has to work over the chart for phase 
   `onDown`, `drawSelection`, and the selection branch in `endPointer`
 - `src/components/modals/FanTradeReview.tsx` — the same four, they are duplicates
 - `src/lib/chart/interactions.ts` — `drawZoomSelection` and `ZoomSelection` become dead;
-  remove both. `barIndexAtX`, `barCenterX` and `isInPlot` stay (the crosshair uses them)
+  remove both. `barIndexAtX`, `barCenterX` and `isInPlot` stay — though not, as written here,
+  because the crosshair uses them: it re-derived all three inline. Point it at the helpers
+  instead, which is what keeps them alive and drops the duplication
 - `src/components/ui/ChartControls.tsx:166` — the hint becomes
   `scroll = zoom · drag = pan`, and phase 2 appends the help gesture to it
 - `docs/development-diary.md` — an entry, since this reverses a documented feature
@@ -241,7 +244,7 @@ viewport API, and an uncalled setter is the kind of thing `CLAUDE.md` warns abou
 Scroll zooms, drag pans, the zoom buttons and reset still work on both charts; holding
 Shift changes nothing anywhere; `npm run test` and `npm run lint` clean.
 
-## Phase 1 — Shift-armed first card, latched chain
+## Phase 1 — Shift-armed first card, latched chain — **landed 2026-09-09**
 
 ### Touch scope
 - `src/help/trigger.ts` (new) — the pure decision function
@@ -317,7 +320,7 @@ pin them and so the modifier is one edit away from changing.
 - `src/help/trigger.test.ts` — the matrix: cold, no modifier → closed but armable; cold +
   modifier → `ARMED_DELAY`; latched within grace → `HOVER_DELAY`; latched, grace expired →
   closed; chain open → `HOVER_DELAY`; inside a card → `NESTED_DELAY` regardless of the
-  modifier or the latch; help mode → `HOVER_DELAY` regardless; `overChart` → closed and
+  modifier or the latch; help mode → `HOVER_DELAY` regardless; `pointerBusy` → closed and
   **not** armable, even with the modifier down.
 - Existing `place.test.ts` / `link.test.ts` / `glossary.test.ts` are untouched.
 

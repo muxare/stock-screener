@@ -8,7 +8,6 @@ import {
   type StepKind,
 } from '../../lib/fanBacktest';
 import { useChartViewport } from '../../lib/chart/viewport';
-import { barIndexAtX, drawZoomSelection, isInPlot, type ZoomSelection } from '../../lib/chart/interactions';
 import { drawMacdPane, drawStochPane } from '../../lib/chart/panes';
 import { HButton } from '../ui/Hoverable';
 import { ChartControls } from '../ui/ChartControls';
@@ -75,10 +74,8 @@ export function FanTradeReview({
   position?: string | null;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const overlayRef = useRef<HTMLCanvasElement>(null);
   const layoutRef = useRef({ padL: 8, plotW: 1, visible: 1, from: 0, to: 0, bottom: 0 });
   const dragRef = useRef({ active: false, lastX: 0, acc: 0 });
-  const selectionRef = useRef<ZoomSelection>({ active: false, startBar: 0, endBar: 0 });
   const [macdOn, setMacdOn] = useState(true);
   const [stochOn, setStochOn] = useState(true);
 
@@ -110,7 +107,7 @@ export function FanTradeReview({
     };
   }, [stock]);
 
-  const { view, zoomAtBar, panByBars, setRange, reset, isDefault } = useChartViewport(total, defWin);
+  const { view, zoomAtBar, panByBars, reset, isDefault } = useChartViewport(total, defWin);
 
   const chartH = PAD_T + PRICE_H + 10 + VOL_H
     + (macdOn ? 8 + MACD_H : 0)
@@ -146,13 +143,6 @@ export function FanTradeReview({
       cv.height = Math.floor(chartH * dpr);
       cv.style.width = cssW + 'px';
       cv.style.height = chartH + 'px';
-      const ov = overlayRef.current;
-      if (ov) {
-        ov.width = cv.width;
-        ov.height = cv.height;
-        ov.style.width = cssW + 'px';
-        ov.style.height = chartH + 'px';
-      }
       const ctx = cv.getContext('2d');
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -391,42 +381,9 @@ export function FanTradeReview({
       }
     };
 
-    const hideOverlay = () => {
-      const ov = overlayRef.current;
-      const g = ov?.getContext('2d');
-      if (ov && g) {
-        const dpr = window.devicePixelRatio || 1;
-        g.setTransform(dpr, 0, 0, dpr, 0, 0);
-        g.clearRect(0, 0, ov.width, ov.height);
-      }
-    };
-
-    const drawSelection = (mx: number, my: number) => {
-      const ov = overlayRef.current, cvEl = canvasRef.current;
-      if (!ov || !cvEl) return;
-      const layout = layoutRef.current;
-      if (!selectionRef.current.active || !isInPlot(mx, my, layout, PAD_T)) {
-        hideOverlay();
-        return;
-      }
-      const dpr = window.devicePixelRatio || 1;
-      const ctx = ov.getContext('2d');
-      if (!ctx) return;
-      const cssW = cvEl.getBoundingClientRect().width;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, cssW, chartH);
-      drawZoomSelection(ctx, layout, selectionRef.current.startBar, selectionRef.current.endBar, PAD_T);
-    };
-
     const onMove = (e: MouseEvent) => {
       const rect = cv.getBoundingClientRect();
       const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-      if (selectionRef.current.active) {
-        selectionRef.current.endBar = barIndexAtX(mx, layoutRef.current);
-        drawSelection(mx, my);
-        return;
-      }
       if (!dragRef.current.active) return;
       const { plotW, visible } = layoutRef.current;
       const barsPerPx = visible / Math.max(1, plotW);
@@ -438,31 +395,10 @@ export function FanTradeReview({
     };
     const onDown = (e: MouseEvent) => {
       const rect = cv.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-      const layout = layoutRef.current;
-      if (e.shiftKey && isInPlot(mx, my, layout, PAD_T)) {
-        const bar = barIndexAtX(mx, layout);
-        selectionRef.current = { active: true, startBar: bar, endBar: bar };
-        hideOverlay();
-        cv.style.cursor = 'crosshair';
-        drawSelection(mx, my);
-        return;
-      }
-      dragRef.current = { active: true, lastX: mx, acc: 0 };
+      dragRef.current = { active: true, lastX: e.clientX - rect.left, acc: 0 };
       cv.style.cursor = 'grabbing';
     };
     const endPointer = () => {
-      if (selectionRef.current.active) {
-        const { startBar, endBar } = selectionRef.current;
-        selectionRef.current.active = false;
-        hideOverlay();
-        cv.style.cursor = 'grab';
-        if (startBar !== endBar) {
-          setRange(Math.min(startBar, endBar), Math.max(startBar, endBar));
-        }
-        return;
-      }
       if (!dragRef.current.active) return;
       dragRef.current.active = false;
       cv.style.cursor = 'grab';
@@ -492,7 +428,7 @@ export function FanTradeReview({
       cv.removeEventListener('wheel', onWheel);
       window.removeEventListener('mouseup', endPointer);
     };
-  }, [stock, series, event, trade, trailEma, view.from, view.to, macdOn, stochOn, chartH, panByBars, zoomAtBar, setRange]);
+  }, [stock, series, event, trade, trailEma, view.from, view.to, macdOn, stochOn, chartH, panByBars, zoomAtBar]);
 
   const center = (view.from + view.to) / 2;
 
@@ -574,7 +510,6 @@ export function FanTradeReview({
           />
           <div style={{ position: 'relative' }}>
             <canvas ref={canvasRef} role="img" aria-label={`${event.ticker} trade candlestick chart`} style={{ display: 'block' }} />
-            <canvas ref={overlayRef} style={{ display: 'block', position: 'absolute', left: 0, top: 0, pointerEvents: 'none' }} />
           </div>
         </div>
       )}
