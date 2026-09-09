@@ -15,6 +15,7 @@
 // chips are dropped and only the glyphs remain — the chart stays readable when
 // it is zoomed all the way out.
 
+import type { Box } from './interactions.ts';
 import type { OHLC } from '../market.ts';
 import type { PatternDir, PatternMarker } from '../patterns.ts';
 
@@ -32,6 +33,17 @@ export interface PatternLayerArgs {
   cw: number;
   top: number;
   height: number;
+}
+
+/**
+ * A chip as it was actually drawn. The layer places these anyway — the
+ * placer's whole job is finding free pixels for them — so handing them back
+ * costs nothing and gives the chart the hit-test it needs to turn a glyph into
+ * a help target. Chips that found no free row are not in the list, because
+ * there is nothing on screen to point at.
+ */
+export interface PatternChip extends Box {
+  marker: PatternMarker;
 }
 
 interface Tone { line: string; fill: string; text: string; chip: string }
@@ -127,10 +139,10 @@ const CHIP_RANK: Partial<Record<string, number>> = {
 
 export function drawPatternLayer({
   ctx, bars, markers, from, to, x, py, cw, top, height,
-}: PatternLayerArgs): void {
-  if (markers.length === 0) return;
+}: PatternLayerArgs): PatternChip[] {
+  if (markers.length === 0) return [];
   const visible = markers.filter((m) => m.to >= from && m.from <= to);
-  if (visible.length === 0) return;
+  if (visible.length === 0) return [];
 
   const slot = cw / 0.62;
   const withLabels = slot >= MIN_SLOT_FOR_LABELS;
@@ -147,10 +159,10 @@ export function drawPatternLayer({
   // Chips are collected as the shapes are drawn and laid out at the end, so the
   // placer can hand the good spots to the patterns that matter most rather than
   // to whichever shape happened to be painted first.
-  const chips: Array<{ cx: number; baseY: number; text: string; tone: Tone; dir: -1 | 1; rank: number }> = [];
+  const chips: Array<{ m: PatternMarker; cx: number; baseY: number; text: string; tone: Tone; dir: -1 | 1; rank: number }> = [];
   const chip = (m: PatternMarker, cx: number, baseY: number, dir: -1 | 1) => {
     if (!withLabels || !m.tag) return;
-    chips.push({ cx, baseY, text: m.tag, tone: TONE[m.dir], dir, rank: CHIP_RANK[m.id] ?? 99 });
+    chips.push({ m, cx, baseY, text: m.tag, tone: TONE[m.dir], dir, rank: CHIP_RANK[m.id] ?? 99 });
   };
 
   // ---- pullback bands (behind everything else) ----
@@ -268,6 +280,7 @@ export function drawPatternLayer({
   chips.sort((a, b) => a.rank - b.rank);
   ctx.font = FONT;
   ctx.textAlign = 'center';
+  const drawn: PatternChip[] = [];
   for (const c of chips) {
     const w = ctx.measureText(c.text).width + 8;
     const y = place(c.cx, w, c.baseY, c.dir);
@@ -277,7 +290,9 @@ export function drawPatternLayer({
     ctx.fill();
     ctx.fillStyle = c.tone.text;
     ctx.fillText(c.text, c.cx, y + 0.5);
+    drawn.push({ marker: c.m, left: c.cx - w / 2, top: y - 6.5, right: c.cx + w / 2, bottom: y + 6.5 });
   }
 
   ctx.restore();
+  return drawn;
 }

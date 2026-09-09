@@ -1,5 +1,63 @@
 # Development diary
 
+## 2026-09-09 — Help on the chart itself: the marks document themselves
+
+### What changed
+Phase 4 of `docs/help-hover-trigger-plan.md`, and the phase the trigger work was for:
+point at a pattern chip or an indicator pane on the detail chart and get its card — with a
+line saying why *that* mark fired, on *that* bar.
+
+- **Virtual anchors (`src/help/anchors.ts`).** Everywhere else a help target is an element
+  carrying `data-help`; a chart is one canvas, so there is nothing for `closest()` to find
+  and nothing for `:hover` to report. A canvas publishes the target under the pointer
+  instead, and the provider treats it exactly like a hovered element: `contains` becomes
+  "is the live virtual key still this one" and `:hover` becomes "is it still published".
+  Everything downstream — the modifier, the delays, the latch, `T`, `Esc`, the chain,
+  pinning — is unchanged, which is what putting the decision in `trigger.ts` bought in
+  phase 1. Identity is the key, so a chart republishing the same mark on every mousemove is
+  nothing happening.
+- **The provider's `onOver` became `enter(target, topic, node, cardId)`**, with a `Target`
+  union of DOM element and virtual anchor. The keep-the-chain loop, the pending target and
+  the leave grace are shared by both.
+- **`drawPatternLayer` returns the chips it drew.** The label placer already computes each
+  chip's rectangle and then discarded it; handing the array back is the whole hit-test.
+  Chips the placer had to drop are not in it, because there is nothing on screen to point
+  at.
+- **What is hittable, most specific first:** a pattern chip under the pointer, else the
+  top-ranked pattern covering the hovered bar (the same list the crosshair readout is
+  already printing), else the pane the pointer is in — volume, MACD, Stoch RSI. The two
+  hit-tests (`boxAt`, `bandAt`) are pure and live in `lib/chart/interactions.ts`.
+- **The instance line.** `PatternMarker.note` is already one line of prose about the
+  instance, so the card renders the bar's date and that note above the glossary body:
+  "2016-06-30 — Swing pivot high — high above the 3 bars either side". Generic
+  documentation answers "what is a pivot"; this answers "why is there one here". Pinned
+  cards keep it.
+- **A chart card never covers the bars it explains.** Phase 3 gave `placeNear` a host rect
+  to keep clear of; a chart passes the *half of the plot the mark is in*, so the card docks
+  to the quieter half. In a detail dock narrower than two card widths that means it clears
+  the plot entirely and lands over the table — which is the right trade: the mark you asked
+  about stays visible.
+- **New glossary topic `macd`**, the classic 12/26/9 the chart's pane actually draws, as
+  distinct from Screenr's own `macd-18-50`. Its aliases are deliberately only the qualified
+  ones, so a bare "MACD" in another card still auto-links to nothing new.
+
+### Where it lives
+`src/help/anchors.ts` (new: `VirtualAnchor`, `useHelpAnchor`, `anchorChanged`,
+`toViewport`) and `src/help/anchors.test.ts`; `src/help/HelpProvider.tsx` (the `Target`
+union, `enter`, the publish callback); `src/help/HelpCard.tsx` + `src/help/help.css` (the
+instance line); `src/lib/chart/interactions.ts` (`boxAt`, `bandAt`) and its new test;
+`src/lib/chart/patternLayer.ts` (`PatternChip`, returned) and its new test;
+`src/components/detail/FanDetail.tsx` (`hitRef`, `helpAt`, publishing on mousemove);
+`src/help/glossary.ts` (`macd`).
+
+### How to test
+`npm run dev`, open a ticker, zoom in until the pattern chips appear (`+` a few times), then
+hold Shift and point at a `HH`/`LH` chip — a card naming the pattern, the date and why that
+bar qualified, docked clear of the candles. Shift + point at a bar with no chip on it — the
+top pattern covering that bar. Shift + point in the MACD pane — the MACD 12/26/9 card, no
+instance line. `T` pins a chart card and it stays put while you pan and zoom underneath it;
+drag-to-pan with Shift held flashes nothing. `npm run test`, `npm run lint`.
+
 ## 2026-09-09 — Help cards: point at the word, and land beside it
 
 ### What changed

@@ -135,6 +135,18 @@ It is favorable when the line is above its signal and the histogram is at or abo
     related: ['step-macd-favorable', 'macd-exit', 'indicators-at-entry'],
   },
   {
+    id: 'macd',
+    title: 'MACD (12/26/9)',
+    kind: 'indicator',
+    aliases: ['MACD 12/26/9', '12/26/9 MACD', 'classic MACD'],
+    body: `The textbook moving-average convergence/divergence, drawn as its own pane under the chart: the line is the 12-EMA minus the 26-EMA, the signal is a 9-bar [[ema|EMA]] of that line, and the bars are line minus signal.
+
+Read it as momentum, not direction. The histogram crossing zero is the line crossing its signal — the move is accelerating or has stopped doing so — and the line's distance from zero says how far the fast average has pulled away from the slow one. Divergence, price making a new extreme while the histogram does not, is the reading it is famous for and the one to be most careful with.
+
+Screenr's own [[macd-18-50|18–50 MACD]] is a different pair, built from the fan's averages; it is what the [[step-macd-favorable]] guard reads. This pane and [[indicators-at-entry]] use the classic settings.`,
+    related: ['macd-18-50', 'stoch-rsi', 'indicators-at-entry'],
+  },
+  {
     id: 'atr',
     title: 'ATR(14)',
     kind: 'indicator',

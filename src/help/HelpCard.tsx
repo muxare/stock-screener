@@ -40,6 +40,17 @@ export function HelpBody({ topic }: { topic: string }) {
   );
 }
 
+/**
+ * The one line that is about *this* mark rather than about the pattern: the
+ * bar it printed on and why it qualified. Generic documentation answers "what
+ * is a pin bar"; this answers "why is there one here", which is the question
+ * someone pointing at a glyph on the chart is actually asking.
+ */
+function Instance({ text }: { text?: string }) {
+  if (!text) return null;
+  return <div className="help-card__instance">{text}</div>;
+}
+
 function Related({ topic }: { topic: string }) {
   const t = topicOf(topic);
   const rel = (t?.related ?? []).filter((id) => topicOf(id));
@@ -76,12 +87,14 @@ function Head({ topic, pinned, onPin, onClose, onDragStart }: {
   );
 }
 
-export function HoverCard({ id, topic, anchor, host, z, onPin }: {
+export function HoverCard({ id, topic, anchor, host, instance, z, onPin }: {
   id: number;
   topic: string;
   anchor: Rect;
   /** the control the anchor sits in, which the card is placed clear of */
   host: Rect | null;
+  /** why this particular mark fired, when the anchor was a chart glyph */
+  instance?: string;
   z: number;
   onPin: () => void;
 }) {
@@ -103,6 +116,7 @@ export function HoverCard({ id, topic, anchor, host, z, onPin }: {
       style={{ left: pos?.x ?? 0, top: pos?.y ?? 0, zIndex: z }}
     >
       <Head topic={topic} pinned={false} onPin={onPin} />
+      <Instance text={instance} />
       <div className="help-card__body"><HelpBody topic={topic} /></div>
       <Related topic={topic} />
       <div className="help-card__foot">
@@ -113,12 +127,14 @@ export function HoverCard({ id, topic, anchor, host, z, onPin }: {
   );
 }
 
-export function PinnedCard({ id, topic, x, y, z, onClose, onMove, onFocus }: {
+export function PinnedCard({ id, topic, x, y, z, instance, onClose, onMove, onFocus }: {
   id: number;
   topic: string;
   x: number;
   y: number;
   z: number;
+  /** why this particular mark fired, when the anchor was a chart glyph */
+  instance?: string;
   onClose: () => void;
   onMove: (x: number, y: number) => void;
   onFocus: () => void;
@@ -161,6 +177,7 @@ export function PinnedCard({ id, topic, x, y, z, onClose, onMove, onFocus }: {
       onMouseDown={onFocus}
     >
       <Head topic={topic} pinned onClose={onClose} onDragStart={onDragStart} />
+      <Instance text={instance} />
       <div className="help-card__body"><HelpBody topic={topic} /></div>
       <Related topic={topic} />
       <div className="help-card__foot">

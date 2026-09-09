@@ -3,12 +3,14 @@ import type { Stock } from '../../lib/market';
 import { ema, macd, rsi, stochRsi } from '../../lib/indicators';
 import { classifyCloses } from '../../lib/fan';
 import { useChartViewport } from '../../lib/chart/viewport';
-import { barCenterX, barIndexAtX, isInPlot } from '../../lib/chart/interactions';
+import { bandAt, barCenterX, barIndexAtX, boxAt, isInPlot, type Band } from '../../lib/chart/interactions';
 import { drawMacdPane, drawStochPane } from '../../lib/chart/panes';
-import { drawPatternLayer } from '../../lib/chart/patternLayer';
+import { drawPatternLayer, type PatternChip } from '../../lib/chart/patternLayer';
 import {
-  countsInRange, detectPatterns, markersAtBar, DEFAULT_PATTERNS, PATTERN_IDS, type PatternId,
+  countsInRange, detectPatterns, markersAtBar, patternMeta, DEFAULT_PATTERNS, PATTERN_IDS,
+  type PatternId, type PatternMarker,
 } from '../../lib/patterns';
+import { toViewport, useHelpAnchor, type VirtualAnchor } from '../../help/anchors';
 import { HButton } from '../ui/Hoverable';
 import { ChartControls } from '../ui/ChartControls';
 import { Disclosure } from '../ui/Disclosure';
@@ -31,6 +33,8 @@ const PAD_L = 8;
 const PAD_R = 58;
 /** patterns listed in the crosshair readout before it collapses to a count */
 const MAX_READOUT_PATTERNS = 4;
+/** slack around a chip, so a 13 px tall label does not need to be hit exactly */
+const CHIP_PAD = 3;
 
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const col = (c: number) => (c >= 0 ? '#06a96b' : '#e23d3d');
@@ -50,6 +54,16 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
   const readoutRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef({ padL: PAD_L, plotW: 1, visible: 1, from: 0, to: 0, bottom: 0 });
   const dragRef = useRef({ active: false, lastX: 0, acc: 0 });
+  // What the last draw put where, so a pointer position can be turned back
+  // into the thing under it. Filled in by `draw`, read by the help hit-test.
+  const hitRef = useRef({
+    chips: [] as PatternChip[],
+    bands: [] as Band[],
+    py: ((): number => 0) as (v: number) => number,
+    priceTop: PAD_T,
+    priceBottom: PAD_T + PRICE_H,
+  });
+  const publishHelp = useHelpAnchor();
 
   const [macdOn, setMacdOn] = useState(true);
   const [stochOn, setStochOn] = useState(true);
@@ -210,9 +224,16 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
         ctx.stroke();
       }
 
-      drawPatternLayer({
+      const chips = drawPatternLayer({
         ctx, bars: stock.full, markers, from, to, x, py, cw, top: priceTop, height: PRICE_H,
       });
+
+      // The panes document themselves: each is one rectangle with one topic
+      // behind it, which is the whole of their hit-test.
+      const bands: Band[] = [{ top: volTop, bottom: volTop + VOL_H, topic: 'volume' }];
+      if (macdOn) bands.push({ top: macdTop, bottom: macdTop + MACD_H, topic: 'macd' });
+      if (stochOn) bands.push({ top: stochTop, bottom: stochTop + STOCH_H, topic: 'stoch-rsi' });
+      hitRef.current = { chips, bands, py, priceTop, priceBottom: priceTop + PRICE_H };
 
       ctx.textAlign = 'left';
       let lx = padL + 4;
@@ -301,6 +322,65 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
       readout.textContent = lines.join('\n');
     };
 
+    /**
+     * What the pointer is on, as a help target. Cheapest first, and each step
+     * is more specific than the one after it: a chip is a label you aimed at, a
+     * marker on the hovered bar is the pattern you are pointing into, a pane is
+     * the indicator you are looking at.
+     *
+     * The card is kept off the bars it explains by handing the help layer the
+     * half of the plot the mark is in as its host rect: `placeNear` docks
+     * beside that, so the card lands in the quieter half rather than over the
+     * candles that are the answer.
+     */
+    const helpAt = (mx: number, my: number): VirtualAnchor | null => {
+      const layout = layoutRef.current;
+      const hit = hitRef.current;
+      if (mx < layout.padL || mx > layout.padL + layout.plotW) return null;
+      const origin = cv.getBoundingClientRect();
+      const mid = layout.padL + layout.plotW / 2;
+      const anchor = (key: string, topic: string, box: { left: number; top: number; right: number; bottom: number }, instance?: string) => {
+        const half = (box.left + box.right) / 2 < mid
+          ? { left: layout.padL, right: mid }
+          : { left: mid, right: layout.padL + layout.plotW };
+        return {
+          key,
+          topic,
+          instance,
+          rect: toViewport(box, origin),
+          host: toViewport({ ...half, top: PAD_T, bottom: layout.bottom }, origin),
+        };
+      };
+      const ofMarker = (m: PatternMarker) => {
+        const iso = stock.full.d?.[m.index];
+        return `${iso ? iso + ' — ' : ''}${m.note}`;
+      };
+
+      const chip = boxAt(mx, my, hit.chips, CHIP_PAD);
+      if (chip) {
+        const topic = patternMeta(chip.marker.id)?.help;
+        if (topic) return anchor(`chip:${chip.marker.id}@${chip.marker.index}`, topic, chip, ofMarker(chip.marker));
+      }
+
+      if (my >= hit.priceTop && my <= hit.priceBottom) {
+        // No chip under the pointer: the patterns covering the hovered bar,
+        // best-ranked first — the same list the crosshair readout is printing.
+        const i = barIndexAtX(mx, layout);
+        const m = markersAtBar(markers, i)[0];
+        const topic = m && patternMeta(m.id)?.help;
+        if (!m || !topic) return null;
+        const cx = barCenterX(i, layout);
+        const y = hit.py(m.price);
+        return anchor(`mark:${m.id}@${m.index}`, topic, { left: cx - 6, right: cx + 6, top: y - 8, bottom: y + 8 }, ofMarker(m));
+      }
+
+      const band = bandAt(my, hit.bands);
+      if (!band) return null;
+      return anchor(`pane:${band.topic}`, band.topic, {
+        left: layout.padL, right: layout.padL + layout.plotW, top: band.top, bottom: band.bottom,
+      });
+    };
+
     const onMove = (e: MouseEvent) => {
       const rect = cv.getBoundingClientRect();
       const mx = e.clientX - rect.left;
@@ -316,6 +396,7 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
         return;
       }
       drawCrosshair(mx, my);
+      publishHelp(helpAt(mx, my));
     };
 
     const onDown = (e: MouseEvent) => {
@@ -324,6 +405,9 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
       dragRef.current = { active: true, lastX: mx, acc: 0 };
       cv.style.cursor = 'grabbing';
       hideCrosshair();
+      // Everything under the pointer is about to move; the target it named is
+      // no longer where it was.
+      publishHelp(null);
     };
 
     const endPointer = () => {
@@ -332,7 +416,7 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
       cv.style.cursor = 'grab';
     };
 
-    const onLeave = () => { hideCrosshair(); };
+    const onLeave = () => { hideCrosshair(); publishHelp(null); };
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
@@ -360,8 +444,9 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
       cv.removeEventListener('mouseleave', onLeave);
       cv.removeEventListener('wheel', onWheel);
       window.removeEventListener('mouseup', endPointer);
+      publishHelp(null);
     };
-  }, [stock, series, markers, view.from, view.to, macdOn, stochOn, chartH, nBars, panByBars, zoomAtBar]);
+  }, [stock, series, markers, view.from, view.to, macdOn, stochOn, chartH, nBars, panByBars, zoomAtBar, publishHelp]);
 
   const center = (view.from + view.to) / 2;
   const patternCounts = useMemo(

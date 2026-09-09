@@ -1,6 +1,6 @@
 # Help cards — how the first card should be summoned
 
-Status (2026-09-09): **phases 0-3 built; 4 open**. Written from Mikael's note that the
+Status (2026-09-09): **all phases built**. Written from Mikael's note that the
 first card arrives too eagerly and covers the thing you were looking at, and his
 suggestion to gate it behind Shift; revised the same day after three follow-ups — which
 modifier (Ctrl/Cmd considered and rejected, see idea A), the wish to hover marks *on the
@@ -8,8 +8,8 @@ chart* for their documentation (phase 4, which is why the modifier cannot be swi
 over a canvas), and **Mikael's decision to retire Shift-drag zoom-to-range in favour of
 wheel-zoom and drag-pan, which frees Shift outright** (phase 0). Phase 1 answers the
 original complaint; everything else builds on it. All open questions were closed the same
-day (see Decisions at the end). **Phases 0-3 landed 2026-09-09 on
-`feat/help-summon-modifier` — see the diary entries of that date. Phase 4 is open.**
+day (see Decisions at the end). **Phases 0-4 landed 2026-09-09 on
+`feat/help-summon-modifier` — see the diary entries of that date.**
 
 ## Context — what the trigger does today
 
@@ -427,7 +427,7 @@ term's child card beside its parent. The narrow-window paths (flip above, shift 
 bottom clamp) are covered by `place.test.ts` rather than by hand — Chrome refused the
 resize.
 
-## Phase 4 — help on the chart itself
+## Phase 4 — help on the chart itself — **landed 2026-09-09**
 
 Mikael, 2026-09-09: *"hover over a mark or indicator on the chart and get the
 documentation on what it is and why it is triggered."* This is the phase that makes the
@@ -444,6 +444,14 @@ it is independent of phase 2.
 - `src/components/detail/FanDetail.tsx` — hit-test on mousemove, publish the target
 - `src/help/HelpCard.tsx` — an instance line above the topic body
 - `src/help/glossary.ts` — indicator/pane topics that do not exist yet, if any
+
+As built, the scope was right except for two files: `src/lib/chart/interactions.ts` took the
+two hit-tests (`boxAt`, `bandAt`) rather than FanDetail inlining them — it is already the
+home of the chart's pointer maths — and `src/help/place.ts` needed no change at all, because
+phase 3's host rect turned out to be exactly the input this phase wanted. Only one glossary
+topic was missing: `macd`, the classic 12/26/9 the pane actually draws, as opposed to
+Screenr's own `macd-18-50`. Its aliases are only the qualified forms, so a bare "MACD"
+elsewhere still auto-links to nothing new.
 
 ### Design
 
@@ -467,6 +475,12 @@ one", `:hover` becomes "is it still published". Everything downstream — the de
 latch, `T`, `Esc`, the chain, pinning — is unchanged, which is the point of putting the
 decision in `trigger.ts` in phase 1.
 
+As built, `VirtualAnchor` also carries the `host` rect the placement section asks for, and
+the provider grew a `Target` union rather than a second code path: `onOver` became
+`enter(target, topic, node, cardId)`, which the DOM listener and the canvas publisher both
+call. The identity rule — republishing the same key is nothing happening — came out as
+`anchorChanged`, which is the testable half of it.
+
 **What is hittable, cheapest first:**
 
 1. **Pattern glyphs and chips.** `markersAtBar(markers, i)` already answers "which
@@ -482,6 +496,12 @@ decision in `trigger.ts` in phase 1.
 3. **The fan lines.** Nearest EMA within ~4 px of the cursor → that EMA's topic (and the
    `fan` card when several converge). Needs a per-line distance test against the points
    already plotted; do it last, and only if pointing at a line feels natural in practice.
+
+**Left out: the fan lines** (3), on the plan's own terms — it is the one that needed a new
+distance test rather than a rect the chart had already computed, and pointing at a 1.6 px
+line inside a stacked fan is a gesture worth trying by hand before building. The price pane
+therefore answers with nothing when neither a chip nor a marker is under the pointer, which
+is the honest answer: no whisper, no card, no cost.
 
 **The card says why *this* mark fired, not just what the pattern is.** `PatternMarker.note`
 is already one line of prose about the instance ("lower wick 2.4× the body, closed in the
@@ -505,16 +525,32 @@ rect where a DOM anchor passes its parent element.
 
 ### Tests
 - `patternLayer.test.ts` — the returned chip rects match what was drawn, and dropped
-  chips (no free row) return no rect.
-- `trigger.test.ts` — a virtual anchor arms and latches identically to a DOM one; a change
-  of `key` swaps the pending target rather than keeping the old one.
-- Hit-test unit tests are pure (rects in, topic out) and belong beside `patterns.test.ts`.
+  chips (no free row) return no rect. A stubbed 2D context records the text it painted, so
+  the test compares the rects handed back against the labels actually drawn.
+- `anchors.test.ts` — republishing a key changes nothing, a new key or a null is a change,
+  and nothing but the key counts. This is where the `trigger.test.ts` line in the plan
+  belonged: `decideTrigger` never sees a target at all, so "a virtual anchor arms
+  identically to a DOM one" is true by construction there and would have been a test of
+  nothing.
+- `interactions.test.ts` — the hit-tests, pure: rects and bands in, the thing under the
+  pointer out, including which of two padded boxes wins.
 
 ### Verification
-Shift + point at a `PIN` chip → a card naming the pattern, the date and why that bar
-qualified, docked beside the glyph and not over it. Shift + point in the MACD pane → the
-MACD card. Shift-drag anywhere in the plot → a range selection and no card. `T` pins a
-chart card; it stays pinned while you pan and zoom underneath it.
+Shift + point at a chip → a card naming the pattern, the date and why that bar qualified,
+docked beside the glyph and not over it. Shift + point in the MACD pane → the MACD card.
+`T` pins a chart card; it stays pinned while you pan and zoom underneath it.
+
+(The plan's fourth line — "Shift-drag anywhere in the plot → a range selection and no card"
+— was written before phase 0 retired that gesture. What was checked instead is the rule
+that replaced it: drag-to-pan with Shift held pans the chart and flashes no card.)
+
+All checked in the running app: the `HH`/`LH` chips, a bar with no chip on it (which answers
+with the top-ranked pattern covering it, the same one the crosshair readout leads with), the
+MACD pane, `T`, and panning under a pinned chart card. One thing to see rather than assume:
+in a detail dock narrower than two card widths the "opposite half" rule has nowhere inside
+the panel to put a 330 px card, so it clears the plot entirely and lands over the table. The
+promise it actually keeps is the one that mattered — the mark you asked about is never under
+the card.
 
 ## Decisions
 

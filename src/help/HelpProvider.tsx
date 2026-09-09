@@ -19,6 +19,12 @@
 // long as it is lit, and a cold dwell whispers the gesture beside the pointer
 // a few times a session.
 //
+// A target does not have to be an element. A canvas publishes virtual anchors
+// (anchors.ts) for the marks it drew, and they run through the same rules: the
+// only two things the provider asks of a target are "does the pointer's node
+// belong to you" and "is the pointer still on you", and both have a second
+// implementation here.
+//
 // Pressing T pins the deepest hover card where it stands. Pinned cards are
 // independent: draggable, closable, and still hoverable for their terms.
 // Esc closes the hover chain if there is one, else the most recent pin.
@@ -29,6 +35,7 @@ import { HoverCard, PinnedCard } from './HelpCard';
 import { clampToViewport, placeNear, type Rect } from './place';
 import { decideTrigger, isModifierDown, SUMMON_LABEL, type TriggerDelays, type TriggerState } from './trigger';
 import { HelpModeContext } from './helpMode';
+import { anchorChanged, HelpAnchorContext, type PublishAnchor, type VirtualAnchor } from './anchors';
 import { topicOf } from './glossary';
 import './help.css';
 
@@ -50,13 +57,29 @@ const HOVER_Z = 10_000;
 
 const DELAYS: TriggerDelays = { hover: HOVER_DELAY, nested: NESTED_DELAY, armed: ARMED_DELAY };
 
+/**
+ * What the pointer is on: an element carrying data-help, or a rect a canvas
+ * published for something it drew. The provider only ever asks a target the
+ * two questions below, so the union stays this small.
+ */
+type Target =
+  | { kind: 'dom'; el: Element }
+  | { kind: 'virtual'; anchor: VirtualAnchor };
+
+function sameTarget(a: Target, b: Target): boolean {
+  if (a.kind === 'dom') return b.kind === 'dom' && a.el === b.el;
+  return b.kind === 'virtual' && a.anchor.key === b.anchor.key;
+}
+
 interface HoverEntry {
   id: number;
   topic: string;
-  anchorEl: Element;
+  target: Target;
   anchorRect: Rect;
   /** the control the anchor sits in, so the card can be placed clear of it */
   hostRect: Rect | null;
+  /** virtual anchors only: why this particular mark fired */
+  instance?: string;
 }
 
 interface Pinned {
@@ -65,10 +88,11 @@ interface Pinned {
   x: number;
   y: number;
   z: number;
+  instance?: string;
 }
 
 interface Pending {
-  anchorEl: Element;
+  target: Target;
   topic: string;
   keepIds: Set<number>;
   /** the target is a term inside an open card, so it is never gated */
@@ -91,6 +115,13 @@ function hostOf(el: Element): Rect | null {
   return el.parentElement ? rectOf(el.parentElement) : null;
 }
 
+/** Where a card for this target goes, and what it has to say about the instance. */
+function geometryOf(t: Target): { anchorRect: Rect; hostRect: Rect | null; instance?: string } {
+  if (t.kind === 'dom') return { anchorRect: rectOf(t.el), hostRect: hostOf(t.el) };
+  const { rect, host, instance } = t.anchor;
+  return { anchorRect: rect, hostRect: host ?? null, instance };
+}
+
 function isEditable(t: EventTarget | null): boolean {
   if (!(t instanceof HTMLElement)) return false;
   const tag = t.tagName;
@@ -110,6 +141,10 @@ export function HelpProvider({ children }: { children: ReactNode }) {
   const enterTimer = useRef<number | null>(null);
   const leaveTimer = useRef<number | null>(null);
   const pending = useRef<Pending | null>(null);
+  /** the mark a canvas says is under the pointer — the virtual ':hover' */
+  const virtual = useRef<VirtualAnchor | null>(null);
+  /** set by the effect below, so the published callback can stay stable */
+  const publishRef = useRef<PublishAnchor>(() => {});
   const modifierDown = useRef(false);
   const pointerBusy = useRef(false);
   /** true while the running enter timer exists only because the modifier is down */
@@ -170,14 +205,26 @@ export function HelpProvider({ children }: { children: ReactNode }) {
       if (chainRef.current.length) setChain([]);
     };
 
+    /**
+     * Is the pointer still on this target? An element answers with :hover; a
+     * virtual anchor answers by still being the one its canvas is publishing.
+     */
+    const isHovered = (t: Target): boolean => (t.kind === 'dom'
+      ? t.el.matches(':hover')
+      : virtual.current?.key === t.anchor.key);
+
+    /** Does the node the pointer is over belong to this target? */
+    const covers = (t: Target, node: Element | null): boolean => (t.kind === 'dom'
+      ? node != null && t.el.contains(node)
+      : virtual.current?.key === t.anchor.key);
+
     /** Open the pending target's card as the next link of the kept chain. */
     const open = (p: Pending) => {
       const entry: HoverEntry = {
         id: nextId.current++,
         topic: p.topic,
-        anchorEl: p.anchorEl,
-        anchorRect: rectOf(p.anchorEl),
-        hostRect: hostOf(p.anchorEl),
+        target: p.target,
+        ...geometryOf(p.target),
       };
       setChain((c) => [...c.filter((e) => p.keepIds.has(e.id)), entry]);
       return entry;
@@ -191,7 +238,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     const showWhisper = () => {
       whisperTimer.current = null;
       const p = pending.current;
-      if (!p || !p.anchorEl.matches(':hover')) return;
+      if (!p || !isHovered(p.target)) return;
       if (modifierDown.current || helpModeRef.current) return;
       whispersLeft.current--;
       setWhisper({ ...pointerAt.current });
@@ -231,7 +278,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
         enterTimer.current = null;
         armedTimer.current = false;
         pending.current = null;
-        if (p.anchorEl.matches(':hover')) open(p);
+        if (isHovered(p.target)) open(p);
       }, d.delay);
     };
 
@@ -250,7 +297,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
         // The pointer is usually already parked on the thing before the hand
         // reaches for the key, so arm what is already pending.
         const p = pending.current;
-        if (p && enterTimer.current == null && p.anchorEl.matches(':hover')) arm(p);
+        if (p && enterTimer.current == null && isHovered(p.target)) arm(p);
       } else if (armedTimer.current) {
         // Released before the card appeared. An open card is never closed by
         // this: moving the pointer into a card must not destroy it.
@@ -263,25 +310,18 @@ export function HelpProvider({ children }: { children: ReactNode }) {
       pointerAt.current = { x: e.clientX, y: e.clientY };
     };
 
-    const onOver = (e: MouseEvent) => {
-      syncModifier(e);
-      onMove(e);
-      // `buttons` is authoritative on every move, so a mouseup missed outside
-      // the window cannot leave the layer wedged shut.
-      pointerBusy.current = e.buttons !== 0;
-      const t = e.target;
-      if (!(t instanceof Element)) return;
-      const cardEl = t.closest('[data-help-card]');
-      const cardId = cardEl ? Number(cardEl.getAttribute('data-help-card')) : null;
-      const anchorEl = t.closest('[data-help]');
-      const topic = anchorEl?.getAttribute('data-help') ?? null;
-
+    /**
+     * The pointer is now on `target` (or on nothing), inside the card `cardId`
+     * (or none), over the node `node`. Trims the chain to what the pointer
+     * still belongs to and records the new pending target.
+     */
+    const enter = (target: Target | null, topic: string | null, node: Element | null, cardId: number | null) => {
       // Keep the chain up to the card the mouse is in, or the card whose
       // anchor the mouse is on; everything deeper is on its way out.
       const chain = chainRef.current;
       let keep = -1;
       for (let k = chain.length - 1; k >= 0; k--) {
-        if (chain[k].id === cardId || chain[k].anchorEl.contains(t)) { keep = k; break; }
+        if (chain[k].id === cardId || covers(chain[k].target, node)) { keep = k; break; }
       }
       const kept = chain.slice(0, keep + 1);
       const keepIds = new Set(kept.map((c) => c.id));
@@ -296,15 +336,42 @@ export function HelpProvider({ children }: { children: ReactNode }) {
       }
 
       const last = kept[kept.length - 1];
-      const same = last != null && last.anchorEl === anchorEl;
-      if (pending.current && pending.current.anchorEl === anchorEl && !same) return;
+      const same = last != null && target != null && sameTarget(last.target, target);
+      const held = pending.current;
+      if (held && target != null && sameTarget(held.target, target) && !same) return;
       clearEnter();
-      if (!anchorEl || !topic || same || !topicOf(topic)) return;
+      if (!target || !topic || same || !topicOf(topic)) return;
       // The pending target is recorded even when nothing opens: it is what the
       // modifier — or T — summons without the pointer having to move again.
-      const p: Pending = { anchorEl, topic, keepIds, insideCard: cardId != null };
+      const p: Pending = { target, topic, keepIds, insideCard: cardId != null };
       pending.current = p;
       arm(p);
+    };
+
+    const onOver = (e: MouseEvent) => {
+      syncModifier(e);
+      onMove(e);
+      // `buttons` is authoritative on every move, so a mouseup missed outside
+      // the window cannot leave the layer wedged shut.
+      pointerBusy.current = e.buttons !== 0;
+      const t = e.target;
+      if (!(t instanceof Element)) return;
+      const cardEl = t.closest('[data-help-card]');
+      const cardId = cardEl ? Number(cardEl.getAttribute('data-help-card')) : null;
+      const anchorEl = t.closest('[data-help]');
+      const topic = anchorEl?.getAttribute('data-help') ?? null;
+      enter(anchorEl ? { kind: 'dom', el: anchorEl } : null, topic, t, cardId);
+    };
+
+    /**
+     * A canvas saying what is under the pointer. Publishing the same key twice
+     * is nothing happening — a chart calls this on every mousemove — so only a
+     * change of mark reaches the chain.
+     */
+    publishRef.current = (a: VirtualAnchor | null) => {
+      if (!anchorChanged(virtual.current, a)) return;
+      virtual.current = a;
+      enter(a ? { kind: 'virtual', anchor: a } : null, a?.topic ?? null, null, null);
     };
 
     const pinTop = () => {
@@ -323,7 +390,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
       const pos = r
         ? { x: r.left, y: r.top }
         : placeNear(top.anchorRect, 330, 200, window.innerWidth, window.innerHeight, top.hostRect ?? undefined);
-      setPinned((p) => [...p, { id: top.id, topic: top.topic, x: pos.x, y: pos.y, z: ++topZ.current }]);
+      setPinned((p) => [...p, { id: top.id, topic: top.topic, x: pos.x, y: pos.y, z: ++topZ.current, instance: top.instance }]);
       setChain((c) => c.filter((x) => x.id !== top.id));
     };
 
@@ -388,6 +455,8 @@ export function HelpProvider({ children }: { children: ReactNode }) {
       document.removeEventListener('scroll', onScroll, true);
       document.removeEventListener('mouseout', onLeaveWindow);
       window.removeEventListener('resize', closeHover);
+      publishRef.current = () => {};
+      virtual.current = null;
       clearEnter();
       clearLeave();
     };
@@ -401,11 +470,13 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     const pos = r
       ? { x: r.left, y: r.top }
       : placeNear(entry.anchorRect, 330, 200, window.innerWidth, window.innerHeight, entry.hostRect ?? undefined);
-    setPinned((p) => [...p, { id, topic: entry.topic, x: pos.x, y: pos.y, z: ++topZ.current }]);
+    setPinned((p) => [...p, { id, topic: entry.topic, x: pos.x, y: pos.y, z: ++topZ.current, instance: entry.instance }]);
     setChain((c) => c.filter((x) => x.id !== id));
   };
 
   const modeApi = useMemo(() => ({ helpMode, setHelpMode: changeHelpMode }), [helpMode, changeHelpMode]);
+  // Stable, so a canvas can publish from an effect without re-subscribing.
+  const publish = useCallback<PublishAnchor>((a) => publishRef.current(a), []);
   // The chip is one short line that never wraps, so its own box is close
   // enough to keep it off the viewport edges.
   const whisperAt = whisper
@@ -414,7 +485,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
 
   return (
     <HelpModeContext.Provider value={modeApi}>
-      {children}
+      <HelpAnchorContext.Provider value={publish}>{children}</HelpAnchorContext.Provider>
       {createPortal(
         <div className="help-layer">
           {pinned.map((p) => (
@@ -425,6 +496,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
               x={p.x}
               y={p.y}
               z={p.z}
+              instance={p.instance}
               onClose={() => setPinned((all) => all.filter((x) => x.id !== p.id))}
               onMove={(x, y) => setPinned((all) => all.map((c) => (c.id === p.id ? { ...c, x, y } : c)))}
               onFocus={() => {
@@ -441,6 +513,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
               topic={c.topic}
               anchor={c.anchorRect}
               host={c.hostRect}
+              instance={c.instance}
               z={HOVER_Z + depth}
               onPin={() => pinFromCard(c.id)}
             />
