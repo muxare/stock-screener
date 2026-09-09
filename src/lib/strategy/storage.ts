@@ -32,10 +32,14 @@ export function browserStorage(): StrategyStorage | null {
   }
 }
 
-/** An in-memory storage, for tests and for a browser that refuses to persist. */
-export function memoryStorage(initial?: string): StrategyStorage {
+/**
+ * An in-memory storage, for tests and for a browser that refuses to persist.
+ * `key` seeds a different key space — saved screens share one storage object
+ * with saved strategies (see screen/storage.ts).
+ */
+export function memoryStorage(initial?: string, key: string = STRATEGIES_KEY): StrategyStorage {
   const map = new Map<string, string>();
-  if (initial != null) map.set(STRATEGIES_KEY, initial);
+  if (initial != null) map.set(key, initial);
   return {
     getItem: (k) => map.get(k) ?? null,
     setItem: (k, v) => { map.set(k, v); },

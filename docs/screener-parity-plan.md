@@ -1,7 +1,7 @@
 # Screener parity — implementation plan
 
-Status (2026-09-08): **phases 1–3 landed** (columns and sorting; filter clauses and chips;
-view tabs and the docked chart); phase 4 proposed. Closes the gap between Screenr and a TradingView-style
+Status (2026-09-08): **complete — phases 1–4 landed** (columns and sorting; filter clauses
+and chips; view tabs and the docked chart; saved screens). Closes the gap between Screenr and a TradingView-style
 screener (reference: Mikael's "Ema fan fundamental" screen, 2026-09-08). **Fundamental data is
 out of scope** for this plan; everything below is computable from the OHLCV bars already in the
 SQLite datasets. Builds on `feat/strategy-builder`; land that branch first.
@@ -188,6 +188,40 @@ Where phase 3 differs from the sketch below, **this section wins**.
   and `live-entry` ids that used to sit on the two panel titles. Still owed: `saved-screen`
   (phase 4).
 
+### What phase 4 actually built
+
+Where phase 4 differs from the sketch below, **this section wins**.
+
+- **`lib/screen/storage.ts`** — as designed, with the shape in §7 unchanged. Two things the
+  sketch did not pin down: **one storage object serves two key spaces** (`store.ts` hands the
+  same injected storage to `loadStrategies` and to the slice; `memoryStorage` took an
+  optional key so tests can seed either), and a stale screen is **repaired, not dropped** —
+  bad clauses, unknown column ids and an unresolvable sort key go one by one, and only a
+  missing id or name loses the whole screen.
+- **`sanitizeColumns` keeps a list that is only the pinned column.** A list with nothing
+  recognisable falls back to the view's defaults, but hiding every optional column is a real
+  choice the chooser allows, so it round-trips. Adding the pinned ids back happens *after*
+  that test, or the fallback could never fire.
+- **`DEFAULT_SORT` moved from `store/screenSlice.ts` to `lib/screen/columns.ts`** (the slice
+  re-exports it, so `store.ts` is unchanged). `sanitizeSort` needs it, and it is a per-view
+  default like `DEFAULT_COLUMNS`. `columns.ts` also gained **`EXTRA_SORT_KEYS`** — the
+  entries table's own sort keys, listed there so "does this key still resolve?" can be
+  answered without importing a component. It is the one place that can drift from
+  `SIGNAL_COLUMNS` in `ScreenView.tsx`.
+- **`loadScreen`'s order is the whole trick**, and it is not what §7 implies. The filters go
+  in first with a plain `set` — deliberately *not* through `setFilters`, whose floors
+  callback would fire a scan on the strategy being replaced — then the strategy through
+  `setSignalStrategy` (which moves the tab and starts exactly one scan, already carrying the
+  saved floors), and the saved tab last. A strategy that no longer resolves loads as `''`.
+- **`screenDirty` compares, and a draft is never dirty.** It diffs the live state against the
+  saved copy field by field (clause order counts, key order does not — hence
+  `screenStateEqual` rather than `JSON.stringify`). With no screen loaded it is false, so
+  `Save` never appears for something that was never saved; `Save as…` is that path.
+- **`ScreenMenu` replaced the filter bar's explanatory sentence**, as §4 asked. Its three
+  variants (the chip hint, the entries note, the market-cap caveat) are all in help cards
+  already, so nothing was lost but a line of prose.
+- **Help** — `saved-screen` is in. Nothing is owed any more.
+
 ### Decisions to confirm (recommended answers in bold)
 
 All of these are now **settled and shipped** — the last four in phase 2, the first two in
@@ -209,9 +243,9 @@ phase 3.
   list of keys.)*
 - **No `@tanstack/react-table`.** A ~80-line sort/column module is enough; remove the
   unused dependency in phase 1.
-- **Saved screens in localStorage**, same pattern as strategies. No server persistence.
-  *(Still phase 4's to build, but phase 2 fixed what gets saved: clauses hold native units,
-  and `ScreenFilters` is a plain `{ clauses }` object that survives `JSON.stringify` intact.)*
+- ✅ **Saved screens in localStorage**, same pattern as strategies. No server persistence.
+  *(Shipped. Phase 2 had already fixed what gets saved: clauses hold native units, and
+  `ScreenFilters` is a plain `{ clauses }` object that survives `JSON.stringify` intact.)*
 - ✅ **A range clause drops rows whose value is missing**, whichever bound is set. Raised by
   phase 1: `snapshot` fields are NaN when the history is too short, so "RSI 14 50–65" over a
   freshly listed name has nothing to compare. Dropping matches today's market-cap behaviour
@@ -417,7 +451,7 @@ green on `npm run typecheck && npm run test && npm run lint`.
 | 1 ✅ | **Columns and sorting** | `IndicatorSnapshot` on both row types; `fields.ts`; `ScreenTable` with sortable sticky header, 34 px rows, column chooser, volume / rel vol / avg vol / cap / sector / RSI / Stoch K columns; remove `@tanstack/react-table` | `lib/fan.ts`, `lib/fanSignals.ts`, `lib/indicators.ts`, `lib/screen/*`, `components/table/*`, `FanLists.tsx`, `store.ts` (sort/columns only), `help/glossary.ts` |
 | 2 ✅ | **Filter model and chips** | `Clause` model, chip bar with ranges and free numeric input, indicator filters, `signalFloorsOf` feeding `/signals`, migration of the five presets | `lib/screen/filters.ts`, `lib/screen/format.ts` (`parseCompact`), `lib/screen/fields.ts` (`options` for sector), `components/filters/*`, `FilterBar.tsx`, `store/screenSlice.ts` (created here; `sort`/`columns` move in from `store.ts`), `fanSignals.ts` (`filterSignalRows` → clauses) |
 | 3 ✅ | **Layout** | View tabs with a single full-width table; docked resizable detail panel; narrow-screen fallback | `AppScreener.tsx`, `ScreenView.tsx`, `detail/DetailPanels.tsx`, `FanDetail.tsx` (width only) |
-| 4 | **Saved screens** | `SavedScreen` storage, screen menu, dirty/Save, default screen at startup | `lib/screen/storage.ts`, `lib/screen/columns.ts` (`sanitizeColumns`), `components/filters/ScreenMenu.tsx`, `store/screenSlice.ts`, `TopBar.tsx` |
+| 4 ✅ | **Saved screens** | `SavedScreen` storage, screen menu, dirty/Save, default screen at startup | `lib/screen/storage.ts`, `lib/screen/columns.ts` (`sanitizeColumns`), `components/filters/ScreenMenu.tsx`, `store/screenSlice.ts`, `FilterBar.tsx` (not `TopBar.tsx` — the menu took the sentence's corner), `help/glossary.ts` |
 
 Phase 1 is independent and immediately useful. Phases 2 and 3 can run in parallel after
 phase 1. Phase 4 depends on 2 (it saves clauses).
@@ -439,14 +473,17 @@ phase 1. Phase 4 depends on 2 (it saves clauses).
   clamp against both minimums, a non-numeric width, and the overlay breakpoint boundary.
   `lib/screen/fields.test.ts` gained `tableViewOf`; `src/store.test.ts` gained the default
   tab, the entry-strategy select moving it, and the dock-width clamp.
-- `lib/screen/storage.test.ts`: round-trip, corrupt JSON, unknown field id dropped, default
-  flag unique, **a saved sort key that no longer resolves falls back to the view default**.
+- ✅ `lib/screen/storage.test.ts`: round-trip, corrupt JSON, unknown field id dropped, default
+  flag unique, **a saved sort key that no longer resolves falls back to the view default**,
+  and what `screenStateEqual` does and does not count as a change. `lib/screen/fields.test.ts`
+  gained the two sanitizers; `src/store.test.ts` gained save / dirty / load / delete / rename,
+  the default screen at start-up, and the saved floors on the first scan.
 - ✅ `server/screen.test.ts` and `lib/fanSignals.test.ts`: rows carry `snapshot`. (There is
   no `server/signals.test.ts`; the signal scan is tested at the library level.)
 - ✅ `src/store.test.ts`: `/signals` body carries floors derived from clauses, and a
   client-side clause (sector / price / RSI) does not re-run the scan. Sort and column state
   survive a `runScreen`.
-- `help/glossary.test.ts`: every new `data-help` id resolves.
+- ✅ `help/glossary.test.ts`: every new `data-help` id resolves.
 
 ## Verification
 
@@ -468,8 +505,11 @@ phase 1. Phase 4 depends on 2 (it saves clauses).
   the split gave per panel) — the split's panels were side by side, so they were already
   full height. What the full-width table buys is the whole column set without the sideways
   scroll.
-- After phase 4: save the screen as "Ema fan technical", reload, it is listed and loads with
-  the same chips, sort and columns; mark it default; edit a chip and `Save` lights up.
+- ✅ After phase 4 with `npm run dev`: saved "Ema fan technical" (Last 20–100, sorted by RSI),
+  edited the chip to 30–100 and `Save` lit up with a dot by the name; saved, marked it ★ and
+  reloaded — chips, sort, columns and the Close-to-fan tab all came back. Repeated on the
+  Entries tab with the 50-EMA tag strategy: it reloads with the strategy selected, the tab
+  live and one scan, which is what the strategy-before-view order buys.
 
 ## Risks
 
@@ -494,7 +534,9 @@ phase 1. Phase 4 depends on 2 (it saves clauses).
   should only get the slice import. *(Phase 2: 583 → 490 lines. Phase 3 added `view` and
   `dockWidth` to the slice and no state to `store.ts` — only the one line in
   `setSignalStrategy` that moves the tab. Phase 4's `screens` / `activeScreenId` must not
-  reopen it.)*
+  reopen it. Phase 4 did not: `screens` / `activeScreenId` went into the slice, and `store.ts`
+  took one extra argument to `createScreenSlice` and one line in `init`. It is 523 lines —
+  the growth since phase 2's 490 is phase 3's, not new state.)*
 - **Percent-unit confusion** in clauses: the chip shows `%` and the `FieldDef.kind` owns
   the conversion in one place; tests cover both directions. *(Closed in phase 2.)*
 

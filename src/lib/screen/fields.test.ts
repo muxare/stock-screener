@@ -9,7 +9,16 @@ import {
   type FieldId,
   type ScreenRowLike,
 } from './fields.ts';
-import { DEFAULT_COLUMNS, SCREEN_TABS, orderColumns, tableViewOf, toggleColumn } from './columns.ts';
+import {
+  DEFAULT_COLUMNS,
+  DEFAULT_SORT,
+  SCREEN_TABS,
+  orderColumns,
+  sanitizeColumns,
+  sanitizeSort,
+  tableViewOf,
+  toggleColumn,
+} from './columns.ts';
 import { EMPTY_SNAPSHOT } from './snapshot.ts';
 import { TOPICS } from '../../help/glossary.ts';
 
@@ -100,6 +109,23 @@ describe('column defaults', () => {
   it('will not hide a pinned column or show a filter-only field', () => {
     expect(toggleColumn(DEFAULT_COLUMNS.fan, 'ticker')).toContain('ticker');
     expect(toggleColumn(DEFAULT_COLUMNS.fan, 'ema200Rising' as FieldId)).not.toContain('ema200Rising');
+  });
+});
+
+describe('a saved column list and sort', () => {
+  it('drops what no longer exists and puts the pinned column back', () => {
+    expect(sanitizeColumns(['rsi14', 'rsi14', 'nonsense', 'ema200Rising'], 'fan')).toEqual(['ticker', 'rsi14']);
+    expect(sanitizeColumns('not a list', 'fan')).toEqual(DEFAULT_COLUMNS.fan);
+    expect(sanitizeColumns([], 'entries')).toEqual(DEFAULT_COLUMNS.entries);
+  });
+
+  it('keeps a sort key each view can still resolve', () => {
+    expect(sanitizeSort({ field: 'rsi14', dir: 'asc' }, 'fan')).toEqual({ field: 'rsi14', dir: 'asc' });
+    // The entries table sorts by its own trade columns, which are not fields.
+    expect(sanitizeSort({ field: 'barsAgo', dir: 'asc' }, 'entries')).toEqual({ field: 'barsAgo', dir: 'asc' });
+    expect(sanitizeSort({ field: 'barsAgo', dir: 'asc' }, 'fan')).toEqual(DEFAULT_SORT.fan);
+    expect(sanitizeSort({ field: 'rsi14', dir: 'sideways' }, 'fan')).toEqual({ field: 'rsi14', dir: 'desc' });
+    expect(sanitizeSort(null, 'entries')).toEqual(DEFAULT_SORT.entries);
   });
 });
 

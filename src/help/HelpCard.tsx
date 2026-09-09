@@ -9,6 +9,7 @@ const KIND_COLOR: Record<HelpKind, string> = {
   screen: '#c9d1d8',
   strategy: '#d9b3ff',
   step: '#c7a6ff',
+  pattern: '#9fd8c8',
   trade: '#ffc078',
   backtest: '#ffd28a',
   data: '#b0bec9',

@@ -10,7 +10,7 @@
 import { buildLinkIndex, explicitLinks, type LinkIndex } from './link.ts';
 
 export type HelpKind =
-  | 'indicator' | 'fan' | 'screen' | 'strategy' | 'step' | 'trade' | 'backtest' | 'data' | 'ui';
+  | 'indicator' | 'fan' | 'screen' | 'strategy' | 'step' | 'pattern' | 'trade' | 'backtest' | 'data' | 'ui';
 
 export interface HelpTopic {
   id: string;
@@ -29,6 +29,7 @@ export const KIND_LABEL: Record<HelpKind, string> = {
   screen: 'Filter',
   strategy: 'Strategy',
   step: 'Step',
+  pattern: 'Price action',
   trade: 'Trade',
   backtest: 'Backtest',
   data: 'Data',
@@ -71,6 +72,16 @@ Click a header to sort by that column; click it again to reverse. Names with no 
 
 Below 1100 px wide there is no room for both, so the panel goes back to covering the list and a click outside closes it. Nothing in the panel changes what the [[fan|screen]] matched; it is the same [[universe|instrument]] history drawn in full.`,
     related: ['fan', 'column-chooser'],
+  },
+  {
+    id: 'saved-screen',
+    title: 'Saved screens',
+    kind: 'ui',
+    aliases: ['saved screen', 'saved screens', 'screen menu'],
+    body: `A screen is everything the bar and the table are set to: the [[filter-chip|chips]], the [[column-chooser|columns]] and sort of the list you are on, the tab itself and the [[entry-strategy|entry strategy]]. The ▾ beside the name saves it, renames it, deletes it, or loads one you saved before. The search box is deliberately not part of it — it is a lookup, not a filter worth naming.
+
+Save appears only once the current state differs from the saved copy, and a dot sits by the name while it does. ★ marks the one screen that loads at start-up. Screens live in this browser, like your saved [[strategy|strategies]], and a screen whose strategy has since been deleted still loads — on the [[fan]] lists, with no entry scan.`,
+    related: ['filters', 'column-chooser', 'entry-strategy'],
   },
   {
     id: 'data-source',
@@ -264,7 +275,7 @@ A [[fan]] match always shows a positive gap. A [[fan-near]] name shows a small n
     body: `The filter bar trims both lists after the [[fan]] screen has run; it never changes which names are in the fan, only which are shown. It is an open row of [[filter-chip|chips]] — one per field — plus a + that adds any other. Clear filters restores the defaults, where only the [[ema200-slope]] is on.
 
 Volume, cap and slope are the three the [[live-entry|entries]] scan is given up front, because that scan is expensive; every other chip is applied to the rows it returns. The same three floors are offered again in the [[backtest]] so the history matches what the lists show.`,
-    related: ['filter-chip', 'avg-volume', 'market-cap', 'min-price', 'sector', 'ema200-slope'],
+    related: ['filter-chip', 'saved-screen', 'avg-volume', 'market-cap', 'min-price', 'sector', 'ema200-slope'],
   },
   {
     id: 'filter-chip',
@@ -814,6 +825,137 @@ End equity, return and [[max-drawdown]] describe that account; [[taken-skipped]]
     aliases: ['MACD / Stoch RSI at entry'],
     body: `A snapshot of two textbook indicators on each fill bar, bucketed against the trade's realized [[r|R]]: the classic 12/26/9 MACD (not the [[macd-18-50]]) and the stochastic RSI's %K and %D. Use it to see whether entries taken with momentum already stretched fared worse than the rest.`,
     related: ['macd-18-50', 'backtest'],
+  },
+
+  // ------------------------------------------------------- price action (chart)
+  {
+    id: 'price-action',
+    title: 'Price-action patterns',
+    kind: 'pattern',
+    aliases: ['price action', 'price-action patterns'],
+    body: `The Patterns menu over the chart draws what the bars themselves are saying, on top of the candles. Each detector is independent: turn on only what you are reading for, and the number beside each one counts what is inside the window you are looking at.
+
+Detection runs over the whole history, not the visible window, so zooming and panning never change what a pattern is. Everything is confirmed-only — a [[pa-pivot|pivot]] is not drawn until the bars that confirm it have printed — so nothing on the chart is knowledge you would not have had on the day.
+
+Hover a bar for the crosshair readout: it lists every pattern whose span covers that bar.`,
+    related: ['pa-pivot', 'pa-structure', 'pa-pullback', 'detail-dock'],
+  },
+  {
+    id: 'pa-pivot',
+    title: 'Pivots (swing points)',
+    kind: 'pattern',
+    aliases: ['swing pivot', 'swing pivots', 'pivot high', 'long pivot', 'short pivot'],
+    body: `A pivot high is a bar whose high beats the highs on both sides of it; a pivot low is the mirror. How many bars each side is what makes one significant: the chart draws a long pivot (3 bars either side) as a solid triangle and a short one (1 bar) as a small dot, so the higher-timeframe swings stand out from the noise between them.
+
+Pivots are what [[pa-structure|swing structure]] is read from, where trendlines and support/resistance get anchored, and where a [[stop]] logically sits — beyond the swing, not beside it. A tie does not count: a bar sharing its high with a neighbour is nobody's pivot.
+
+The backtester's [[pivot-low]] is a different, stricter rule with its own confirmation, used for trailing; this one is for reading the chart.`,
+    related: ['pa-structure', 'pivot-low', 'stop'],
+  },
+  {
+    id: 'pa-structure',
+    title: 'HH / HL / LH / LL',
+    kind: 'pattern',
+    aliases: ['higher high', 'higher low', 'lower high', 'lower low', 'swing structure'],
+    body: `Every long [[pa-pivot|pivot]] labelled against the last pivot of its own kind, joined by a dashed zigzag. Higher highs with higher lows is an uptrend; lower highs with lower lows is a downtrend — this is the definition of trend, not an indicator of it.
+
+The useful moment is the break in the sequence: a lower low inside a run of HH/HL, or a lower high that stops a rally, is the first evidence the trend has changed hands. Read it before the [[ema|EMAs]], which lag it by construction.`,
+    related: ['pa-pivot', 'pa-pullback', 'ema'],
+  },
+  {
+    id: 'pa-pullback',
+    title: 'Pullbacks',
+    kind: 'pattern',
+    aliases: ['pullback band'],
+    body: `A run of at least two bars of lower highs *and* lower lows while the trend is up — drawn as a tinted band over the bars it covers. It is a breather inside the move, not a turn: the point of marking it is to enter with the trend at a better price, once the run stalls (a higher low, or the minor downtrend line breaking).
+
+Trend context is the 20 vs 50 [[ema|EMA]] order at the bar the run starts from, so the same three red bars in a downtrend are marked as a counter-trend rally instead, the other colour.
+
+The [[step-pullback]] step is the strategy-builder version of the same idea, with its own EMA condition and its own bar count.`,
+    related: ['pa-structure', 'step-pullback', 'ema'],
+  },
+  {
+    id: 'pa-reversal-2bar',
+    title: 'Two-bar reversal (chart)',
+    kind: 'pattern',
+    body: `Two bars of opposite character at a turning point: a bar that makes a new extreme over the last five, immediately followed by a bar the other way that closes back through at least half of it. Exhaustion — whoever pushed to the extreme could not hold it for a single bar.
+
+The entry is conventionally the break of the second bar's extreme, with the [[stop]] beyond the pair's extreme, which is the price the marker points at.
+
+Note this is a stricter rule than the builder's [[reversal-2bar|two-bar reversal]] step, which only asks for a down bar then an up bar with a lower high. The chart wants the new extreme and the retracement too.`,
+    related: ['reversal-2bar', 'pa-reversal-3bar', 'stop'],
+  },
+  {
+    id: 'pa-reversal-3bar',
+    title: 'Three-bar reversal',
+    kind: 'pattern',
+    aliases: ['three-bar reversal', '3-bar reversal'],
+    body: `The filtered version of the [[pa-reversal-2bar|two-bar turn]]: a bar makes the extreme, a second bar pauses on it (a small body inside a narrower range), and a third closes back through the first bar's opposite end.
+
+The middle bar is what buys the extra confidence — the move did not merely bounce, it stopped, held, and then reversed. Fewer signals than the two-bar version, and fewer of them fail.`,
+    related: ['pa-reversal-2bar', 'pa-doji'],
+  },
+  {
+    id: 'pa-pin-bar',
+    title: 'Pin bar',
+    kind: 'pattern',
+    aliases: ['pin bar', 'rejection candle'],
+    body: `A bar with a long wick and a small body: price was pushed to an extreme within the bar and rejected outright. A bullish pin has the long wick below (buyers stepped in under the market); a bearish pin has it above.
+
+The chart wants the signal wick to be at least 55% of the range, the opposite wick under 25%, and the body under 35% — and the bar to be worth looking at at all, which is why bars smaller than a quarter of [[atr|ATR]] are skipped. Colour is not part of it.
+
+Worth trading at a level — a [[pa-pivot|pivot]], an [[ema|EMA]], the edge of a range — and worth ignoring in the middle of nowhere. The builder's [[ma-bounce|rejection wick]] is the same shape pinned to an average.`,
+    related: ['ma-bounce', 'pa-pivot', 'atr'],
+  },
+  {
+    id: 'pa-engulfing',
+    title: 'Engulfing bar',
+    kind: 'pattern',
+    aliases: ['engulfing bar', 'engulfing'],
+    body: `A bar whose body completely covers the previous bar's body, in the opposite direction: bullish when an up bar swallows the prior down body, bearish the other way. One session undid the whole of the last one — a decisive change of hands rather than a drift.
+
+The chart brackets both bars and marks the pair's extreme, which is where a [[stop]] would go.`,
+    related: ['pa-outside-bar', 'pa-pin-bar', 'stop'],
+  },
+  {
+    id: 'pa-inside-bar',
+    title: 'Inside bar',
+    kind: 'pattern',
+    aliases: ['inside bar', 'mother bar'],
+    body: `A bar whose whole range sits inside the previous bar's — the previous bar being the "mother bar". Range contracting means disagreement contracting: nobody took price anywhere new.
+
+It is traded as the break of the mother bar's high or low rather than on its own, and it is a continuation pattern as often as a turn — in a trend, a pause is usually just a pause. Several in a row is compression, and compression tends to resolve with an [[pa-outside-bar|expansion bar]].`,
+    related: ['pa-outside-bar', 'pa-failed-break'],
+  },
+  {
+    id: 'pa-outside-bar',
+    title: 'Outside bar',
+    kind: 'pattern',
+    aliases: ['outside bar'],
+    body: `The opposite of an [[pa-inside-bar|inside bar]]: a range that covers the previous bar's high and its low. Both sides were tested inside one session, so it is an expansion of volatility whichever way it closes — and where it closes is what decides whether it read as a reversal or a breakout. The chart takes its colour from the close for exactly that reason.`,
+    related: ['pa-inside-bar', 'pa-engulfing', 'atr-pct'],
+  },
+  {
+    id: 'pa-doji',
+    title: 'Doji',
+    kind: 'pattern',
+    aliases: ['doji'],
+    body: `Open and close all but equal — the bar went somewhere and came back. Balance, not direction.
+
+Where it prints is the whole of its meaning: at the end of an extended move it is a warning that the move has stopped paying, and it is the classic middle bar of a [[pa-reversal-3bar|three-bar reversal]]. Inside a range it is noise. Bars narrower than a quarter of [[atr|ATR]] are skipped so a quiet session does not litter the chart.`,
+    related: ['pa-reversal-3bar', 'atr'],
+  },
+  {
+    id: 'pa-failed-break',
+    title: 'Failed breakout',
+    kind: 'pattern',
+    aliases: ['failed breakout', 'false break'],
+    body: `Price takes out the 20-bar high (or low), then closes back inside it within three bars. The chart draws the level that gave way as a dashed line and brackets the attempt.
+
+Everyone who bought the break is offside at once, and their stops sit just the other side of the level — which is why the fade in the opposite direction is a higher-probability trade than the breakout was, with the [[stop]] just beyond the failed extreme.
+
+Compression before the attempt — a run of [[pa-inside-bar|inside bars]] — makes both the break and its failure more likely to matter.`,
+    related: ['pa-inside-bar', 'pa-pivot', 'stop'],
   },
 ];
 

@@ -2,7 +2,6 @@ import { useCallback, useMemo, useState } from 'react';
 import { useScreener } from '../store';
 import {
   clausesActive,
-  clauseOf,
   newClause,
   type Clause,
 } from '../lib/screen/filters';
@@ -11,6 +10,7 @@ import { presets } from '../lib/strategy/presets';
 import { HButton } from './ui/Hoverable';
 import { FilterChip } from './filters/FilterChip';
 import { FieldPicker } from './filters/FieldPicker';
+import { ScreenMenu } from './filters/ScreenMenu';
 
 const PRESET_OPTIONS = presets().map((s) => ({ label: s.name, value: s.id }));
 
@@ -70,8 +70,6 @@ export function FilterBar() {
   const [justAdded, setJustAdded] = useState<string | null>(null);
 
   const active = clausesActive(filters);
-  const entriesMode = signalStrategy !== '';
-  const capFiltered = clauseOf(filters, 'marketCap') !== undefined;
 
   const strategyOptions = useMemo(() => [
     { label: 'Fan lists (no entry)', value: '' },
@@ -122,13 +120,7 @@ export function FilterBar() {
       </div>
 
       <div style={{ flex: 1, minWidth: 8 }} />
-      <div data-help={entriesMode ? 'live-entry' : 'filter-chip'} style={{ fontSize: '11px', color: '#98a0a8', paddingBottom: 8, maxWidth: 300, lineHeight: 1.4 }}>
-        {entriesMode
-          ? 'Entries: names with a live open trade for this strategy — 1R stop, 2.5–3R exit window. Volume, cap, and 200-EMA slope filter the scan.'
-          : capFiltered
-            ? 'Cap filter applies only when shares outstanding is imported; other datasets may show fewer names.'
-            : 'Click a chip to set its range, or + to filter any column. A name with no value for a filtered field is dropped.'}
-      </div>
+      <ScreenMenu />
     </div>
   );
 }

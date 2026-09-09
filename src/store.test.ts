@@ -5,9 +5,10 @@ import type { MarketClient, ScreenResp, SignalsRequest, SignalsResp, FanSignalRo
 import { DEFAULT_FAN_BACKTEST_CONFIG, type FanEntryEvent, type FanBacktestResult } from './lib/fanBacktest';
 import type { InstrumentBars } from './lib/market';
 import { STRATEGIES_KEY, memoryStorage, type StrategyStorage } from './lib/strategy/storage';
+import { SCREENS_KEY, type SavedScreen } from './lib/screen/storage';
 import { newCustomStrategy } from './lib/strategy/presets';
 import { EMPTY_SNAPSHOT } from './lib/screen/snapshot';
-import { DEFAULT_COLUMNS } from './lib/screen/columns';
+import { DEFAULT_COLUMNS, DEFAULT_SORT } from './lib/screen/columns';
 import { DOCK_DEFAULT, DOCK_MIN } from './lib/screen/dock';
 
 function deferred<T>() {
@@ -479,6 +480,153 @@ describe('saved strategies', () => {
     await vi.waitFor(() => expect(calls).toHaveLength(1));
     store.getState().saveStrategy({ ...mine, name: 'Mine v2' });
     await vi.waitFor(() => expect(calls).toHaveLength(2));
+  });
+});
+
+describe('saved screens', () => {
+  function savedScreen(over: Partial<SavedScreen> = {}): SavedScreen {
+    return {
+      id: 'screen-1',
+      name: 'Ema fan technical',
+      savedAt: '2026-09-08T10:00:00.000Z',
+      filters: { clauses: [
+        { field: 'ema200Rising', kind: 'bars', bars: 21 },
+        { field: 'avgVol20', kind: 'range', min: 400_000 },
+      ] },
+      sort: { field: 'rsi14', dir: 'asc' },
+      columns: ['ticker', 'name', 'price', 'rsi14'],
+      view: 'near',
+      signalStrategy: '',
+      ...over,
+    };
+  }
+  const withScreens = (screens: SavedScreen[]) => memoryStorage(JSON.stringify(screens), SCREENS_KEY);
+
+  it('writes the chips, the tab and that tab\'s columns and sort under a name', () => {
+    const storage = memoryStorage();
+    const store = makeStore(fakeClient(), storage);
+    store.getState().setClause({ field: 'rsi14', kind: 'range', min: 50, max: 65 });
+    store.getState().setSort('fan', { field: 'rsi14', dir: 'asc' });
+    store.getState().toggleColumn('fan', 'ema18');
+    store.getState().setView('near');
+    store.getState().saveScreenAs('  Ema fan   technical  ');
+
+    const [saved] = store.getState().screens;
+    expect(saved.name).toBe('Ema fan technical');
+    expect(saved.view).toBe('near');
+    expect(saved.sort).toEqual({ field: 'rsi14', dir: 'asc' });
+    expect(saved.columns).not.toContain('ema18');
+    expect(saved.filters.clauses).toContainEqual({ field: 'rsi14', kind: 'range', min: 50, max: 65 });
+    expect(store.getState().activeScreenId).toBe(saved.id);
+    expect(JSON.parse(storage.getItem(SCREENS_KEY) ?? 'null')).toHaveLength(1);
+  });
+
+  it('lights Save up on a change and puts it out again when saved', () => {
+    const store = makeStore(fakeClient(), memoryStorage());
+    expect(store.getState().screenDirty()).toBe(false); // nothing loaded is not dirty
+    store.getState().saveScreenAs('Mine');
+    expect(store.getState().screenDirty()).toBe(false);
+    store.getState().setClause({ field: 'price', kind: 'range', min: 20 });
+    expect(store.getState().screenDirty()).toBe(true);
+    store.getState().saveScreen();
+    expect(store.getState().screenDirty()).toBe(false);
+    expect(store.getState().screens).toHaveLength(1);
+  });
+
+  it('loads a screen back onto its tab, columns and sort', () => {
+    const store = makeStore(fakeClient(), withScreens([savedScreen()]));
+    store.getState().loadScreen('screen-1');
+    expect(store.getState().view).toBe('near');
+    expect(store.getState().columns.fan).toEqual(['ticker', 'name', 'price', 'rsi14']);
+    expect(store.getState().sort.fan).toEqual({ field: 'rsi14', dir: 'asc' });
+    expect(store.getState().filters.clauses).toHaveLength(2);
+    expect(store.getState().screenDirty()).toBe(false);
+  });
+
+  it('restores the entry strategy first, so the tab it moves is the saved one', async () => {
+    const calls: SignalsRequest[] = [];
+    const client = fakeClient({
+      signals: vi.fn(async (body: SignalsRequest): Promise<SignalsResp> => {
+        calls.push(body);
+        return { universe: 1, elapsedMs: 1, strategy: 'tag50', strategyName: 'Tag 50', rows: [] };
+      }),
+    });
+    const store = makeStore(client, withScreens([savedScreen({ view: 'entries', signalStrategy: 'tag50' })]));
+    store.getState().loadScreen('screen-1');
+    expect(store.getState().signalStrategy).toBe('tag50');
+    expect(store.getState().view).toBe('entries');
+    // One scan, and it already carries the saved floors rather than the old ones.
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].minAvgVol).toBe(400_000);
+  });
+
+  it('drops an entry strategy that no longer exists rather than scanning for it', async () => {
+    const client = fakeClient({ signals: vi.fn(async (): Promise<SignalsResp> => (
+      { universe: 0, elapsedMs: 1, strategy: 'gone', strategyName: 'gone', rows: [] }
+    )) });
+    const store = makeStore(client, withScreens([savedScreen({ view: 'entries', signalStrategy: 'custom-gone' })]));
+    store.getState().loadScreen('screen-1');
+    expect(store.getState().signalStrategy).toBe('');
+    expect(store.getState().signalsError).toBeNull();
+    expect(client.signals).not.toHaveBeenCalled();
+  });
+
+  it('loads the default screen at start-up, and only that one', () => {
+    const storage = withScreens([
+      savedScreen({ id: 'a', name: 'Plain' }),
+      savedScreen({ id: 'b', name: 'Default', default: true, view: 'fan', sort: { field: 'relVol', dir: 'desc' } }),
+    ]);
+    const store = makeStore(fakeClient(), storage);
+    store.getState().init();
+    expect(store.getState().activeScreenId).toBe('b');
+    expect(store.getState().sort.fan).toEqual({ field: 'relVol', dir: 'desc' });
+  });
+
+  it('starts on the built-in screen when none is marked default', () => {
+    const store = makeStore(fakeClient(), withScreens([savedScreen()]));
+    store.getState().init();
+    expect(store.getState().activeScreenId).toBeNull();
+    expect(store.getState().view).toBe('fan');
+    expect(store.getState().sort.fan).toEqual(DEFAULT_SORT.fan);
+  });
+
+  it('moves the default flag and persists it', () => {
+    const storage = withScreens([savedScreen({ id: 'a' }), savedScreen({ id: 'b', default: true })]);
+    const store = makeStore(fakeClient(), storage);
+    store.getState().setDefaultScreen('a');
+    expect(store.getState().screens.map((s) => s.default)).toEqual([true, undefined]);
+    const persisted = JSON.parse(storage.getItem(SCREENS_KEY) ?? 'null') as SavedScreen[];
+    expect(persisted.filter((s) => s.default)).toHaveLength(1);
+  });
+
+  it('renames, and refuses a name that is only spaces', () => {
+    const store = makeStore(fakeClient(), withScreens([savedScreen()]));
+    store.getState().renameScreen('screen-1', 'Ema fan fundamental');
+    expect(store.getState().screens[0].name).toBe('Ema fan fundamental');
+    store.getState().renameScreen('screen-1', '   ');
+    expect(store.getState().screens[0].name).toBe('Ema fan fundamental');
+  });
+
+  it('deleting the loaded screen leaves the filters on screen, unattached', () => {
+    const store = makeStore(fakeClient(), withScreens([savedScreen()]));
+    store.getState().loadScreen('screen-1');
+    store.getState().deleteScreen('screen-1');
+    expect(store.getState().screens).toEqual([]);
+    expect(store.getState().activeScreenId).toBeNull();
+    expect(store.getState().filters.clauses).toHaveLength(2);
+    expect(store.getState().screenDirty()).toBe(false);
+  });
+
+  it('New screen goes back to the defaults and detaches', () => {
+    const store = makeStore(fakeClient(), withScreens([savedScreen()]));
+    store.getState().loadScreen('screen-1');
+    store.getState().newScreen();
+    expect(store.getState().activeScreenId).toBeNull();
+    expect(store.getState().view).toBe('fan');
+    expect(store.getState().columns.fan).toEqual(DEFAULT_COLUMNS.fan);
+    expect(store.getState().sort.fan).toEqual(DEFAULT_SORT.fan);
+    expect(store.getState().filters.clauses).toEqual([{ field: 'ema200Rising', kind: 'bars', bars: 21 }]);
+    expect(store.getState().signalStrategy).toBe('');
   });
 });
 

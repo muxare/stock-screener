@@ -1,5 +1,121 @@
 # Development diary
 
+## 2026-09-08 — Price-action patterns on the candlestick chart
+
+### What changed
+The detail chart can now **draw what the bars are saying**: eleven price-action patterns,
+each toggled independently, over the candles. Phase 1 of `docs/price-action-patterns-plan.md`.
+
+- `src/lib/patterns.ts` (new) — the detectors, pure and isomorphic like `indicators.ts`:
+  pivots (long and short), the HH/HL/LH/LL sequence, pullbacks, 2- and 3-bar reversals, pin
+  bars, engulfing, inside, outside, doji and failed breakouts. `detectPatterns(bars, ids,
+  config?)` runs the ones you ask for and returns `PatternMarker[]` sorted by confirming bar.
+- **One marker shape for all eleven** — `{ id, index, from, to, dir, price, tag, note }`. The
+  drawing layer and the crosshair readout need nothing else, so a twelfth pattern is a
+  function plus a registry row and no change to the chart.
+- **`from`/`to` are the bars the pattern *is*, not the bars that confirmed it.** A pivot spans
+  its own bar and carries `strength`; an inside bar spans the mother bar too. That is what
+  makes `markersAtBar` — "which patterns is this bar part of?" — an interval test, and it is
+  what stopped the readout from claiming the three bars either side of a swing were pivots.
+- **Confirmed only, and detected over the full history.** Nothing appears before the bars
+  establishing it have printed, so the last few bars carry no pivot; and because detection is
+  not windowed, panning never changes what a pattern is. The chooser can therefore count
+  patterns you have not turned on yet.
+- Every threshold sits in `PatternConfig` (3/1-bar pivots, 2-bar minimum pullback, 20-bar
+  breakout level, a quarter-ATR noise floor for the single-bar shapes), so phase 2 can tighten
+  one without forking a detector.
+- `src/lib/chart/patternLayer.ts` (new) — the glyph vocabulary: triangles at pivots (big for
+  3-bar, a dot for 1-bar), HH/HL/LH/LL chips on a dashed zigzag, a tinted band over a
+  pullback, a bracket around the bars of a formation, the broken level as a dashed line for a
+  failed breakout. **Chips are collected during drawing and laid out last**, best-ranked
+  first (structure, then turns, then shapes), each pushed a row at a time until it lands on
+  free pixels and *dropped* rather than overprinted when there are none — the glyph still
+  marks the bar. Below 5 px per bar the text goes entirely and only glyphs remain.
+- `src/components/ui/ChartControls.tsx` — a "Patterns · n ▾" chooser beside MACD / Stoch RSI,
+  grouped, each row carrying the count in the visible window. `patterns` is an **optional**
+  prop, so `FanTradeReview` compiles unchanged and can opt in later.
+- `src/components/detail/FanDetail.tsx` — wiring, plus the crosshair readout now lists every
+  pattern covering the hovered bar (four, then a count).
+- `src/help/` — a `pattern` help kind and twelve cards. The ids are `pa-`-prefixed on purpose:
+  the chart's two-bar reversal is a **stricter, different rule** from the builder's
+  `reversal-2bar` step, and the cards say so and link to each other rather than pretending
+  one definition serves both. Same for `pa-pullback` vs `step-pullback`.
+
+### Why this shape
+These are readings, not signals — who is in control, where a stop logically sits, whether a
+move is continuation or turn. That is why they live beside `indicators.ts` rather than in
+`lib/strategy/`, whose definitions are tuned for firing entries and are deliberately
+different.
+
+### How to test
+- `npm test` — `src/lib/patterns.test.ts` (36 cases: each detector plus its near-miss — the
+  second bar that barely recovers, the long wick with a fat body, the break that holds, the
+  tie that is nobody's pivot — the confirmation edges, and the combined result's ordering)
+- `src/help/glossary.test.ts` now asserts a card exists behind every registry entry
+- `npm run dev` → click a row → **Patterns**. Pivots and HH/HL/LH/LL are on by default; zoom
+  in past ~5 px per bar for the labels; hover a bar for the patterns it belongs to.
+
+## 2026-09-08 — Screener parity phase 4: saved screens
+
+### What changed
+A screen can now be **named, saved, reloaded and made the one that opens at start-up**.
+Phase 4 — the last — of `docs/screener-parity-plan.md`.
+
+- `src/lib/screen/storage.ts` (new) — `SavedScreen` = `{ id, name, savedAt, filters, sort,
+  columns, view, signalStrategy, default? }` under `stockScreener.screens.v1`, same
+  injected-storage + re-parse-on-load pattern as `strategy/storage.ts`. **One storage object,
+  two key spaces**: `store.ts` passes the same injected storage to the strategies loader and
+  to the slice.
+- **A stale screen is repaired, not dropped.** The parse drops what no longer means anything
+  clause by clause — a field that left the registry or stopped being filterable, a second
+  clause on the same field, a slope lookback the chip cannot show — then `sanitizeColumns`
+  drops unknown/filter-only column ids and puts the pinned ones back, and `sanitizeSort`
+  falls back to the view's default for a sort key that no longer resolves. Only a screen with
+  no id or no name is thrown away.
+- `src/lib/screen/columns.ts` — gains those two sanitizers plus `EXTRA_SORT_KEYS`, the
+  entries table's own sort keys (`barsAgo`, `entryPrice`, …), so "does this key still
+  resolve?" can be answered without reaching into a component. `DEFAULT_SORT` **moved here
+  from `store/screenSlice.ts`** (which re-exports it) — it is a per-view default like
+  `DEFAULT_COLUMNS`, and `sanitizeSort` needs it below the store.
+- `src/store/screenSlice.ts` — `screens` / `activeScreenId` plus `screenState`,
+  `screenDirty`, `newScreen`, `saveScreen`, `saveScreenAs`, `loadScreen`, `renameScreen`,
+  `deleteScreen`, `setDefaultScreen`, `applyDefaultScreen`. `store.ts` gained no state: one
+  extra argument to `createScreenSlice` and one line in `init` (after the strategies load, so
+  a saved entry strategy resolves).
+- **Load order is the whole trick.** `loadScreen` sets the filters first (so the scan the
+  strategy setter starts already carries the saved floors, and there is exactly one scan),
+  then the strategy through `setSignalStrategy` — which moves the tab — and only then the
+  saved tab. A screen whose strategy has since been deleted loads with no strategy rather
+  than a scan that can only fail.
+- **`screenDirty` is a comparison, not `clausesActive`.** It diffs the live state against the
+  saved copy field by field (clause order included, key order not), so `Save` appears only
+  for a real change. Nothing loaded is never dirty — a draft is not a modified copy.
+- `src/components/filters/ScreenMenu.tsx` (new) — the screen name, a ▾ (New / Save /
+  Save as… / Rename… / Delete, then the saved list with a ★ for the start-up screen) and a
+  `Save` button that appears only when dirty. It **replaces the filter bar's explanatory
+  sentence** in the right-hand corner, as the plan called for; that sentence's content lives
+  in the `filters`, `filter-chip` and `market-cap` help cards.
+- Help: new `saved-screen` card on the name button — the last id the plan owed.
+
+The search box is deliberately **not** part of a screen: it is a lookup, not a filter worth
+naming. `filteredMatches` / `filteredNear` are still unused by the UI — phase 2 flagged the
+duplication, phase 3 kept the component's `useMemo` for the unfiltered totals, and phase 4
+did not need to disturb it either. That is now three phases of "later"; it belongs to
+whatever next touches `ScreenView.tsx`.
+
+### How to test
+- `npm run test` — new `lib/screen/storage.test.ts` (round-trip, corrupt JSON, an entry with
+  no identity, stale clauses/columns/sort keys, one default only, and what `screenStateEqual`
+  does and does not notice); `lib/screen/fields.test.ts` covers the two sanitizers;
+  `store.test.ts` covers save/dirty/load/delete/rename, the default screen at start-up, the
+  saved floors on the first scan, and a strategy that no longer exists
+- `npm run dev` — add a chip, sort a column, Save as… a name: the corner shows it with no
+  dot. Edit the chip and `Save` lights up; save, mark it ★, reload — the chips, sort, columns
+  and tab come back. Verified end to end, including a screen saved on the Entries tab, which
+  reloads with its strategy selected and the tab live.
+
+---
+
 ## 2026-09-08 — Screener parity phase 3: view tabs and the docked chart
 
 ### What changed

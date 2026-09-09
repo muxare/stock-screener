@@ -25,6 +25,7 @@ import { DEFAULT_COLUMNS, type ScreenView } from './lib/screen/columns';
 import { setSectorOptions, type FieldId } from './lib/screen/fields';
 import type { SortState } from './lib/screen/sort';
 import { createScreenSlice, DEFAULT_SORT, type ScreenSlice } from './store/screenSlice';
+import type { SavedScreen } from './lib/screen/storage';
 import {
   DEFAULT_FAN_BACKTEST_CONFIG,
   fanEntryIndex,
@@ -38,7 +39,7 @@ export type { FanRow, FanSignalRow, ImportConfigOption, ImportDataEntry, DevImpo
 export type { Clause, ScreenFilters, ScreenSlice };
 export type { FanBacktestConfig, FanBacktestProgress, FanBacktestResult, FanEntryEvent };
 export type { StrategyDef, ExitSpec };
-export type { ScreenView, FieldId, SortState };
+export type { ScreenView, FieldId, SortState, SavedScreen };
 export { DEFAULT_FAN_BACKTEST_CONFIG, DEFAULT_COLUMNS, DEFAULT_SORT };
 
 export type DisplayStatus = 'loading' | 'loaded' | 'error';
@@ -183,9 +184,10 @@ export function makeScreenerState(
   let displayGen = 0;
 
   return (set, get) => ({
+    // One storage object, two key spaces: saved strategies and saved screens.
     ...createScreenSlice(set, get, () => {
       if (get().signalStrategy) void get().runSignals();
-    }),
+    }, storage),
     ready: false,
     matches: [],
     near: [],
@@ -208,6 +210,9 @@ export function makeScreenerState(
     init: () => {
       if (get().ready) return;
       set({ ready: true, strategies: loadStrategies(storage) });
+      // After the strategies, so a saved screen's entry strategy resolves;
+      // before the screen runs, so the first /signals scan carries its floors.
+      get().applyDefaultScreen();
       void get().bootstrap();
       void get().runScreen();
       if (import.meta.env.DEV) {

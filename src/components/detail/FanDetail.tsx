@@ -1,10 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Stock } from '../../lib/market';
 import { ema, macd, rsi, stochRsi } from '../../lib/indicators';
 import { classifyCloses } from '../../lib/fan';
 import { useChartViewport } from '../../lib/chart/viewport';
 import { barIndexAtX, drawZoomSelection, isInPlot, type ZoomSelection } from '../../lib/chart/interactions';
 import { drawMacdPane, drawStochPane } from '../../lib/chart/panes';
+import { drawPatternLayer } from '../../lib/chart/patternLayer';
+import {
+  countsInRange, detectPatterns, markersAtBar, DEFAULT_PATTERNS, PATTERN_IDS, type PatternId,
+} from '../../lib/patterns';
 import { HButton } from '../ui/Hoverable';
 import { ChartControls } from '../ui/ChartControls';
 import { Disclosure } from '../ui/Disclosure';
@@ -25,6 +29,8 @@ const PAD_T = 8;
 const PAD_B = 24;
 const PAD_L = 8;
 const PAD_R = 58;
+/** patterns listed in the crosshair readout before it collapses to a count */
+const MAX_READOUT_PATTERNS = 4;
 
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const col = (c: number) => (c >= 0 ? '#06a96b' : '#e23d3d');
@@ -48,6 +54,14 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
 
   const [macdOn, setMacdOn] = useState(true);
   const [stochOn, setStochOn] = useState(true);
+  const [patterns, setPatterns] = useState<PatternId[]>(() => [...DEFAULT_PATTERNS]);
+
+  const togglePattern = useCallback((id: PatternId) => {
+    setPatterns((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+  }, []);
+  const setAllPatterns = useCallback((on: boolean) => {
+    setPatterns(on ? [...PATTERN_IDS] : []);
+  }, []);
 
   const cls = classifyCloses(stock.full.c);
   const emas = Number.isFinite(cls.emas.ema18) ? cls.emas : null;
@@ -64,6 +78,16 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
       stoch: stochRsi(rsi(c, 14), 14, 3, 3),
     };
   }, [stock]);
+
+  // Every detector runs over the full history — not the visible window, so
+  // panning never changes what a pattern is, and not only the selected ones, so
+  // the chooser can show how many of each are there before you turn it on. The
+  // chart then draws the subset that is selected.
+  const allMarkers = useMemo(() => detectPatterns(stock.full, PATTERN_IDS), [stock.full]);
+  const markers = useMemo(
+    () => allMarkers.filter((m) => patterns.includes(m.id)),
+    [allMarkers, patterns],
+  );
 
   const { view, zoomAtBar, panByBars, setRange, reset, isDefault } = useChartViewport(
     nBars,
@@ -187,6 +211,10 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
         ctx.stroke();
       }
 
+      drawPatternLayer({
+        ctx, bars: stock.full, markers, from, to, x, py, cw, top: priceTop, height: PRICE_H,
+      });
+
       ctx.textAlign = 'left';
       let lx = padL + 4;
       for (const e of EMA_COLORS) {
@@ -266,8 +294,12 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
       ctx.setLineDash([]);
       const bar = stock.full;
       const iso = bar.d?.[i] ?? '';
+      const hits = markersAtBar(markers, i);
+      const lines = [`${iso}  O ${fmt(bar.o[i])}  H ${fmt(bar.h[i])}  L ${fmt(bar.l[i])}  C ${fmt(bar.c[i])}`];
+      for (const m of hits.slice(0, MAX_READOUT_PATTERNS)) lines.push(`• ${m.note}`);
+      if (hits.length > MAX_READOUT_PATTERNS) lines.push(`• +${hits.length - MAX_READOUT_PATTERNS} more`);
       readout.style.display = 'block';
-      readout.textContent = `${iso}  O ${fmt(bar.o[i])}  H ${fmt(bar.h[i])}  L ${fmt(bar.l[i])}  C ${fmt(bar.c[i])}`;
+      readout.textContent = lines.join('\n');
     };
 
     const drawSelection = (mx: number, my: number) => {
@@ -372,9 +404,13 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
       cv.removeEventListener('wheel', onWheel);
       window.removeEventListener('mouseup', endPointer);
     };
-  }, [stock, series, view.from, view.to, macdOn, stochOn, chartH, nBars, panByBars, zoomAtBar, setRange]);
+  }, [stock, series, markers, view.from, view.to, macdOn, stochOn, chartH, nBars, panByBars, zoomAtBar, setRange]);
 
   const center = (view.from + view.to) / 2;
+  const patternCounts = useMemo(
+    () => countsInRange(allMarkers, view.from, view.to),
+    [allMarkers, view.from, view.to],
+  );
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#fff', overflow: 'hidden' }}>
@@ -436,6 +472,12 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
                 onZoomOut={() => zoomAtBar(center, 1.3)}
                 onReset={reset}
                 canReset={!isDefault}
+                patterns={{
+                  selected: patterns,
+                  counts: patternCounts,
+                  onToggle: togglePattern,
+                  onAll: setAllPatterns,
+                }}
               />
             </div>
             <div style={{ position: 'relative', padding: '10px 14px 0 14px' }}>
@@ -447,7 +489,7 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
                   position: 'absolute', left: 20, top: 16, display: 'none', pointerEvents: 'none',
                   background: 'rgba(255,255,255,0.92)', border: '1px solid #ececef', borderRadius: 7,
                   padding: '6px 9px', fontSize: 11, lineHeight: 1.5, zIndex: 2,
-                  fontVariantNumeric: 'tabular-nums',
+                  fontVariantNumeric: 'tabular-nums', whiteSpace: 'pre-line', maxWidth: 380,
                 }}
               />
             </div>
