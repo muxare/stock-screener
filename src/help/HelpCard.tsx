@@ -76,10 +76,12 @@ function Head({ topic, pinned, onPin, onClose, onDragStart }: {
   );
 }
 
-export function HoverCard({ id, topic, anchor, z, onPin }: {
+export function HoverCard({ id, topic, anchor, host, z, onPin }: {
   id: number;
   topic: string;
   anchor: Rect;
+  /** the control the anchor sits in, which the card is placed clear of */
+  host: Rect | null;
   z: number;
   onPin: () => void;
 }) {
@@ -89,8 +91,8 @@ export function HoverCard({ id, topic, anchor, z, onPin }: {
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    setPos(placeNear(anchor, el.offsetWidth, el.offsetHeight, window.innerWidth, window.innerHeight));
-  }, [anchor, topic]);
+    setPos(placeNear(anchor, el.offsetWidth, el.offsetHeight, window.innerWidth, window.innerHeight, host ?? undefined));
+  }, [anchor, host, topic]);
 
   return (
     <div

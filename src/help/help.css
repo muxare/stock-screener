@@ -22,6 +22,21 @@
   animation: popin 0.12s ease-out;
   -webkit-font-smoothing: antialiased;
 }
+/* A hover card is a passing answer, not a panel, so it stays slightly
+   see-through: the number it landed next to is still readable underneath it,
+   and it goes solid the moment the pointer enters it to read or pin it. A
+   pinned card was parked deliberately and stays opaque. */
+.help-card:not(.is-pinned) {
+  opacity: 0.92;
+  animation: help-popin 0.12s ease-out;
+  transition: opacity 0.1s ease-out;
+}
+.help-card:not(.is-pinned):hover { opacity: 1; }
+@keyframes help-popin {
+  from { transform: translateY(10px) scale(0.98); opacity: 0; }
+  to { transform: none; opacity: 0.92; }
+}
+
 .help-card.is-pinned {
   border-color: rgba(126, 226, 184, 0.45);
   box-shadow: 0 0 0 1px rgba(126, 226, 184, 0.15), 0 18px 48px rgba(0, 0, 0, 0.4);

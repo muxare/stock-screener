@@ -27,7 +27,11 @@ export function TopBar() {
         <span data-help="data-source" title={dbSelector.activePath || 'Synthetic generated dataset'} style={{ fontSize: '11px', color: '#98a0a8', padding: '3px 7px', background: '#f4f5f6', borderRadius: '5px', letterSpacing: '0.03em', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sourceBadge}</span>
       </div>
 
-      <div data-help="search" style={{ position: 'relative', flex: 1, maxWidth: '340px' }}>
+      {/* The ⌕ carries the help, not the 340 px box around it: a wrapper that
+          wide is a trap the pointer falls into on its way somewhere else, and
+          the glyph is the one part of a search field that is a marker rather
+          than a control. */}
+      <div style={{ position: 'relative', flex: 1, maxWidth: '340px' }}>
         <HInput
           value={search}
           onInput={(e) => onSearch((e.target as HTMLInputElement).value)}
@@ -35,14 +39,14 @@ export function TopBar() {
           style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px 9px 34px', border: '1px solid #e7e8ea', borderRadius: '9px', fontSize: '13px', fontFamily: 'inherit', outline: 'none', background: '#fafbfb' }}
           focusStyle={{ border: '1px solid #06a96b', background: '#fff' }}
         />
-        <span style={{ position: 'absolute', left: '11px', top: '50%', transform: 'translateY(-50%)', color: '#aab0b6', fontSize: '14px' }}>⌕</span>
+        <span data-help="search" style={{ position: 'absolute', left: '11px', top: '50%', transform: 'translateY(-50%)', color: '#aab0b6', fontSize: '14px', cursor: 'help' }}>⌕</span>
       </div>
 
       <div style={{ flex: 1 }} />
 
       {dbSelector.available && (
-        <div data-help="data-source" style={{ display: 'flex', alignItems: 'center', gap: '6px' }} title={dbSelector.error || 'Select the active market-data source'}>
-          <span style={{ fontSize: '11px', color: '#98a0a8' }}>Data</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }} title={dbSelector.error || 'Select the active market-data source'}>
+          <span data-help="data-source" style={{ fontSize: '11px', color: '#98a0a8', cursor: 'help' }}>Data</span>
           <select
             value={dbValue}
             disabled={dbSelector.switching}

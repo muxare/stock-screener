@@ -55,6 +55,8 @@ interface HoverEntry {
   topic: string;
   anchorEl: Element;
   anchorRect: Rect;
+  /** the control the anchor sits in, so the card can be placed clear of it */
+  hostRect: Rect | null;
 }
 
 interface Pinned {
@@ -76,6 +78,17 @@ interface Pending {
 function rectOf(el: Element): Rect {
   const r = el.getBoundingClientRect();
   return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
+}
+
+/**
+ * The control an anchor belongs to. Phase 3 moved the anchors onto the words
+ * — the ⌕ in the search box, a tab's label, a term inside a card body — and
+ * beside a word that small is usually inside the thing it names, so `placeNear`
+ * is given the parent to keep clear of. A parent too wide to have a side of its
+ * own is simply ignored there, which is why the plain parent is enough.
+ */
+function hostOf(el: Element): Rect | null {
+  return el.parentElement ? rectOf(el.parentElement) : null;
 }
 
 function isEditable(t: EventTarget | null): boolean {
@@ -164,6 +177,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
         topic: p.topic,
         anchorEl: p.anchorEl,
         anchorRect: rectOf(p.anchorEl),
+        hostRect: hostOf(p.anchorEl),
       };
       setChain((c) => [...c.filter((e) => p.keepIds.has(e.id)), entry]);
       return entry;
@@ -308,7 +322,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
       const r = el?.getBoundingClientRect();
       const pos = r
         ? { x: r.left, y: r.top }
-        : placeNear(top.anchorRect, 330, 200, window.innerWidth, window.innerHeight);
+        : placeNear(top.anchorRect, 330, 200, window.innerWidth, window.innerHeight, top.hostRect ?? undefined);
       setPinned((p) => [...p, { id: top.id, topic: top.topic, x: pos.x, y: pos.y, z: ++topZ.current }]);
       setChain((c) => c.filter((x) => x.id !== top.id));
     };
@@ -384,7 +398,9 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     if (!entry) return;
     const el = document.querySelector(`[data-help-card="${id}"]`);
     const r = el?.getBoundingClientRect();
-    const pos = r ? { x: r.left, y: r.top } : placeNear(entry.anchorRect, 330, 200, window.innerWidth, window.innerHeight);
+    const pos = r
+      ? { x: r.left, y: r.top }
+      : placeNear(entry.anchorRect, 330, 200, window.innerWidth, window.innerHeight, entry.hostRect ?? undefined);
     setPinned((p) => [...p, { id, topic: entry.topic, x: pos.x, y: pos.y, z: ++topZ.current }]);
     setChain((c) => c.filter((x) => x.id !== id));
   };
@@ -424,6 +440,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
               id={c.id}
               topic={c.topic}
               anchor={c.anchorRect}
+              host={c.hostRect}
               z={HOVER_Z + depth}
               onPin={() => pinFromCard(c.id)}
             />

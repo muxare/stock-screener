@@ -1,6 +1,6 @@
 # Help cards — how the first card should be summoned
 
-Status (2026-09-09): **phases 0-2 built; 3-4 open**. Written from Mikael's note that the
+Status (2026-09-09): **phases 0-3 built; 4 open**. Written from Mikael's note that the
 first card arrives too eagerly and covers the thing you were looking at, and his
 suggestion to gate it behind Shift; revised the same day after three follow-ups — which
 modifier (Ctrl/Cmd considered and rejected, see idea A), the wish to hover marks *on the
@@ -8,8 +8,8 @@ chart* for their documentation (phase 4, which is why the modifier cannot be swi
 over a canvas), and **Mikael's decision to retire Shift-drag zoom-to-range in favour of
 wheel-zoom and drag-pan, which frees Shift outright** (phase 0). Phase 1 answers the
 original complaint; everything else builds on it. All open questions were closed the same
-day (see Decisions at the end). **Phases 0-2 landed 2026-09-09 on
-`feat/help-summon-modifier` — see the diary entries of that date. Phases 3-4 are open.**
+day (see Decisions at the end). **Phases 0-3 landed 2026-09-09 on
+`feat/help-summon-modifier` — see the diary entries of that date. Phase 4 is open.**
 
 ## Context — what the trigger does today
 
@@ -374,12 +374,17 @@ parked deliberately and carry their own ✕.
 appears on a cold hover, vanishes on Shift, and does not reappear indefinitely. All four
 checked in the running app.
 
-## Phase 3 — anchors and placement
+## Phase 3 — anchors and placement — **landed 2026-09-09**
 
 ### Touch scope
 `src/components/TopBar.tsx`, `src/components/FilterBar.tsx`,
 `src/components/ScreenView.tsx`, `src/components/filters/*.tsx`,
 `src/components/detail/DetailPanels.tsx`, `src/help/place.ts`, `src/help/help.css`
+
+As built, neither `filters/*.tsx` nor `DetailPanels.tsx` needed touching — the chips already
+carry their own field anchors, and the resize handle is 8 px wide, which is not the kind of
+target this phase was about. Two files the plan did not foresee did: `src/help/HelpCard.tsx`
+and `src/help/HelpProvider.tsx`, for the host rect below.
 
 - **Narrow the over-broad anchors** (E-lite): move `data-help` from wrappers onto the
   label text they describe — `search` from the 340 px div onto the input's label,
@@ -395,9 +400,32 @@ checked in the running app.
 - Optionally add the stillness condition from idea C to *latched* dwell, where the plain
   380 ms timer still applies.
 
+As built, three things the plan did not have right:
+
+- **`search` had no label to move onto**, so the `⌕` glyph took the anchor — the marker a
+  label would have been. `filters` had no heading either, so the phase added one: a
+  `FILTERS` caption above the chip row, styled like the `ENTRY STRATEGY` caption beside it.
+  `data-source` got the same treatment, off its select group and onto the word "Data".
+- **Narrow anchors broke the new placement**, which is the interaction neither half of this
+  phase saw coming: beside a 14 px marker is *inside* the control it names, so the `search`
+  card landed on the search box and `filters` on the chips. `placeNear` therefore takes an
+  optional **host rect** — the anchor's parent element, threaded through as
+  `HoverEntry.hostRect` — and picks the side that clears it, falling back to the anchor
+  when the host is too wide to have a side of its own (a table header row, the TopBar).
+  The same rule gives phase 4 most of what it wanted from "a preferred container rect", and
+  it makes a term's child card open *beside* its parent card instead of over it.
+- **The stillness condition was left out.** It needs a movement tracker in the provider and
+  a fourth input to `decideTrigger`, the verification below does not ask for it, and the
+  honest way to decide is to live with the latch for a day.
+
 ### Verification
 Every card opens beside, not on top of, the control that explains it, at every window
 size in the phase-1 checklist; `place.test.ts` extended with the side-preference cases.
+Checked in the running app: the `GAP` header card sits left of the gap column instead of
+over it, the `⌕` card clear of the search box, the `FILTERS` card right of the chips, a
+term's child card beside its parent. The narrow-window paths (flip above, shift left,
+bottom clamp) are covered by `place.test.ts` rather than by hand — Chrome refused the
+resize.
 
 ## Phase 4 — help on the chart itself
 
@@ -471,8 +499,9 @@ because the chart already built the peek half.
 candles is the worst version of problem (3), and on a chart it is unusable rather than
 merely annoying: the mark you asked about is *under the card*. So a chart card docks to
 the chart panel's quieter side — opposite half from the glyph, inside the panel bounds —
-instead of floating at the pointer. This is phase 3's `placeNear` work with one extra
-input (a preferred container rect), which is why phase 4 reads better after it.
+instead of floating at the pointer. Phase 3 built the extra input this needs: `placeNear`
+already takes a **host rect** it keeps the card clear of, so a chart card passes the plot
+rect where a DOM anchor passes its parent element.
 
 ### Tests
 - `patternLayer.test.ts` — the returned chip rects match what was drawn, and dropped

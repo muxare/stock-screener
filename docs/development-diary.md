@@ -1,5 +1,59 @@
 # Development diary
 
+## 2026-09-09 — Help cards: point at the word, and land beside it
+
+### What changed
+Phase 3 of `docs/help-hover-trigger-plan.md` — the two problems the modifier did not fix.
+Anchors that were far bigger than the word they explain, and a card that opened *downward
+over the content below the anchor*, which for anything in the TopBar or the filter row is
+the table you were reading.
+
+- **`placeNear` places beside, not below.** It picks the side with more room and top-aligns
+  the card with the anchor, so the control that summoned the card and its own row stay
+  visible. Only when neither side can take the width — a table header row, the filter bar,
+  any full-width anchor — does it fall back to the old below-then-above behaviour. The
+  visible result: pointing at the `GAP` column header used to drop the card straight onto
+  the gap values you were reading; it now sits to their left.
+- **A card is placed clear of the anchor's *host*, not just the anchor.** Narrowing the
+  anchors created a new failure the plan did not foresee: beside a 14 px marker is *inside*
+  the control it names, so the `search` card landed on the search box and the `filters` card
+  on the chips. `placeNear` takes an optional host rect — the anchor's parent element — and
+  uses it to choose the side, ignoring it when it is too wide to have a side of its own. One
+  rule, and it covers the table header (host is the full-width row, so the cell decides) and
+  a term inside a card body (host is the card, so the child card now sits *beside* its
+  parent instead of on top of it, which is a straight improvement on phases 1–2).
+- **Narrower anchors** (idea E-lite): `search` moved off the 340 px wrapper onto the `⌕`
+  glyph, which is the marker a label would have been; the tab anchors moved off the whole
+  tab button onto the tab's label text, so the count badge and the padding stop being
+  targets; `data-source` moved off the select group onto the word "Data". `filters` came off
+  the widest target on the screen — a row that is mostly gaps between chips, each of which
+  documents itself — onto a new `FILTERS` caption above the row, styled like the
+  `ENTRY STRATEGY` caption beside it. `closest()` picks the innermost anchor, so a chip
+  inside the row still wins over the row.
+- **Hover cards open at 0.92 opacity and go solid on pointer enter**, with their own popin
+  keyframe so the animation ends where the rule leaves it. A card you can read the number
+  through is a card you do not have to dismiss. Pinned cards stay opaque: they were parked
+  deliberately.
+- **Not done, deliberately:** the plan's optional stillness condition on *latched* dwell.
+  It would need a movement tracker in the provider and a fourth input to `decideTrigger`,
+  and the phase-3 verification does not ask for it; the honest way to decide is to live with
+  the latch for a day first.
+
+### Where it lives
+`src/help/place.ts` (`placeNear`, now with the `host` argument), `src/help/place.test.ts`
+(side preference, host clearing, host-too-wide, bottom clamp), `src/help/HelpProvider.tsx`
+(`hostOf`, `HoverEntry.hostRect`), `src/help/HelpCard.tsx` (`HoverCard` takes `host`),
+`src/help/help.css` (the translucency and `help-popin`), `src/components/TopBar.tsx`,
+`src/components/FilterBar.tsx` (the `FILTERS` caption and a hoisted `fieldLabel`),
+`src/components/ScreenView.tsx` (the tab label spans).
+
+### How to test
+`npm run dev`, then click `?` for help mode and point at things: the `GAP` header — card to
+its left, the gap column readable; the `⌕` in the search box — card clear to the right of the
+whole box, not over it; the `FILTERS` caption — card right of the filter group, chips still
+visible; a highlighted term inside an open card — the child opens beside its parent. Every
+card is faintly see-through until the pointer enters it. `npm run test`, `npm run lint`.
+
 ## 2026-09-09 — Finding the Shift gesture: help mode and the whisper
 
 ### What changed

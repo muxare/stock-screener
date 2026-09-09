@@ -80,7 +80,6 @@ function TabStrip({
         return (
           <HButton
             key={id}
-            data-help={TAB_LABEL[id].help}
             disabled={disabled}
             onClick={() => onPick(id)}
             title={disabled ? 'Choose an entry strategy to scan for open entries.' : undefined}
@@ -96,7 +95,10 @@ function TabStrip({
             }}
             hoverStyle={disabled ? undefined : { color: '#15171a' }}
           >
-            {TAB_LABEL[id].label}
+            {/* The word, not the whole tab: `closest()` picks the innermost
+                anchor, so the count badge and the tab's padding stop being
+                targets for a pointer only passing through. */}
+            <span data-help={TAB_LABEL[id].help}>{TAB_LABEL[id].label}</span>
             <span
               style={{
                 fontSize: 11, fontWeight: 700, fontVariantNumeric: 'tabular-nums',
