@@ -47,6 +47,8 @@ const TOPIC_LIST: HelpTopic[] = [
 
 Once a card is up the key is redundant — you are already reading documentation — so plain hover keeps working while a card is showing, and for a moment after the last one closes on its own. Highlighted words inside a card are terms of their own: hover one to open its card on top.
 
+The ? button in the top bar is the same thing without the key: click it and help mode stays on, lit green, with plain hover opening cards everywhere until you click it again or press Esc. Use it if holding a key while moving the pointer is awkward, or when you are reading rather than working.
+
 Press T while a card is showing to pin it. A pinned card stays where it is, can be dragged by its title bar, and still lets you hover its highlighted terms to keep digging. Press Esc to close the most recent card, or use the × on a pinned one; dismissing a card also ends the plain-hover grace, so the next card needs the key again.`,
     related: ['fan', 'strategy', 'backtest'],
   },

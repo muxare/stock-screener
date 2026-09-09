@@ -136,3 +136,18 @@
   text-align: center;
   line-height: 15px;
 }
+
+/* The whisper — the gesture, mentioned beside the pointer when a target has
+   been sat on long enough to be a question. Deliberately not a panel: it is a
+   caption on the app, so the halo does the work a background would. */
+.help-whisper {
+  position: fixed;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: #5b6168;
+  white-space: nowrap;
+  text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 7px #fff, 0 1px 2px rgba(255, 255, 255, 0.9);
+  animation: sd-fade 0.14s ease-out;
+}
+.help-whisper b { color: #06865a; font-weight: 700; }

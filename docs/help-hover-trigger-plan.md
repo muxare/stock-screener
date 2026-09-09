@@ -1,6 +1,6 @@
 # Help cards — how the first card should be summoned
 
-Status (2026-09-09): **phases 0 and 1 built; 2-4 open**. Written from Mikael's note that the
+Status (2026-09-09): **phases 0-2 built; 3-4 open**. Written from Mikael's note that the
 first card arrives too eagerly and covers the thing you were looking at, and his
 suggestion to gate it behind Shift; revised the same day after three follow-ups — which
 modifier (Ctrl/Cmd considered and rejected, see idea A), the wish to hover marks *on the
@@ -8,8 +8,8 @@ chart* for their documentation (phase 4, which is why the modifier cannot be swi
 over a canvas), and **Mikael's decision to retire Shift-drag zoom-to-range in favour of
 wheel-zoom and drag-pan, which frees Shift outright** (phase 0). Phase 1 answers the
 original complaint; everything else builds on it. All open questions were closed the same
-day (see Decisions at the end). **Phases 0 and 1 landed 2026-09-09 on
-`feat/help-summon-modifier` — see the diary entry of that date. Phases 2-4 are open.**
+day (see Decisions at the end). **Phases 0-2 landed 2026-09-09 on
+`feat/help-summon-modifier` — see the diary entries of that date. Phases 3-4 are open.**
 
 ## Context — what the trigger does today
 
@@ -339,11 +339,15 @@ pin them and so the modifier is one edit away from changing.
    opens nothing until phase 4 gives the canvas its own targets.)
 6. `npm run test` and `npm run lint` clean.
 
-## Phase 2 — making the gesture findable
+## Phase 2 — making the gesture findable — **landed 2026-09-09**
 
 ### Touch scope
 `src/components/TopBar.tsx`, `src/help/HelpProvider.tsx`, `src/help/help.css`,
-`src/help/glossary.ts`
+`src/help/glossary.ts`, plus `src/help/HelpCard.tsx` for the footer and one file this plan
+did not foresee: `src/help/helpMode.ts`, the context the button and the provider share. It is
+its own module so `HelpProvider.tsx` keeps exporting only its component, which is what
+`react-refresh/only-export-components` wants — the `data-help-mode` attribute this plan
+offered as the alternative cannot light the button back up when `Esc` leaves the mode.
 
 - **The `?` button becomes a real toggle** (idea D): click = help mode on, plain hover
   everywhere, button lit green, `Esc` or a second click exits. `helpMode` is already a
@@ -360,9 +364,15 @@ pin them and so the modifier is one edit away from changing.
   the gesture: "⇧ Shift + point for a card · T to pin" — both generated from
   `SUMMON_MODIFIER` so a change of key updates the copy with it.
 
+As built, three details the plan left open: the whisper takes itself away after 2.6 s (a
+parked pointer should not be nagged) as well as on the modifier and on leaving the target; the
+budget is four a session; and `Esc` leaves the mode *before* it closes pinned cards, which were
+parked deliberately and carry their own ✕.
+
 ### Verification
 `?` toggles a visibly-lit mode in which today's hover behaviour returns; the whisper
-appears on a cold hover, vanishes on Shift, and does not reappear indefinitely.
+appears on a cold hover, vanishes on Shift, and does not reappear indefinitely. All four
+checked in the running app.
 
 ## Phase 3 — anchors and placement
 

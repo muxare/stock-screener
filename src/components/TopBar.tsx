@@ -1,7 +1,10 @@
 import { useScreener } from '../store';
+import { useHelpMode } from '../help/helpMode';
+import { SUMMON_LABEL } from '../help/trigger';
 import { HInput, HButton } from './ui/Hoverable';
 
 export function TopBar() {
+  const { helpMode, setHelpMode } = useHelpMode();
   const search = useScreener((s) => s.search);
   const onSearch = useScreener((s) => s.onSearch);
   const devImportAvailable = useScreener((s) => s.devImport.available);
@@ -81,9 +84,14 @@ export function TopBar() {
       <HButton
         data-help="help"
         type="button"
-        aria-label="Help"
-        style={{ width: 30, height: 30, padding: 0, border: '1px solid #e7e8ea', borderRadius: '50%', background: '#fff', color: '#98a0a8', fontSize: '14px', fontWeight: 700, cursor: 'help', fontFamily: 'inherit' }}
-        hoverStyle={{ border: '1px solid #06a96b', color: '#06865a' }}
+        aria-label="Help mode"
+        aria-pressed={helpMode}
+        onClick={() => setHelpMode(!helpMode)}
+        style={{ width: 30, height: 30, padding: 0, border: `1px solid ${helpMode ? '#06a96b' : '#e7e8ea'}`, borderRadius: '50%', background: helpMode ? '#06a96b' : '#fff', color: helpMode ? '#fff' : '#98a0a8', fontSize: '14px', fontWeight: 700, cursor: 'help', fontFamily: 'inherit' }}
+        hoverStyle={{ border: '1px solid #06a96b', color: helpMode ? '#fff' : '#06865a' }}
+        title={helpMode
+          ? 'Help mode is on — point at anything for a card. Click again or press Esc to leave'
+          : `Help mode: point at anything for a card, without holding ${SUMMON_LABEL}`}
       >
         ?
       </HButton>

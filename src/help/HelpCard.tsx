@@ -104,8 +104,8 @@ export function HoverCard({ id, topic, anchor, z, onPin }: {
       <div className="help-card__body"><HelpBody topic={topic} /></div>
       <Related topic={topic} />
       <div className="help-card__foot">
-        <span><kbd>T</kbd>pin</span>
-        <span>{SUMMON_LABEL} + point summons a card</span>
+        <span>{SUMMON_LABEL} + point for a card</span>
+        <span><kbd>T</kbd>to pin</span>
       </div>
     </div>
   );

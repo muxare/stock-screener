@@ -1,5 +1,49 @@
 # Development diary
 
+## 2026-09-09 — Finding the Shift gesture: help mode and the whisper
+
+### What changed
+Phase 1 made the first help card something you have to ask for; the gesture that asks is
+invisible. Phase 2 of `docs/help-hover-trigger-plan.md` pays that cost twice over — once with a
+visible switch, once with a hint at the moment the gesture is wanted.
+
+- **The `?` in the TopBar is a toggle now**, not a decorative anchor. Lit green, plain hover
+  opens cards everywhere for as long as it stays on; click it again or press `Esc` to leave.
+  This is the accessible half of the design rather than a convenience: holding a modifier while
+  moving a pointer is not available to everyone, and a modifier-only trigger would have been a
+  regression against the hover behaviour that shipped before it.
+- `src/help/helpMode.ts` (new) — the context the button and the provider share. It is a
+  separate module so `HelpProvider.tsx` keeps exporting nothing but its component, which is
+  what keeps Vite's fast refresh (and `react-refresh/only-export-components`) happy.
+- **Session-only, by decision.** Persisting it would make it a stored preference, which means a
+  store field and somewhere for it to live. If it turns out you always want it on, that is a
+  different and better feature — defaulting help mode on — and can be decided then.
+- **`Esc` order: the open chain, then the mode, then the pinned cards.** Esc means "stop
+  showing me documentation", and that is the mode before it is the pins, which were parked
+  deliberately and carry their own ✕.
+- **The whisper.** Dwell ~600 ms on a target that the modifier *would* have opened and a single
+  11 px `⇧ Shift help` appears beside the pointer — no panel, just a white halo, because it is
+  a caption on the app rather than another card. It goes on the modifier (taking it away is the
+  acknowledgement), on leaving the target, and on its own after 2.6 s so a parked pointer is
+  not nagged. Four per session and then silence: it is a hint, not a preference to manage.
+- The hint costs the provider one `mousemove` listener that writes two numbers, so the chip
+  lands where the eye is rather than where the pointer crossed the anchor's edge.
+- Both strings come from `SUMMON_LABEL`, as does the reworded card footer
+  (`⇧ Shift + point for a card · T to pin`) and the `help` topic in `glossary.ts`, so changing
+  `SUMMON_MODIFIER` still changes every mention of the key with it.
+
+### Where it lives
+`src/help/helpMode.ts` (new), `src/help/HelpProvider.tsx` (help-mode state, whisper state and
+its three timers), `src/help/help.css` (`.help-whisper`), `src/help/HelpCard.tsx` (footer),
+`src/help/glossary.ts` (the `help` topic), `src/components/TopBar.tsx` (the toggle).
+
+### How to test
+`npm run dev`, then: hover the Backtest button without Shift and wait — `⇧ Shift help` appears
+beside the pointer and fades on its own; press Shift and it vanishes as the card arrives. Click
+`?` — it lights green and plain hover opens cards everywhere with no key. `Esc` closes the open
+card, a second `Esc` leaves the mode and the button goes grey. Sweep across four or five cold
+targets and the whisper stops offering itself.
+
 ## 2026-09-09 — Shift summons the help card; Shift-drag zoom retired
 
 ### What changed

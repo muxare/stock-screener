@@ -14,15 +14,21 @@
 // explicit dismissal (Esc, a click outside, a scroll, a resize) ends that grace
 // at once: it means "stop showing me cards".
 //
+// The modifier is a hidden gesture, so two things make it findable: the ? in
+// the TopBar toggles help mode, in which plain hover works everywhere for as
+// long as it is lit, and a cold dwell whispers the gesture beside the pointer
+// a few times a session.
+//
 // Pressing T pins the deepest hover card where it stands. Pinned cards are
 // independent: draggable, closable, and still hoverable for their terms.
 // Esc closes the hover chain if there is one, else the most recent pin.
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { HoverCard, PinnedCard } from './HelpCard';
-import { placeNear, type Rect } from './place';
-import { decideTrigger, isModifierDown, type TriggerDelays, type TriggerState } from './trigger';
+import { clampToViewport, placeNear, type Rect } from './place';
+import { decideTrigger, isModifierDown, SUMMON_LABEL, type TriggerDelays, type TriggerState } from './trigger';
+import { HelpModeContext } from './helpMode';
 import { topicOf } from './glossary';
 import './help.css';
 
@@ -34,6 +40,12 @@ const ARMED_DELAY = 90;
 const LEAVE_GRACE = 170;
 /** how long plain hover keeps working after the last card closes on its own */
 const LATCH_GRACE = 800;
+/** a cold dwell this long has stopped travelling, so the gesture is worth a word */
+const WHISPER_DELAY = 600;
+/** and then take the word away, so a parked pointer is not nagged indefinitely */
+const WHISPER_LINGER = 2600;
+/** a hint, not a stored preference: it teaches a few times a session, then stops */
+const WHISPER_LIMIT = 4;
 const HOVER_Z = 10_000;
 
 const DELAYS: TriggerDelays = { hover: HOVER_DELAY, nested: NESTED_DELAY, armed: ARMED_DELAY };
@@ -75,6 +87,9 @@ function isEditable(t: EventTarget | null): boolean {
 export function HelpProvider({ children }: { children: ReactNode }) {
   const [chain, setChain] = useState<HoverEntry[]>([]);
   const [pinned, setPinned] = useState<Pinned[]>([]);
+  const [helpMode, setHelpMode] = useState(false);
+  /** where the whisper is showing, in viewport coords; null = not showing */
+  const [whisper, setWhisper] = useState<{ x: number; y: number } | null>(null);
   const chainRef = useRef(chain);
   const pinnedRef = useRef(pinned);
   const nextId = useRef(1);
@@ -87,6 +102,11 @@ export function HelpProvider({ children }: { children: ReactNode }) {
   /** true while the running enter timer exists only because the modifier is down */
   const armedTimer = useRef(false);
   const latchedUntil = useRef(0);
+  const helpModeRef = useRef(helpMode);
+  const whisperTimer = useRef<number | null>(null);
+  /** this session's hint budget — a whisper is only useful until it is learnt */
+  const whispersLeft = useRef(WHISPER_LIMIT);
+  const pointerAt = useRef({ x: 0, y: 0 });
 
   // The latch, kept here rather than in the listener so it follows the chain
   // itself: open while any hover card is up, then a grace once the last one
@@ -98,6 +118,20 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     else if (latchedUntil.current === Infinity) latchedUntil.current = Date.now() + LATCH_GRACE;
   }, [chain]);
   useEffect(() => { pinnedRef.current = pinned; }, [pinned]);
+  useEffect(() => { helpModeRef.current = helpMode; }, [helpMode]);
+
+  const clearWhisper = useCallback(() => {
+    if (whisperTimer.current != null) window.clearTimeout(whisperTimer.current);
+    whisperTimer.current = null;
+    setWhisper(null);
+  }, []);
+
+  // Switching help mode on retires the hint it was teaching: plain hover works
+  // now, so there is nothing left to ask for.
+  const changeHelpMode = useCallback((on: boolean) => {
+    setHelpMode(on);
+    if (on) clearWhisper();
+  }, [clearWhisper]);
 
   useEffect(() => {
     const clearTimer = () => {
@@ -107,6 +141,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     };
     const clearEnter = () => {
       clearTimer();
+      clearWhisper();
       pending.current = null;
     };
     const clearLeave = () => {
@@ -134,19 +169,47 @@ export function HelpProvider({ children }: { children: ReactNode }) {
       return entry;
     };
 
+    /**
+     * Say the gesture once, beside the pointer. No panel and no dismissal: it
+     * goes on the modifier, on leaving the target, and on its own after a
+     * moment — and the session only ever gets WHISPER_LIMIT of them.
+     */
+    const showWhisper = () => {
+      whisperTimer.current = null;
+      const p = pending.current;
+      if (!p || !p.anchorEl.matches(':hover')) return;
+      if (modifierDown.current || helpModeRef.current) return;
+      whispersLeft.current--;
+      setWhisper({ ...pointerAt.current });
+      whisperTimer.current = window.setTimeout(() => {
+        whisperTimer.current = null;
+        setWhisper(null);
+      }, WHISPER_LINGER);
+    };
+
     /** Start the open timer for `p`, if the current state says it may open at all. */
     const arm = (p: Pending) => {
       const state: TriggerState = {
         insideCard: p.insideCard,
         chainOpen: chainRef.current.length > 0,
-        helpMode: false,
+        helpMode: helpModeRef.current,
         modifierDown: modifierDown.current,
         pointerBusy: pointerBusy.current,
         latchedUntil: latchedUntil.current,
         now: Date.now(),
       };
       const d = decideTrigger(state, DELAYS);
-      if (!d.open) return;
+      if (!d.open) {
+        // Nothing opens — but if the modifier *would* have opened it, the
+        // pointer has stopped on something it could be asking about, which is
+        // the one moment the gesture is worth mentioning.
+        if (d.armable && whispersLeft.current > 0) {
+          whisperTimer.current = window.setTimeout(showWhisper, WHISPER_DELAY);
+        }
+        return;
+      }
+      // A card is on its way; the hint has served its purpose.
+      clearWhisper();
       // Whether the modifier alone is holding this timer up, so releasing it
       // cancels a card that has not appeared yet without touching one that has.
       armedTimer.current = !decideTrigger({ ...state, modifierDown: false }, DELAYS).open;
@@ -168,6 +231,8 @@ export function HelpProvider({ children }: { children: ReactNode }) {
       if (down === modifierDown.current) return;
       modifierDown.current = down;
       if (down) {
+        // The hint has been read. Taking it away is the acknowledgement.
+        clearWhisper();
         // The pointer is usually already parked on the thing before the hand
         // reaches for the key, so arm what is already pending.
         const p = pending.current;
@@ -179,8 +244,14 @@ export function HelpProvider({ children }: { children: ReactNode }) {
       }
     };
 
+    /** Nothing but the pointer position, so the whisper lands where the eye is. */
+    const onMove = (e: MouseEvent) => {
+      pointerAt.current = { x: e.clientX, y: e.clientY };
+    };
+
     const onOver = (e: MouseEvent) => {
       syncModifier(e);
+      onMove(e);
       // `buttons` is authoritative on every move, so a mouseup missed outside
       // the window cannot leave the layer wedged shut.
       pointerBusy.current = e.buttons !== 0;
@@ -246,6 +317,10 @@ export function HelpProvider({ children }: { children: ReactNode }) {
       syncModifier(e);
       if (e.key === 'Escape') {
         if (chainRef.current.length || pending.current) { closeHover(); e.preventDefault(); return; }
+        // Then the mode itself: Esc means "stop showing me documentation", and
+        // that is the mode before it is the pinned cards, which were parked
+        // deliberately and carry their own ✕.
+        if (helpModeRef.current) { setHelpMode(false); e.preventDefault(); return; }
         if (pinnedRef.current.length) {
           setPinned((p) => p.slice(0, -1));
           e.preventDefault();
@@ -281,6 +356,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     };
 
     document.addEventListener('mouseover', onOver);
+    document.addEventListener('mousemove', onMove, { passive: true });
     document.addEventListener('keydown', onKey);
     document.addEventListener('keyup', syncModifier);
     document.addEventListener('mousedown', onDown);
@@ -290,6 +366,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     window.addEventListener('resize', closeHover);
     return () => {
       document.removeEventListener('mouseover', onOver);
+      document.removeEventListener('mousemove', onMove);
       document.removeEventListener('keydown', onKey);
       document.removeEventListener('keyup', syncModifier);
       document.removeEventListener('mousedown', onDown);
@@ -300,7 +377,7 @@ export function HelpProvider({ children }: { children: ReactNode }) {
       clearEnter();
       clearLeave();
     };
-  }, []);
+  }, [clearWhisper]);
 
   const pinFromCard = (id: number) => {
     const entry = chainRef.current.find((e) => e.id === id);
@@ -312,8 +389,15 @@ export function HelpProvider({ children }: { children: ReactNode }) {
     setChain((c) => c.filter((x) => x.id !== id));
   };
 
+  const modeApi = useMemo(() => ({ helpMode, setHelpMode: changeHelpMode }), [helpMode, changeHelpMode]);
+  // The chip is one short line that never wraps, so its own box is close
+  // enough to keep it off the viewport edges.
+  const whisperAt = whisper
+    ? clampToViewport(whisper.x + 15, whisper.y + 17, 104, 18, window.innerWidth, window.innerHeight)
+    : null;
+
   return (
-    <>
+    <HelpModeContext.Provider value={modeApi}>
       {children}
       {createPortal(
         <div className="help-layer">
@@ -344,9 +428,14 @@ export function HelpProvider({ children }: { children: ReactNode }) {
               onPin={() => pinFromCard(c.id)}
             />
           ))}
+          {whisperAt && (
+            <div className="help-whisper" style={{ left: whisperAt.x, top: whisperAt.y }}>
+              <b>{SUMMON_LABEL}</b> help
+            </div>
+          )}
         </div>,
         document.body,
       )}
-    </>
+    </HelpModeContext.Provider>
   );
 }
