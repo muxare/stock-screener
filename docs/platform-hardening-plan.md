@@ -16,13 +16,20 @@ one unblocks the next rather than being done in parallel by one person.
 | **Trading platform** — entries to consider at Avanza | A **scheduled** post-close pipeline and an **immutable signal log**. What matters is not just today's signals but what the system said last Tuesday and what data it said it from. Plus Nordic coverage, which is the in-flight `docs/borsdata-ingest-plan.md`. |
 | **Learning platform** — deploy/manage it, apply CCA-F | Infrastructure stops being overhead and becomes a **deliverable**. Containers, CI/CD, observability, secrets and a local→cloud path are the point, not a tax. And the Anthropic **Claude Certified Architect – Foundations** material gets applied to real features here, not toy ones. |
 
-### Two decisions taken (2026-09-14) — do not re-open
+### Decisions taken (2026-09-14) — do not re-open
 
 - **Deployment: local first, cloud later.** Build for containers now, run on your own
   hardware, treat the cloud move as a distinct later stage.
 - **Avanza: advisory + read-only portfolio sync. No order execution.** Signals are entries
   *to consider*; you place them yourself. Portfolio sync is either typed in by hand or read
   by Claude from a screenshot of the Avanza account.
+- **Notification: in the UI only.** No email, no push, no external channel. The signal log is
+  the source of truth and the UI reads it — so the nightly pipeline needs no outbound
+  dependency and no third secret.
+- **History: as much as the provider will give.** Börsdata's full available history, not a
+  convenient window. This has a measured consequence — see stage 6.4.
+- **Multiple users: build for it.** Not "leave a seam" — the auth and per-user data story is
+  a deliberate learning goal, so stage 5 carries it properly rather than deferring it.
 
 ### One design invariant that falls out of that
 
@@ -202,8 +209,25 @@ at all.
   persisted with its full config, its result, *and a fingerprint of the dataset it ran
   against* (which DB, which date range, bar count, content hash). A run you cannot reproduce
   is not a research result.
-- Auth: single-user is fine to start, but put the seam in — every row carries an owner, even
-  if there is only ever one. Retrofitting that is far worse than carrying it.
+- **Multi-user, properly** (decided 2026-09-14, so this is no longer a deferred seam):
+  - Every user-owned row carries an `owner_id`, and **authorization is enforced in the query
+    layer, not the route handler**. The classic failure is a route that checks ownership on
+    `GET /screens/:id` and forgets to on `DELETE`. Make the data-access layer incapable of
+    returning another user's row rather than relying on each handler to remember.
+  - **OIDC against an identity provider — do not hand-roll sessions.** Self-hosting Keycloak
+    in compose fits local-first and is squarely on the ops learning goal; a hosted provider is
+    the lower-effort alternative. Either way the app validates tokens and never stores a
+    password.
+  - **The market data stays shared and unscoped.** The warm universe is read-only reference
+    data, not user data, so multi-user costs nothing there — one cache still serves everyone.
+    Keep that boundary clean: user data and market data are different databases for a reason.
+  - **The `/dev/*` routes must never be reachable in a multi-user deployment.** They import
+    CSVs and hot-swap the active dataset for *everyone*. `DEV_TOOLS` already gates them and
+    phase 2.1 makes that gate structural — with multiple users that stops being tidiness and
+    becomes the thing standing between a second user and your whole dataset.
+  - **Per-user cost control on the Claude routes.** The `ANTHROPIC_API_KEY` is *yours*; every
+    user spending it is your bill. Rate-limit per user and cap it before stage 3's reader is
+    reachable by anyone but you.
 
 - Touch scope: `server/db/` (new), `server/routes/screens.ts`, `server/routes/strategies.ts`,
   `src/lib/screen/storage.ts`, `src/lib/strategy/storage.ts`, `src/store.ts`.
@@ -231,10 +255,40 @@ actively harmful if unaddressed, because both produce *encouraging* wrong answer
 **Phase 6.3 — The nightly signal pipeline.** A scheduled post-close job runs the strategies
 and writes to an **append-only signal log**: what fired, on what data, with what entry, stop
 and target. Never mutated — the value is in being able to ask "what did this tell me three
-weeks ago, and was it right?". Delivery (email/push/web) hangs off the log, not off the job.
+weeks ago, and was it right?". **Delivery is the UI reading that log** (decided 2026-09-14) —
+no email, no push, no outbound dependency. The job's only output is rows; the UI shows what is
+new since you last looked, which is a read model over the log rather than a notification
+system.
 
-**Phase 6.4 — Nordic data.** This is where `docs/borsdata-ingest-plan.md` lands and Avanza
-signals become actually actionable. That plan is already written; it slots in here.
+**Phase 6.4 — Nordic data, with full history.** This is where `docs/borsdata-ingest-plan.md`
+lands and Avanza signals become actually actionable. That plan is already written; it slots in
+here. The 2026-09-14 decision to take **as much history as Börsdata will give** adds one
+problem that plan does not cover, because it is a property of the *server*, not the importer:
+
+> **The warm universe does not survive full history unchanged.** `universe.ts` builds the
+> entire universe into memory at boot and holds it forever, with indicator caches on top.
+> Measured on `kaggle-market.db` (1,500 instruments, 1.10M bars): **144 MB heap and a 2.0 s
+> boot build**. Börsdata's Nordic universe at full history is roughly an order of magnitude
+> more bars, which projects to **~1.5 GB resident and ~20 s of boot** before the service can
+> serve anything.
+
+Neither number is fatal, but both are load-bearing: 1.5 GB is a lot for one process on a
+homelab box, and a 20-second cold start is exactly why phase 4.4 splits `/ready` from
+`/health` — without that split an orchestrator kills the process before it finishes booting.
+
+The fix follows from what each path actually needs, and it is cheap because the seam already
+exists:
+
+- **A screen needs a recent window, not all history.** The deepest thing it looks back through
+  is EMA-200 plus the rising lookbacks — a few hundred bars. A ~500-bar warm window over
+  ~1,900 Nordic instruments is roughly 120 MB, i.e. about what runs today.
+- **A backtest needs full history, but phase 6.1 already made it a job.** A job can stream
+  instruments from SQLite one at a time and never hold the universe at once.
+
+So: warm window for the p95-budgeted screen path, streamed full history for the batch path.
+Both go through the existing `MarketDataProvider` port, so this is a provider and store
+change — no handler and no engine edits. Do this **before** importing full history, not after
+discovering the boot time.
 
 - Verify: a scheduled run produces the same signals as the same config run by hand; the
   signal log is append-only under test; a strategy's run history is comparable across
@@ -287,6 +341,8 @@ The "later" half of local-first, taken only once stages 1–6 are steady locally
 - CD from the CI built in phase 1.1, deploying the image built in phase 4.3.
 - Real secret storage replacing phase 4.2's env injection.
 - The observability stack from phase 4.4, hosted.
+- The identity provider from stage 5 moves from compose to something managed (or a hardened
+  self-hosted one) — with real users this is the piece that stops being a learning exercise.
 
 Sizing note: `dev-market.db` is 51 MB and `kaggle-market.db` 94 MB. Small enough that this
 stays cheap, which is the right reason to keep the market data in SQLite rather than
@@ -317,11 +373,20 @@ Stages 1 and 2 are prerequisites for everything. Stage 3 is deliberately off the
 so there is a Claude feature working early. Stage 5 is the keystone — both remaining intents
 are blocked on it.
 
-## Open questions (not blocking stage 1)
+## Questions resolved 2026-09-14
 
-- **Notification channel for stage 6.3** — email, push, or just the web UI? Decides what
-  external dependency and which secret the nightly pipeline needs.
-- **How much history does the research platform need?** Walk-forward and parameter sweeps
-  change the storage and job design; worth knowing before stage 6.1 rather than after.
-- **Single-user forever, or eventually accounts?** Stage 5 puts the owner seam in either way,
-  but it changes how hard the auth story has to be in stage 8.
+All three of this plan's original open questions are answered and folded in above:
+
+| Question | Answer | Where it landed |
+|---|---|---|
+| Notification channel for 6.3 | **UI only** — no external channel, no extra secret | Phase 6.3 |
+| How much history | **As much as Börsdata gives** | Phase 6.4, plus the warm-universe change it forces |
+| Single-user or accounts | **Build for multiple users** | Stage 5, and the IdP in stage 8 |
+
+### Still open (none blocking stage 1)
+
+- **Which identity provider.** Self-hosted Keycloak in compose maximises the ops learning;
+  a hosted provider gets stage 5 done faster. Decide at stage 5, not before.
+- **Börsdata tier.** How much history you actually get is a function of the subscription, and
+  the phase 6.4 sizing above scales with it. Worth knowing the real bar count before building
+  the warm window, though the windowed design is right at any size.
