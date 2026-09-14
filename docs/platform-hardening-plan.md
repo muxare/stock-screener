@@ -1,7 +1,7 @@
 # Platform hardening plan — from dev tool to research + signal platform
 
-Status (2026-09-14): **proposed — stage 1 open**. Follows the Option C decision recorded in
-`docs/server-migration-plan.md`: the server stays TypeScript and gets hardened rather than
+Status (2026-09-14): **in progress — stage 1: phase 1.1 landed, 1.2–1.3 open**. Follows the
+Option C decision recorded in `docs/server-migration-plan.md`: the server stays TypeScript and gets hardened rather than
 ported. This document is the executable half.
 
 ## The three intents, and what each one demands
@@ -49,9 +49,11 @@ switches and a regulatory conversation. Everything below is scoped to the first.
 
 Small, no design decisions, unblocks everything. Do this first.
 
-**Phase 1.1 — CI.** `.github/workflows/ci.yml`: `npm ci` → `npm run typecheck` →
-`npm run lint` → `npm run test` on push and PR, Node 24. This is the single biggest gap in
-the repo today — `.github/workflows` does not exist, so tests and lint are manual.
+**Phase 1.1 — CI. Landed 2026-09-14.** `.github/workflows/ci.yml`: `npm ci` →
+`npm run typecheck` → `npm run lint` → `npm run test` on push and PR, on a **Node 24 + 25**
+matrix rather than 24 alone — 24 is the `engines` floor, 25 is what development happens on.
+This was the single biggest gap in the repo — `.github/workflows` did not exist, so tests and
+lint were manual.
 
 **Phase 1.2 — Graceful shutdown.** `UniverseStore.close()` exists and is **never called**;
 there is no `SIGTERM`/`SIGINT` handler in `server/index.ts`, so the SQLite handle leaks on

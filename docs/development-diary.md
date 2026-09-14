@@ -1,5 +1,40 @@
 # Development diary
 
+## 2026-09-14 — CI: the checks stop being something you remember to run
+
+### What changed
+Phase 1.1 of `docs/platform-hardening-plan.md`. The repo had no `.github/` at all, so
+`npm run typecheck`, `npm run lint` and `npm run test` were manual and a PR's green-ness was
+a claim rather than a fact. `.github/workflows/ci.yml` runs all three on every pull request
+and on pushes to `main`.
+
+- **Node 24 *and* 25.** The plan said 24; the matrix carries both. 24 is the floor
+  `engines` declares and what `node:sqlite` and `import.meta.main` need; 25 is what
+  development actually happens on locally, and a version you develop on but never test is
+  the one that breaks. `fail-fast: false`, so a failure on one version still reports the
+  other instead of hiding it.
+- **`npm ci`, not `npm install`.** The lockfile is the input; a CI run that silently
+  resolves different versions is not reproducing anything. `cache: npm` keyed off the
+  lockfile keeps it cheap.
+- **No service containers, no fixtures, no secrets.** SQLite is `node:sqlite`, a built-in —
+  there is no native module to compile and nothing to install beyond the lockfile. Verified
+  by running the full suite in a fresh clone with no `dev-market.db` and no `.dev-active-db`
+  present: 41 files, 541 tests, green. The test suite genuinely does not depend on local
+  market data, which is worth knowing before stage 4 tries to run it in a container.
+- **`concurrency` with `cancel-in-progress`.** A new push to a branch makes the previous
+  run's answer irrelevant; `permissions: contents: read` because nothing here writes.
+- **Not included, deliberately:** `npm run build`. `typecheck` already runs `tsc -b` across
+  the app, server and tools projects, so a build step would re-typecheck to tell us the same
+  thing more slowly. Add it when there is an artifact worth producing — stage 4's container.
+
+### Where it lives
+`.github/workflows/ci.yml` (new).
+
+### How to test
+Open a PR: two checks, `check (node 24)` and `check (node 25)`. Break something on purpose —
+add an unused variable, or change a response shape the client depends on — and confirm the
+matching step fails.
+
 ## 2026-09-09 — Help on the chart itself: the marks document themselves
 
 ### What changed
