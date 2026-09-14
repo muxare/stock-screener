@@ -12,7 +12,7 @@ one unblocks the next rather than being done in parallel by one person.
 
 | Intent | What it actually demands |
 |---|---|
-| **Research platform** — try out trading strategies | Backtest runs must be **durable, reproducible and comparable**. Today a run is an ephemeral NDJSON stream that is rendered once and lost. A research platform needs the run, its config, and *the exact data it ran against* recorded together. |
+| **Research platform** — try out trading strategies | Backtest runs must be **durable, reproducible and comparable**. Today a run is an ephemeral NDJSON stream that is rendered once and lost. A research platform needs the run, its config, and *the exact data it ran against* recorded together — and it needs to be **statistically honest about what it found**, which phase 6.2 shows is the harder half. |
 | **Trading platform** — entries to consider at Avanza | A **scheduled** post-close pipeline and an **immutable signal log**. What matters is not just today's signals but what the system said last Tuesday and what data it said it from. Plus Nordic coverage, which is the in-flight `docs/borsdata-ingest-plan.md`. |
 | **Learning platform** — deploy/manage it, apply CCA-F | Infrastructure stops being overhead and becomes a **deliverable**. Containers, CI/CD, observability, secrets and a local→cloud path are the point, not a tax. And the Anthropic **Claude Certified Architect – Foundations** material gets applied to real features here, not toy ones. |
 
@@ -27,7 +27,10 @@ one unblocks the next rather than being done in parallel by one person.
   the source of truth and the UI reads it — so the nightly pipeline needs no outbound
   dependency and no third secret.
 - **History: as much as the provider will give.** Börsdata's full available history, not a
-  convenient window. This has a measured consequence — see stage 6.4.
+  convenient window. A 2-year window was considered on 2026-09-14 and **rejected on measured
+  evidence** — see phase 6.2, which shows the effective sample size is driven by elapsed time
+  and not by universe breadth, so a short window cannot be compensated for with more tickers.
+  Storage is not the binding constraint; the memory consequence is handled in stage 6.4.
 - **Multiple users: build for it.** Not "leave a seam" — the auth and per-user data story is
   a deliberate learning goal, so stage 5 carries it properly rather than deferring it.
 
@@ -243,14 +246,62 @@ artifact; the NDJSON stream becomes a progress *view* of a job rather than the o
 result ever exists. This unlocks comparing runs, and it is the prerequisite for anything
 long-running (parameter sweeps, walk-forward).
 
-**Phase 6.2 — Reproducibility guards.** Two failure modes that make a research platform
-actively harmful if unaddressed, because both produce *encouraging* wrong answers:
-- **Look-ahead bias** — the signal log must record what data was available at signal time,
-  not what the DB holds now. A backtest silently using restated or back-adjusted prices will
-  flatter every strategy you test.
-- **Survivorship bias** — a universe built from today's listed names has already dropped
-  everything that failed. Worth at least knowing and documenting for each dataset, since the
-  Stooq/Kaggle/Yahoo DBs differ here.
+**Phase 6.2 — Statistical validity.** The failure modes here all produce *encouraging* wrong
+answers, which is what makes them dangerous: a research platform that quietly flatters every
+strategy is worse than no platform. Ordered by how badly each one bites **this** system,
+measured against the real engine on 2026-09-14 (see the appendix for the numbers).
+
+**(a) Transaction costs — unmodelled, and plausibly fatal.** `fanBacktest.ts` models no
+commission, spread or slippage at all; its `cost` field is position cost basis
+(`shares × entryPrice`), not friction. That matters more than usual because the stops are
+tight — mean stop distance is **2.35–2.61% of entry**, so 1R is only about 2.5% of price, and
+friction is a large fraction of one risk unit:
+
+| Round-trip cost | net mean R (dev) | net mean R (kaggle) |
+|---|---|---|
+| 0% (as modelled today) | 0.506 | 0.649 |
+| 0.5% | 0.315 | 0.436 |
+| 1.0% | 0.124 | 0.224 |
+| **1.5%** | **−0.068** | 0.012 |
+| 2.0% | −0.259 | −0.201 |
+
+Avanza courtage is perhaps 0.3%, but Nordic small-cap spreads alone run 0.5–2%. **Outside
+liquid large caps this strategy is likely negative after costs**, and no amount of history
+fixes that — it is a modelling gap, not a sample-size one. Cheapest fix in the whole plan,
+largest effect: make cost a config field, charge it on entry and exit, and refuse to report a
+gross-only result.
+
+**(b) Multiple testing.** The strategy builder is, structurally, a search machine — the
+expected best-of-N spurious t-statistic is ≈ √(2 ln N), so ~100 parameter variants yields
+t ≈ 3.0 from pure noise. This is why finance uses a **t > 3.0** threshold rather than 2.0
+(Harvey, Liu & Zhu 2016). The platform should count its own trials: the `runs` table from
+stage 5 already records every run, so **deflated Sharpe** (Bailey & López de Prado 2014),
+which adjusts for number of trials, non-normality and sample length, is computable from data
+you are already storing. Report it next to the raw number.
+
+**(c) Clustered standard errors.** Trades are not independent observations. Names entering
+the same setup on the same day are one bet about the market regime, counted many times.
+Measured intra-month ICC is 0.08–0.11, which on this entry rate gives a design effect of
+2.1–3.4 — so the honest t is roughly half the naive one (4.53 → 2.24 on kaggle). **Report the
+month-clustered t, never the per-trade t.** One function, and it is the difference between a
+result that looks conclusive and one that is not.
+
+**(d) Look-ahead bias** — the signal log must record what data was available at signal time,
+not what the DB holds now. A backtest silently using restated or back-adjusted prices will
+flatter every strategy you test.
+
+**(e) Survivorship bias** — a universe built from today's listed names has already dropped
+everything that failed. **Confirm early whether Börsdata serves delisted instruments**; if it
+only returns currently-listed names, every backtest is structurally optimistic no matter how
+deep the history, and that is worth knowing before phase 6.4 imports anything.
+
+**(f) Corporate actions.** `src/lib/data/sqlite.ts` states the provider performs *no*
+adjustment and "trusts the importer's pre-adjusted bars". An unadjusted 2:1 split reads as a
+−50% crash and will fire or destroy signals spuriously. The Börsdata plan has splits in scope
+— make sure that is actually wired, because the engine has no defence of its own.
+
+- Verify: a backtest refuses to report without a cost assumption; the run record carries the
+  clustered t and the trial count; a synthetic split in a fixture does not generate a signal.
 
 **Phase 6.3 — The nightly signal pipeline.** A scheduled post-close job runs the strategies
 and writes to an **append-only signal log**: what fired, on what data, with what entry, stop
@@ -289,6 +340,23 @@ So: warm window for the p95-budgeted screen path, streamed full history for the 
 Both go through the existing `MarketDataProvider` port, so this is a provider and store
 change — no handler and no engine edits. Do this **before** importing full history, not after
 discovering the boot time.
+
+**How deep does the history need to be?** Phase 6.2's measurements answer this, and the answer
+is *much* deeper than intuition suggests. Because the per-month effect ratio is 0.27–0.43 and
+`t = ratio × √months`:
+
+| Bar to clear | dev-market rate | kaggle rate |
+|---|---|---|
+| t = 2, gross of costs | 4.5 yr | 1.8 yr |
+| **t = 3, gross of costs** | **10 yr** | **4 yr** |
+| t = 3, after 0.3% round-trip | 17 yr | 6 yr |
+| t = 3, after 1.0% round-trip | 169 yr | 34 yr |
+
+**10–15 years is the defensible minimum**, and it should span 2008, 2020 and 2022 — you need
+to have seen the strategy *fail*, not only work. Once the warm window above is in place there
+is no memory reason to store less, and disk is not a constraint at this scale. If the Börsdata
+subscription caps the depth, that cap is a real limit on what the research platform can ever
+conclude, and is worth knowing before committing to a tier.
 
 - Verify: a scheduled run produces the same signals as the same config run by hand; the
   signal log is append-only under test; a strategy's run history is comparable across
@@ -372,6 +440,43 @@ stays cheap, which is the right reason to keep the market data in SQLite rather 
 Stages 1 and 2 are prerequisites for everything. Stage 3 is deliberately off the critical path
 so there is a Claude feature working early. Stage 5 is the keystone — both remaining intents
 are blocked on it.
+
+## Appendix — measured baseline (2026-09-14)
+
+Everything in phase 6.2 and the 6.4 sizing table comes from running the **default fan
+strategy** (`DEFAULT_FAN_BACKTEST_CONFIG`) over the two real datasets, clustering trades by
+calendar month. Re-derivable with `backtestFanUniverse(subjects, config, undefined, 1e9)` —
+note the 4th argument, since `entries` is capped at 300 by default and the cap silently keeps
+only the most recent ones.
+
+| | dev-market.db | kaggle-market.db |
+|---|---|---|
+| Instruments / bars | 491 / 603K | 1,500 / 1.10M |
+| Date range | 2018-11 → 2023-11 | 2014-11 → 2017-11 |
+| Trades | 548 | 819 |
+| Win rate | 31.6% | 33.2% |
+| Mean R / sd | 0.506 / 3.355 | 0.649 / 4.096 |
+| Mean stop distance | 2.61% | 2.35% |
+| Naive t (per trade) | 3.53 | 4.53 |
+| Intra-month ICC | 0.113 | 0.083 |
+| Design effect | 2.10 | 3.43 |
+| **Effective n** | **261** | **239** |
+| **Month-clustered t** | **1.94** | **2.24** |
+| Profitable months | 26 / 51 | 18 / 27 |
+
+**The finding that decided the history question:** tripling the universe (491 → 1,500 names)
+*lowered* effective sample size, 261 → 239. The extra names enter the same setup on the same
+days, so they raise the design effect (2.10 → 3.43) by as much as they add trades. **Effective
+n is bought with elapsed time, not with breadth** — which is why a 2-year window over 1,900
+Nordic names would land near an effective n of ~225, roughly what these datasets already give,
+and why the 2-year proposal was rejected.
+
+Also worth carrying forward: the median trade returns **0.00%**. All of the expectancy sits in
+the ~30% of trades that reach a trailing exit. A distribution that skewed is exactly the case
+where normal-theory significance tests are least trustworthy and the deflated-Sharpe machinery
+in phase 6.2(b) earns its place.
+
+---
 
 ## Questions resolved 2026-09-14
 
