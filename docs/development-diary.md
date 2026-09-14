@@ -1,5 +1,597 @@
 # Development diary
 
+## 2026-09-14 — CI: the checks stop being something you remember to run
+
+### What changed
+Phase 1.1 of `docs/platform-hardening-plan.md`. The repo had no `.github/` at all, so
+`npm run typecheck`, `npm run lint` and `npm run test` were manual and a PR's green-ness was
+a claim rather than a fact. `.github/workflows/ci.yml` runs all three on every pull request
+and on pushes to `main`.
+
+- **Node 24 *and* 25.** The plan said 24; the matrix carries both. 24 is the floor
+  `engines` declares and what `node:sqlite` and `import.meta.main` need; 25 is what
+  development actually happens on locally, and a version you develop on but never test is
+  the one that breaks. `fail-fast: false`, so a failure on one version still reports the
+  other instead of hiding it.
+- **`npm ci`, not `npm install`.** The lockfile is the input; a CI run that silently
+  resolves different versions is not reproducing anything. `cache: npm` keyed off the
+  lockfile keeps it cheap.
+- **No service containers, no fixtures, no secrets.** SQLite is `node:sqlite`, a built-in —
+  there is no native module to compile and nothing to install beyond the lockfile. Verified
+  by running the full suite in a fresh clone with no `dev-market.db` and no `.dev-active-db`
+  present: 41 files, 541 tests, green. The test suite genuinely does not depend on local
+  market data, which is worth knowing before stage 4 tries to run it in a container.
+- **`concurrency` with `cancel-in-progress`.** A new push to a branch makes the previous
+  run's answer irrelevant; `permissions: contents: read` because nothing here writes.
+- **Not included, deliberately:** `npm run build`. `typecheck` already runs `tsc -b` across
+  the app, server and tools projects, so a build step would re-typecheck to tell us the same
+  thing more slowly. Add it when there is an artifact worth producing — stage 4's container.
+
+### Where it lives
+`.github/workflows/ci.yml` (new).
+
+### How to test
+Open a PR: two checks, `check (node 24)` and `check (node 25)`. Break something on purpose —
+add an unused variable, or change a response shape the client depends on — and confirm the
+matching step fails.
+
+## 2026-09-09 — Help on the chart itself: the marks document themselves
+
+### What changed
+Phase 4 of `docs/help-hover-trigger-plan.md`, and the phase the trigger work was for:
+point at a pattern chip or an indicator pane on the detail chart and get its card — with a
+line saying why *that* mark fired, on *that* bar.
+
+- **Virtual anchors (`src/help/anchors.ts`).** Everywhere else a help target is an element
+  carrying `data-help`; a chart is one canvas, so there is nothing for `closest()` to find
+  and nothing for `:hover` to report. A canvas publishes the target under the pointer
+  instead, and the provider treats it exactly like a hovered element: `contains` becomes
+  "is the live virtual key still this one" and `:hover` becomes "is it still published".
+  Everything downstream — the modifier, the delays, the latch, `T`, `Esc`, the chain,
+  pinning — is unchanged, which is what putting the decision in `trigger.ts` bought in
+  phase 1. Identity is the key, so a chart republishing the same mark on every mousemove is
+  nothing happening.
+- **The provider's `onOver` became `enter(target, topic, node, cardId)`**, with a `Target`
+  union of DOM element and virtual anchor. The keep-the-chain loop, the pending target and
+  the leave grace are shared by both.
+- **`drawPatternLayer` returns the chips it drew.** The label placer already computes each
+  chip's rectangle and then discarded it; handing the array back is the whole hit-test.
+  Chips the placer had to drop are not in it, because there is nothing on screen to point
+  at.
+- **What is hittable, most specific first:** a pattern chip under the pointer, else the
+  top-ranked pattern covering the hovered bar (the same list the crosshair readout is
+  already printing), else the pane the pointer is in — volume, MACD, Stoch RSI. The two
+  hit-tests (`boxAt`, `bandAt`) are pure and live in `lib/chart/interactions.ts`.
+- **The instance line.** `PatternMarker.note` is already one line of prose about the
+  instance, so the card renders the bar's date and that note above the glossary body:
+  "2016-06-30 — Swing pivot high — high above the 3 bars either side". Generic
+  documentation answers "what is a pivot"; this answers "why is there one here". Pinned
+  cards keep it.
+- **A chart card never covers the bars it explains.** Phase 3 gave `placeNear` a host rect
+  to keep clear of; a chart passes the *half of the plot the mark is in*, so the card docks
+  to the quieter half. In a detail dock narrower than two card widths that means it clears
+  the plot entirely and lands over the table — which is the right trade: the mark you asked
+  about stays visible.
+- **New glossary topic `macd`**, the classic 12/26/9 the chart's pane actually draws, as
+  distinct from Screenr's own `macd-18-50`. Its aliases are deliberately only the qualified
+  ones, so a bare "MACD" in another card still auto-links to nothing new.
+
+### Where it lives
+`src/help/anchors.ts` (new: `VirtualAnchor`, `useHelpAnchor`, `anchorChanged`,
+`toViewport`) and `src/help/anchors.test.ts`; `src/help/HelpProvider.tsx` (the `Target`
+union, `enter`, the publish callback); `src/help/HelpCard.tsx` + `src/help/help.css` (the
+instance line); `src/lib/chart/interactions.ts` (`boxAt`, `bandAt`) and its new test;
+`src/lib/chart/patternLayer.ts` (`PatternChip`, returned) and its new test;
+`src/components/detail/FanDetail.tsx` (`hitRef`, `helpAt`, publishing on mousemove);
+`src/help/glossary.ts` (`macd`).
+
+### How to test
+`npm run dev`, open a ticker, zoom in until the pattern chips appear (`+` a few times), then
+hold Shift and point at a `HH`/`LH` chip — a card naming the pattern, the date and why that
+bar qualified, docked clear of the candles. Shift + point at a bar with no chip on it — the
+top pattern covering that bar. Shift + point in the MACD pane — the MACD 12/26/9 card, no
+instance line. `T` pins a chart card and it stays put while you pan and zoom underneath it;
+drag-to-pan with Shift held flashes nothing. `npm run test`, `npm run lint`.
+
+## 2026-09-09 — Help cards: point at the word, and land beside it
+
+### What changed
+Phase 3 of `docs/help-hover-trigger-plan.md` — the two problems the modifier did not fix.
+Anchors that were far bigger than the word they explain, and a card that opened *downward
+over the content below the anchor*, which for anything in the TopBar or the filter row is
+the table you were reading.
+
+- **`placeNear` places beside, not below.** It picks the side with more room and top-aligns
+  the card with the anchor, so the control that summoned the card and its own row stay
+  visible. Only when neither side can take the width — a table header row, the filter bar,
+  any full-width anchor — does it fall back to the old below-then-above behaviour. The
+  visible result: pointing at the `GAP` column header used to drop the card straight onto
+  the gap values you were reading; it now sits to their left.
+- **A card is placed clear of the anchor's *host*, not just the anchor.** Narrowing the
+  anchors created a new failure the plan did not foresee: beside a 14 px marker is *inside*
+  the control it names, so the `search` card landed on the search box and the `filters` card
+  on the chips. `placeNear` takes an optional host rect — the anchor's parent element — and
+  uses it to choose the side, ignoring it when it is too wide to have a side of its own. One
+  rule, and it covers the table header (host is the full-width row, so the cell decides) and
+  a term inside a card body (host is the card, so the child card now sits *beside* its
+  parent instead of on top of it, which is a straight improvement on phases 1–2).
+- **Narrower anchors** (idea E-lite): `search` moved off the 340 px wrapper onto the `⌕`
+  glyph, which is the marker a label would have been; the tab anchors moved off the whole
+  tab button onto the tab's label text, so the count badge and the padding stop being
+  targets; `data-source` moved off the select group onto the word "Data". `filters` came off
+  the widest target on the screen — a row that is mostly gaps between chips, each of which
+  documents itself — onto a new `FILTERS` caption above the row, styled like the
+  `ENTRY STRATEGY` caption beside it. `closest()` picks the innermost anchor, so a chip
+  inside the row still wins over the row.
+- **Hover cards open at 0.92 opacity and go solid on pointer enter**, with their own popin
+  keyframe so the animation ends where the rule leaves it. A card you can read the number
+  through is a card you do not have to dismiss. Pinned cards stay opaque: they were parked
+  deliberately.
+- **Not done, deliberately:** the plan's optional stillness condition on *latched* dwell.
+  It would need a movement tracker in the provider and a fourth input to `decideTrigger`,
+  and the phase-3 verification does not ask for it; the honest way to decide is to live with
+  the latch for a day first.
+
+### Where it lives
+`src/help/place.ts` (`placeNear`, now with the `host` argument), `src/help/place.test.ts`
+(side preference, host clearing, host-too-wide, bottom clamp), `src/help/HelpProvider.tsx`
+(`hostOf`, `HoverEntry.hostRect`), `src/help/HelpCard.tsx` (`HoverCard` takes `host`),
+`src/help/help.css` (the translucency and `help-popin`), `src/components/TopBar.tsx`,
+`src/components/FilterBar.tsx` (the `FILTERS` caption and a hoisted `fieldLabel`),
+`src/components/ScreenView.tsx` (the tab label spans).
+
+### How to test
+`npm run dev`, then click `?` for help mode and point at things: the `GAP` header — card to
+its left, the gap column readable; the `⌕` in the search box — card clear to the right of the
+whole box, not over it; the `FILTERS` caption — card right of the filter group, chips still
+visible; a highlighted term inside an open card — the child opens beside its parent. Every
+card is faintly see-through until the pointer enters it. `npm run test`, `npm run lint`.
+
+## 2026-09-09 — Finding the Shift gesture: help mode and the whisper
+
+### What changed
+Phase 1 made the first help card something you have to ask for; the gesture that asks is
+invisible. Phase 2 of `docs/help-hover-trigger-plan.md` pays that cost twice over — once with a
+visible switch, once with a hint at the moment the gesture is wanted.
+
+- **The `?` in the TopBar is a toggle now**, not a decorative anchor. Lit green, plain hover
+  opens cards everywhere for as long as it stays on; click it again or press `Esc` to leave.
+  This is the accessible half of the design rather than a convenience: holding a modifier while
+  moving a pointer is not available to everyone, and a modifier-only trigger would have been a
+  regression against the hover behaviour that shipped before it.
+- `src/help/helpMode.ts` (new) — the context the button and the provider share. It is a
+  separate module so `HelpProvider.tsx` keeps exporting nothing but its component, which is
+  what keeps Vite's fast refresh (and `react-refresh/only-export-components`) happy.
+- **Session-only, by decision.** Persisting it would make it a stored preference, which means a
+  store field and somewhere for it to live. If it turns out you always want it on, that is a
+  different and better feature — defaulting help mode on — and can be decided then.
+- **`Esc` order: the open chain, then the mode, then the pinned cards.** Esc means "stop
+  showing me documentation", and that is the mode before it is the pins, which were parked
+  deliberately and carry their own ✕.
+- **The whisper.** Dwell ~600 ms on a target that the modifier *would* have opened and a single
+  11 px `⇧ Shift help` appears beside the pointer — no panel, just a white halo, because it is
+  a caption on the app rather than another card. It goes on the modifier (taking it away is the
+  acknowledgement), on leaving the target, and on its own after 2.6 s so a parked pointer is
+  not nagged. Four per session and then silence: it is a hint, not a preference to manage.
+- The hint costs the provider one `mousemove` listener that writes two numbers, so the chip
+  lands where the eye is rather than where the pointer crossed the anchor's edge.
+- Both strings come from `SUMMON_LABEL`, as does the reworded card footer
+  (`⇧ Shift + point for a card · T to pin`) and the `help` topic in `glossary.ts`, so changing
+  `SUMMON_MODIFIER` still changes every mention of the key with it.
+
+### Where it lives
+`src/help/helpMode.ts` (new), `src/help/HelpProvider.tsx` (help-mode state, whisper state and
+its three timers), `src/help/help.css` (`.help-whisper`), `src/help/HelpCard.tsx` (footer),
+`src/help/glossary.ts` (the `help` topic), `src/components/TopBar.tsx` (the toggle).
+
+### How to test
+`npm run dev`, then: hover the Backtest button without Shift and wait — `⇧ Shift help` appears
+beside the pointer and fades on its own; press Shift and it vanishes as the card arrives. Click
+`?` — it lights green and plain hover opens cards everywhere with no key. `Esc` closes the open
+card, a second `Esc` leaves the mode and the button goes grey. Sweep across four or five cold
+targets and the whisper stops offering itself.
+
+## 2026-09-09 — Shift summons the help card; Shift-drag zoom retired
+
+### What changed
+The first help card now has to be **asked for**. Holding **Shift** and pointing at anything
+carrying `data-help` opens its card in ~90 ms; without the key nothing opens, however long
+you dwell. Phases 0 and 1 of `docs/help-hover-trigger-plan.md`, in one branch because phase 0
+exists only to free the key.
+
+**Phase 0 — Shift-drag zoom-to-range is gone.** Wheel-to-zoom and drag-to-pan already covered
+the job between them, and one modifier meaning two things — a chart gesture in the plot and a
+documentation gesture everywhere else — was not survivable once help cards are wanted *inside*
+the chart (phase 4 of the plan). What is actually lost is precision in a single gesture:
+jumping straight to an exact bar span instead of a few wheel notches and a pan.
+
+- `src/lib/chart/interactions.ts` — `drawZoomSelection` and `ZoomSelection` deleted.
+  `barIndexAtX`, `barCenterX` and `isInPlot` stay, and `FanDetail`'s crosshair now calls all
+  three instead of re-deriving the same three expressions inline.
+- `src/lib/chart/viewport.ts` — `setRange` deleted with its only two callers. `zoomAtBar`,
+  `panByBars` and `reset` are a complete viewport API; an uncalled setter is not.
+- `src/components/detail/FanDetail.tsx`, `src/components/modals/FanTradeReview.tsx` — the
+  `selectionRef`, the `e.shiftKey` branch in `onDown`, `drawSelection` and the selection branch
+  in `endPointer`, in both copies. `FanTradeReview`'s overlay canvas went with them: the
+  marquee was the only thing ever drawn on it.
+- `src/components/ui/ChartControls.tsx` — the hint is now `scroll = zoom · drag = pan`.
+
+**Phase 1 — the trigger is a pure function.** `HOVER_DELAY = 380 ms` was inside the range of
+ordinary pointer travel, so a card was as likely to be interrupting a question as answering
+one — and it opens 330 px of opaque panel *downward over the content below the anchor*.
+
+- `src/help/trigger.ts` (new) — `decideTrigger(state, delays)`, modelled on `place.ts`
+  ("Pure, so it is testable"). Rules in order: a mouse button down opens nothing and arms
+  nothing; a term inside a card is never gated (180 ms); help mode, an open chain or a live
+  latch mean plain hover (380 ms); the modifier means 90 ms; otherwise closed but *armable*.
+  `SUMMON_MODIFIER` is one constant, and `SUMMON_LABEL` is where the on-screen copy comes
+  from, so changing the key changes the footer and the `help` card with it.
+- **Why Shift and not Ctrl/Cmd**, recorded in the module: Ctrl+click is the secondary click on
+  macOS and every help target is a live control; Ctrl/Cmd+wheel is browser zoom; and Ctrl/Cmd+T
+  opens a browser tab, which would fight the pin key — silently, since `onKey` already ignores
+  `T` with those modifiers. `Shift+T` is unbound, and `onKey` lowercases, so pinning works with
+  the key still held and needed no change at all.
+- `src/help/HelpProvider.tsx` — the latch. `latchedUntil` is `Infinity` while a card is
+  showing and `now + 800 ms` once the last one closes on its own, so you can leave a card, look
+  at what it described and hover a neighbour without reaching for Shift again. `Esc`, a click
+  outside, a scroll or a resize sets it to `0`: an explicit dismissal means *stop showing me
+  cards*. Pinned cards deliberately do not hold it open — a pin is a parked reference, not a
+  reading session.
+- The pending target is now recorded even when nothing opens, which is the path that matters:
+  the pointer is usually already parked on the thing before the hand reaches for the key, so
+  the keypress arms what is already pending rather than waiting for another mouse move.
+  Releasing the key cancels a card that has not appeared yet and never closes one that has.
+- Modifier state is read from `e.shiftKey` on keydown, keyup *and* mouse events rather than by
+  matching `e.key` — that gets both Shift keys for free and recovers the state when the key
+  went down before the window had focus. `buttons !== 0` on every `mouseover` re-derives
+  "pointer busy", so a `mouseup` missed outside the window cannot wedge the layer shut.
+- `src/help/trigger.test.ts` (new) — the matrix: cold, latched, expired, nested, help mode, and
+  pointer-busy with the modifier held (a Shift-held chart pan must flash nothing).
+
+### How to test
+`npm run dev`, then: sweep the pointer across the TopBar, the filter row and the table for ten
+seconds — no card. Point at "Backtest" and press Shift — card in about a tenth of a second;
+press `T` while still holding Shift and it pins, with no browser side effect. Release Shift,
+move into the card, hover a highlighted term — the child card opens as before. Close with `Esc`
+and hover a different chip — nothing, because the dismissal cleared the latch; let a card close
+by walking away instead and hover a neighbour within ~0.8 s — it opens without Shift. On the
+detail chart: scroll zooms, drag pans, and holding Shift through a pan flashes nothing.
+
+## 2026-09-08 — Price-action patterns on the candlestick chart
+
+### What changed
+The detail chart can now **draw what the bars are saying**: eleven price-action patterns,
+each toggled independently, over the candles. Phase 1 of `docs/price-action-patterns-plan.md`.
+
+- `src/lib/patterns.ts` (new) — the detectors, pure and isomorphic like `indicators.ts`:
+  pivots (long and short), the HH/HL/LH/LL sequence, pullbacks, 2- and 3-bar reversals, pin
+  bars, engulfing, inside, outside, doji and failed breakouts. `detectPatterns(bars, ids,
+  config?)` runs the ones you ask for and returns `PatternMarker[]` sorted by confirming bar.
+- **One marker shape for all eleven** — `{ id, index, from, to, dir, price, tag, note }`. The
+  drawing layer and the crosshair readout need nothing else, so a twelfth pattern is a
+  function plus a registry row and no change to the chart.
+- **`from`/`to` are the bars the pattern *is*, not the bars that confirmed it.** A pivot spans
+  its own bar and carries `strength`; an inside bar spans the mother bar too. That is what
+  makes `markersAtBar` — "which patterns is this bar part of?" — an interval test, and it is
+  what stopped the readout from claiming the three bars either side of a swing were pivots.
+- **Confirmed only, and detected over the full history.** Nothing appears before the bars
+  establishing it have printed, so the last few bars carry no pivot; and because detection is
+  not windowed, panning never changes what a pattern is. The chooser can therefore count
+  patterns you have not turned on yet.
+- Every threshold sits in `PatternConfig` (3/1-bar pivots, 2-bar minimum pullback, 20-bar
+  breakout level, a quarter-ATR noise floor for the single-bar shapes), so phase 2 can tighten
+  one without forking a detector.
+- `src/lib/chart/patternLayer.ts` (new) — the glyph vocabulary: triangles at pivots (big for
+  3-bar, a dot for 1-bar), HH/HL/LH/LL chips on a dashed zigzag, a tinted band over a
+  pullback, a bracket around the bars of a formation, the broken level as a dashed line for a
+  failed breakout. **Chips are collected during drawing and laid out last**, best-ranked
+  first (structure, then turns, then shapes), each pushed a row at a time until it lands on
+  free pixels and *dropped* rather than overprinted when there are none — the glyph still
+  marks the bar. Below 5 px per bar the text goes entirely and only glyphs remain.
+- `src/components/ui/ChartControls.tsx` — a "Patterns · n ▾" chooser beside MACD / Stoch RSI,
+  grouped, each row carrying the count in the visible window. `patterns` is an **optional**
+  prop, so `FanTradeReview` compiles unchanged and can opt in later.
+- `src/components/detail/FanDetail.tsx` — wiring, plus the crosshair readout now lists every
+  pattern covering the hovered bar (four, then a count).
+- `src/help/` — a `pattern` help kind and twelve cards. The ids are `pa-`-prefixed on purpose:
+  the chart's two-bar reversal is a **stricter, different rule** from the builder's
+  `reversal-2bar` step, and the cards say so and link to each other rather than pretending
+  one definition serves both. Same for `pa-pullback` vs `step-pullback`.
+
+### Why this shape
+These are readings, not signals — who is in control, where a stop logically sits, whether a
+move is continuation or turn. That is why they live beside `indicators.ts` rather than in
+`lib/strategy/`, whose definitions are tuned for firing entries and are deliberately
+different.
+
+### How to test
+- `npm test` — `src/lib/patterns.test.ts` (36 cases: each detector plus its near-miss — the
+  second bar that barely recovers, the long wick with a fat body, the break that holds, the
+  tie that is nobody's pivot — the confirmation edges, and the combined result's ordering)
+- `src/help/glossary.test.ts` now asserts a card exists behind every registry entry
+- `npm run dev` → click a row → **Patterns**. Pivots and HH/HL/LH/LL are on by default; zoom
+  in past ~5 px per bar for the labels; hover a bar for the patterns it belongs to.
+
+## 2026-09-08 — Screener parity phase 4: saved screens
+
+### What changed
+A screen can now be **named, saved, reloaded and made the one that opens at start-up**.
+Phase 4 — the last — of `docs/screener-parity-plan.md`.
+
+- `src/lib/screen/storage.ts` (new) — `SavedScreen` = `{ id, name, savedAt, filters, sort,
+  columns, view, signalStrategy, default? }` under `stockScreener.screens.v1`, same
+  injected-storage + re-parse-on-load pattern as `strategy/storage.ts`. **One storage object,
+  two key spaces**: `store.ts` passes the same injected storage to the strategies loader and
+  to the slice.
+- **A stale screen is repaired, not dropped.** The parse drops what no longer means anything
+  clause by clause — a field that left the registry or stopped being filterable, a second
+  clause on the same field, a slope lookback the chip cannot show — then `sanitizeColumns`
+  drops unknown/filter-only column ids and puts the pinned ones back, and `sanitizeSort`
+  falls back to the view's default for a sort key that no longer resolves. Only a screen with
+  no id or no name is thrown away.
+- `src/lib/screen/columns.ts` — gains those two sanitizers plus `EXTRA_SORT_KEYS`, the
+  entries table's own sort keys (`barsAgo`, `entryPrice`, …), so "does this key still
+  resolve?" can be answered without reaching into a component. `DEFAULT_SORT` **moved here
+  from `store/screenSlice.ts`** (which re-exports it) — it is a per-view default like
+  `DEFAULT_COLUMNS`, and `sanitizeSort` needs it below the store.
+- `src/store/screenSlice.ts` — `screens` / `activeScreenId` plus `screenState`,
+  `screenDirty`, `newScreen`, `saveScreen`, `saveScreenAs`, `loadScreen`, `renameScreen`,
+  `deleteScreen`, `setDefaultScreen`, `applyDefaultScreen`. `store.ts` gained no state: one
+  extra argument to `createScreenSlice` and one line in `init` (after the strategies load, so
+  a saved entry strategy resolves).
+- **Load order is the whole trick.** `loadScreen` sets the filters first (so the scan the
+  strategy setter starts already carries the saved floors, and there is exactly one scan),
+  then the strategy through `setSignalStrategy` — which moves the tab — and only then the
+  saved tab. A screen whose strategy has since been deleted loads with no strategy rather
+  than a scan that can only fail.
+- **`screenDirty` is a comparison, not `clausesActive`.** It diffs the live state against the
+  saved copy field by field (clause order included, key order not), so `Save` appears only
+  for a real change. Nothing loaded is never dirty — a draft is not a modified copy.
+- `src/components/filters/ScreenMenu.tsx` (new) — the screen name, a ▾ (New / Save /
+  Save as… / Rename… / Delete, then the saved list with a ★ for the start-up screen) and a
+  `Save` button that appears only when dirty. It **replaces the filter bar's explanatory
+  sentence** in the right-hand corner, as the plan called for; that sentence's content lives
+  in the `filters`, `filter-chip` and `market-cap` help cards.
+- Help: new `saved-screen` card on the name button — the last id the plan owed.
+
+The search box is deliberately **not** part of a screen: it is a lookup, not a filter worth
+naming. `filteredMatches` / `filteredNear` are still unused by the UI — phase 2 flagged the
+duplication, phase 3 kept the component's `useMemo` for the unfiltered totals, and phase 4
+did not need to disturb it either. That is now three phases of "later"; it belongs to
+whatever next touches `ScreenView.tsx`.
+
+### How to test
+- `npm run test` — new `lib/screen/storage.test.ts` (round-trip, corrupt JSON, an entry with
+  no identity, stale clauses/columns/sort keys, one default only, and what `screenStateEqual`
+  does and does not notice); `lib/screen/fields.test.ts` covers the two sanitizers;
+  `store.test.ts` covers save/dirty/load/delete/rename, the default screen at start-up, the
+  saved floors on the first scan, and a strategy that no longer exists
+- `npm run dev` — add a chip, sort a column, Save as… a name: the corner shows it with no
+  dot. Edit the chip and `Save` lights up; save, mark it ★, reload — the chips, sort, columns
+  and tab come back. Verified end to end, including a screen saved on the Entries tab, which
+  reloads with its strategy selected and the tab live.
+
+---
+
+## 2026-09-08 — Screener parity phase 3: view tabs and the docked chart
+
+### What changed
+The side-by-side split and the modal chart drawer are gone. The screener is now **one
+full-width table under three view tabs**, with the candlestick chart **docked beside the
+list** instead of covering it. Phase 3 of `docs/screener-parity-plan.md`.
+
+- `src/components/ScreenView.tsx` (was `FanLists.tsx`) — one component, one `ScreenTable`.
+  Tabs are **EMA fan · Close to fan · Entries**, each with its filtered count; Entries is
+  dead (and shows `—`) until an entry strategy is chosen. All three row sets are filtered on
+  every render, so switching tab is a repaint, never a re-screen. The card header keeps the
+  count sentence, the list's own rule and the ⚙; the "n of m shown" line now counts the
+  search box as filtering too, which the fan lists previously ignored.
+- **Two axes, deliberately not merged.** `ScreenView` (`'fan' | 'entries'`) stays the *table
+  shape* — the column set and sort, which `near` shares with `fan`. The new `ScreenTab`
+  (`'fan' | 'near' | 'entries'`) in `lib/screen/columns.ts` is the *row set*, i.e. the
+  visible tab, and `tableViewOf(tab)` maps one to the other. Phase 4's `SavedScreen.view` is
+  a `ScreenTab`.
+- `src/components/detail/DetailPanels.tsx` — `DetailOverlay` became **`DetailDock`**: a
+  resizable flex sibling of the table (no backdrop), so the list stays visible and clicking
+  another row swaps the symbol in place. Drag the left edge to resize; the chart's existing
+  `ResizeObserver` redraws it, and pointer moves are coalesced to one width per frame. Esc
+  or ✕ closes — unless a help card is up, which owns Escape first.
+- `src/lib/screen/dock.ts` (new) — `clampDockWidth` / `isNarrow` and the three constants.
+  The dock is at least 420 px and never squeezes the table below 520 px, so a width dragged
+  on a wide screen still fits a narrow one; **below 1100 px the panel falls back to the old
+  full-height overlay** with its click-outside backdrop. Kept pure so the drag handler, the
+  store and the tests share one rule.
+- `src/store/screenSlice.ts` — gains `view` and `dockWidth` (plus `setView` / `setDockWidth`).
+  `store.ts` gained no new state: its `setSignalStrategy` now moves the tab, since picking a
+  strategy should show its entries and clearing it should not leave an empty tab selected.
+  A tab that outlives what enabled it (a deleted strategy, a saved screen in phase 4) is
+  corrected at render — the visible tab is derived, not trusted.
+- Help: new `detail-dock` card on the drag handle; the tabs carry the existing `fan`,
+  `fan-near` and `live-entry` ids that used to sit on the two panel titles.
+
+**The plan's "rows per screen roughly doubles" expectation was wrong, and this is the place
+to say so.** The old split was two *side-by-side* panels, so each already ran the full height
+of the window: 27 rows at 34 px in a 1216 px-tall viewport, before and after. What the
+full-width table actually buys is width — the whole 15-column set is visible at once instead
+of scrolling sideways inside a half-width panel — and one list at a time with its own tab
+rather than two lists competing for the same glance. Vertical density is now a row-height
+question, not a layout one.
+
+### How to test
+- `npm run test` — new `lib/screen/dock.test.ts` (clamping, the list minimum, a NaN width,
+  the breakpoint boundary); `lib/screen/fields.test.ts` covers `tableViewOf`; `store.test.ts`
+  covers the default tab, the strategy select moving it, and the dock-width clamp
+- `npm run dev` — click a row: the chart docks right and the table stays scrollable; click
+  another row and the symbol swaps in place; drag the divider and the chart redraws; switch
+  tabs and the fan/near lists share their columns and sort while Entries brings its own;
+  pick a strategy and the tab follows, clear it and it goes back
+- Under 1100 px wide the panel goes back to covering the list — verify by narrowing the
+  window (temporarily raising `DOCK_BREAKPOINT` is the quick way on a large display)
+
+---
+
+## 2026-09-08 — Screener parity phase 2: filter clauses and chips
+
+### What changed
+The six fixed dropdowns are gone. Filters are now an **open list of clauses**, one per field,
+rendered as TradingView-style chips with free numeric ranges and a `+` that adds any
+filterable field in the registry. Phase 2 of `docs/screener-parity-plan.md`.
+
+- `src/lib/screen/filters.ts` (replaces `src/lib/filters.ts`) — the `Clause` model:
+  `range` (either bound optional) on any numeric field, `in` for the sector, `bars` for the
+  200-EMA slope. `applyClauses` / `filterRows` evaluate it, `clausesActive` tells the "n of m
+  shown" line whether to speak, and `signalFloorsOf` projects the three floors the `/signals`
+  scan still takes server-side. `DEFAULT_FILTERS` is the 1-month slope test alone, so the
+  out-of-the-box behaviour is unchanged.
+- **Units follow the field's `kind`, in one place.** A `ratio` field holds a fraction and its
+  chip is typed in percent — volatility `3` is stored as `0.03`; a `percent` field is already
+  in percent units, so `changePct` `2.5` stays `2.5`. `parseCompact` (new, in
+  `screen/format.ts` beside its inverse `fmtCompact`) reads `400K` / `1.2B`.
+- **A range clause drops rows whose value is missing**, whichever bound is set — NaN in
+  process, `null` after JSON, identically. A freshly listed name has no RSI to compare, and
+  silently keeping it would be the wrong answer. Sorting keeps the opposite convention on
+  purpose: missing sinks to the bottom but stays in the list. The `filter-chip` help card
+  says so, because a count that shrinks for an invisible reason is the confusing case.
+- `src/store/screenSlice.ts` (new) — `search`, `filters`, `columns`, `sort` and
+  `filteredMatches` / `filteredNear` moved out of `store.ts`, which keeps only the data and
+  async layer plus the slice import. The slice compares `signalFloorsOf` before and after
+  every filter change and re-runs the entries scan **only when a floor actually moved**, so a
+  sector or RSI chip is applied client-side with no round trip — the old hand-maintained
+  `scanKeys` list is gone.
+- `src/components/filters/` — `FilterChip.tsx` (the chip plus its editor: two bounds, quick
+  values, a sector checklist, the three slope lookbacks), `FieldPicker.tsx` (the `+`, with a
+  type-ahead) and `useDismiss.ts`. `FilterBar.tsx` keeps the entry-strategy select and
+  becomes the chip row. The old dropdown presets survive as one-click quick values; the
+  backtest modal still uses the preset arrays as selects.
+- Sector choices come from the loaded dataset: `fields.ts` gained `setSectorOptions`, wired
+  once to the store's facts, so `FieldDef.options` is no longer a declared-but-unimplemented
+  hole.
+- Help: new `filter-chip` card; the `filters` card now explains which three chips the entries
+  scan is given up front and why. Existing `data-help` ids (`min-price`, `avg-volume`,
+  `market-cap`, `sector`, `ema200-slope`) ride on the chips that replaced their dropdowns.
+
+The layout is still the two-panel split and the modal chart — that is phase 3.
+
+### How to test
+- `npm run test` — new `lib/screen/filters.test.ts` (every clause kind, open-ended ranges,
+  both percent conventions, `300M` / `1.2B` parsing, `signalFloorsOf`, and that the default
+  set reproduces the old dropdown behaviour); `src/store.test.ts` asserts the `/signals` body
+  carries floors derived from clauses and that a client-side clause does not re-scan
+- `npm run dev` — add Price 20–100, RSI 14 40–50 and Avg vol ≥ 400K as chips and watch the
+  count go "3 of 14 shown"; pick an entry strategy, change the slope chip (one `/signals`
+  request) then add a sector chip (none)
+- `curl -s -X POST http://localhost:8787/signals -H 'content-type: application/json'
+  -d '{"strategy":"tag50","minAvgVol":400000,"minMarketCap":0,"ema200RisingBars":21}'`
+
+---
+
+## 2026-09-08 — Screener parity phase 1: columns and sorting
+
+### What changed
+The screener tables stop being two hand-written CSS grids with a frozen column set. One
+`ScreenTable` now renders both the fan lists and the entries list, driven by a **field
+registry**, and every row carries an **indicator snapshot** so RSI, Stoch RSI, volatility
+and performance are screenable instead of chart-only. Phase 1 of
+`docs/screener-parity-plan.md`.
+
+- `src/lib/screen/snapshot.ts` — `IndicatorSnapshot` (volume, RSI 14, Stoch %K/%D, 1M/3M
+  performance, ATR%, 52-week high/low) built from the closes, volumes and highs/lows the
+  subject already holds. `FanRow` and `FanSignalRow` both gain `snapshot`, so `/screen` and
+  `/signals` carry it with no extra round trip. **NaN means "not computable"** — never a
+  placeholder 50 — so short histories sort last instead of looking neutral. Stoch RSI stays
+  missing until its whole 14-bar RSI window is real (2 × the period), which is where the old
+  `?? 50` fallback used to fabricate a zero.
+- `src/lib/screen/fields.ts` — one declaration per field drives the header label, width,
+  alignment, cell format, sort value and help topic. Units live in the field's `kind`:
+  `percent` is already in percent units (`changePct`), `ratio` is a fraction rendered as a
+  percent (`worstGap`, perf, ATR%), `compact` is 1.2M / 3.4B. Adding a column is adding a row
+  to the list; `GRID` / `SIG_GRID` are gone and the grid template is computed from the
+  visible columns.
+- `src/lib/screen/sort.ts` — `sortRows` over an injected accessor, so the entries list's own
+  columns (entry, stop, R, target window, age) sort through the same code as the fields.
+  Missing values sink to the bottom in **both** directions; ties break on the ticker.
+- `src/components/table/ScreenTable.tsx` + `ColumnChooser.tsx` — 34 px rows (was 44), a
+  sticky header that sorts on click, an `extra` block for the signal-only columns placed
+  after `Chg`, and a ⚙ checklist per list. Wider column sets scroll sideways inside the
+  panel. Column and sort state live in `store.ts` per view (`fan`, `entries`); the defaults
+  and the toggle are pure functions in `lib/screen/columns.ts`.
+- `atr14` moved from `strategy/primitives.ts` to `indicators.ts` (re-exported, so the engine's
+  imports are unchanged) — the snapshot needed it without importing the strategy layer.
+  `fmtCompact` moved to `lib/screen/format.ts`, likewise re-exported from `lib/filters.ts`.
+- New help cards: `rsi`, `stoch-rsi`, `volume`, `rel-vol`, `perf`, `atr-pct`, `week52`,
+  `column-chooser`. The `Stoch RSI` alias moved from the backtest panel's card to the
+  indicator's, where it belongs.
+- Removed the unused `@tanstack/react-table` dependency.
+
+The filter bar, the six dropdowns and the two-panel layout are untouched — those are phases
+2 and 3.
+
+### How to test
+- `npm run test` — new `lib/screen/{snapshot,sort,fields}.test.ts`, snapshot assertions in
+  `server/screen.test.ts` and `lib/fanSignals.test.ts`, sort/column state in `src/store.test.ts`
+- `npm run dev` — sort the fan list by Rel vol, then by RSI; the arrow shows on both panels
+  (they share the fan view's sort); hide the EMA columns from the ⚙ and Gap / RSI / Stoch
+  come into view; the header stays pinned while the list scrolls
+- `curl -s -X POST http://localhost:8787/screen -H 'content-type: application/json' -d '{}'`
+  — every row carries `snapshot`
+
+---
+
+## 2026-09-07 — Strategy builder replaces the fixed fan strategies
+
+### What changed
+A strategy is no longer one of eight hardcoded ids with its own detector in `fanBacktest.ts`. It is a
+**`StrategyDef`**: an ordered state machine of parameterized steps plus three editable trade rows
+(entry / stop / exit). The eight former strategies are built-in presets made of steps, and one engine
+serves the backtest, the live signal scan and the schematic example. This entry closes the four-phase
+plan in `docs/strategy-builder-plan.md`.
+
+- `src/lib/strategy/` — `types.ts` (the model), `primitives.ts` (predicates moved verbatim out of
+  `fanBacktest.ts`), `steps.ts` (the step-type registry: kind, holdability, defaults, a param schema
+  that drives *both* the parser's coercion and the builder's controls, and `compile`), `engine.ts`
+  (walks the steps bar by bar and records one mark per step), `trade.ts` (the R simulator, driven by
+  an `ExitSpec`), `presets.ts`, `parse.ts` (shared by server and localStorage), `example.ts`
+  (synthesises a sketch and runs the **real** engine over it) and `storage.ts`.
+- The backtest modal's strategy `<select>` is now `StrategyBuilder.tsx`: preset / saved picker with
+  Save · Save as · Reset · Delete, step cards (type, generated params, hold, max wait, reorder,
+  remove), an add-step menu, and the Entry / Stop / Exit rows — the Target, Max hold, breakeven and
+  MACD controls moved in from the modal. Custom strategies are saved in localStorage under
+  `stockScreener.strategies.v1` and are listed next to the presets in the filter bar; the signal scan
+  sends a preset as its id and a saved strategy as its definition.
+- Steps are typed by **kind**, which is what makes the machine composable: `candle` consumes a bar,
+  `instant` fires on the same bar as the step before it, `guard` must hold on the bar the previous
+  step fired, `tracker` fires once and then follows the swing high. A step marked *hold* is an
+  invariant — when it breaks, the machine resets to step 1.
+- Parity is exact: the new engine reproduces the old one's 14,899 entries across all eight presets —
+  same entry bar, price, stop, exit bar and exit reason.
+
+```mermaid
+flowchart LR
+  B[StrategyBuilder] -->|StrategyDef| S[(localStorage)]
+  B --> P[parseStrategyDef]
+  S --> P
+  H["POST /backtest · /signals"] --> P
+  P --> E[strategy/engine]
+  E --> BT[fanBacktest: scan · stats · cash book]
+  E --> SG[fanSignals: open entries]
+  E --> EX[strategy/example: schematic + per-step checks]
+```
+
+### How to test
+- `npm run typecheck`, `npm run test`, `npm run lint`
+- `npm run dev`, then **Backtest**: every preset draws an example with one mark per step and a ✓ list;
+  pick *New strategy…*, edit the steps, watch the schematic redraw, **Save**, reload — it is still in
+  the picker and in the filter bar's *Entry strategy* list; selecting it there scans the universe with
+  its definition; **Delete** falls back to the fan lists. Editing a preset marks it *edited* and can
+  only be kept via **Save as**. Add a step that cannot fire (e.g. *high below the 200-EMA* after a
+  50-EMA tag) and the right pane names the step that never completed.
+- ```bash
+  curl -s localhost:8787/backtest -H 'content-type: application/json' -d '{"strategy":"tag50","horizons":[5]}' | tail -1 | head -c 200
+  curl -s localhost:8787/backtest -H 'content-type: application/json' -d '{"strategy":{"steps":[]}}'   # 400 JSON
+  ```
+
+---
+
 ## 2026-09-04 — Retire the rule engine and the DAG layer
 
 ### What changed

@@ -6,28 +6,24 @@
 
 import { screenFanSignals, signalScanConfig } from '../src/lib/fanSignals.ts';
 import type { FanSignalRow, FanSignalSubject } from '../src/lib/fanSignals.ts';
-import type { FanBacktestConfig, FanStrategyId } from '../src/lib/fanBacktest.ts';
+import type { FanBacktestConfig } from '../src/lib/fanBacktest.ts';
 import type { Stock } from '../src/lib/market.ts';
+import { RequestError } from './handlers.ts';
+import { parseStrategyField } from './fanBacktest.ts';
 
 export type { FanSignalRow };
 
-const STRATS: FanStrategyId[] = ['onset', 'cross', 'tag18', 'tag50', 'structure', 'dual_ema', 'bunn_bounce', 'bunn_cont'];
-
-export function isFanStrategyId(v: unknown): v is FanStrategyId {
-  return typeof v === 'string' && (STRATS as string[]).includes(v);
-}
-
-/** Parse the /signals body into a scan config. Throws-free: caller validates strategy. */
-export function parseFanSignalsBody(body: unknown): { strategy: FanStrategyId; config: FanBacktestConfig } | null {
+/** Parse the /signals body into a scan config. Throws RequestError on a missing or invalid strategy. */
+export function parseFanSignalsBody(body: unknown): FanBacktestConfig {
   const b = (body && typeof body === 'object') ? body as Record<string, unknown> : {};
-  if (!isFanStrategyId(b.strategy)) return null;
+  if (b.strategy === undefined || b.strategy === '') throw new RequestError('unknown or missing strategy');
+  const strategy = parseStrategyField(b.strategy);
   const num = (v: unknown, d = 0) => (typeof v === 'number' && v >= 0 ? v : d);
-  const config = signalScanConfig(b.strategy, {
+  return signalScanConfig(strategy, {
     minAvgVol: num(b.minAvgVol),
     minMarketCap: num(b.minMarketCap),
     ema200RisingBars: Math.floor(num(b.ema200RisingBars, 21)),
   });
-  return { strategy: b.strategy, config };
 }
 
 function subjectFromStock(s: Stock): FanSignalSubject {

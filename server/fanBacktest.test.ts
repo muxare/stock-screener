@@ -3,6 +3,8 @@ import { syntheticProvider } from '../src/lib/data/synthetic.ts';
 import { createUniverseStore } from './universe.ts';
 import { runFanBacktest, parseFanBacktestBody } from './fanBacktest.ts';
 import { createScreenServer } from './index.ts';
+import { RequestError } from './handlers.ts';
+import { presetById } from '../src/lib/strategy/presets.ts';
 
 const store = createUniverseStore(syntheticProvider(7));
 
@@ -11,62 +13,33 @@ beforeAll(() => {
 });
 
 describe('parseFanBacktestBody', () => {
-  it('defaults missing fields to 50-EMA tag + trail 50', () => {
+  it('defaults a missing strategy to the 50-EMA tag preset', () => {
     const cfg = parseFanBacktestBody({});
-    expect(cfg.strategy).toBe('tag50');
-    expect(cfg.targetR).toBe(3);
-    expect(cfg.macdWindow).toBe(false);
-    expect(cfg.continueEpisode).toBe(true);
-    expect(cfg.breakevenAtR).toBe(1);
-    expect(cfg.trailEma).toBe(50);
-    expect(cfg.targetWindow).toBe(false);
-    expect(cfg.trailPivot).toBeFalsy();
+    expect(cfg.strategy.id).toBe('tag50');
+    expect(cfg.strategy.trade.exit.trailEma).toBe(50);
+    expect(cfg.strategy.trade.exit.breakevenAtR).toBe(1);
+    expect(cfg.horizons).toEqual([5, 10, 20, 40]);
   });
 
-  it('accepts an explicit hard target that turns the trail off', () => {
-    const cfg = parseFanBacktestBody({ strategy: 'structure', trailEma: null, macdWindow: true, targetR: 3 });
-    expect(cfg.strategy).toBe('structure');
-    expect(cfg.trailEma).toBeNull();
-    expect(cfg.macdWindow).toBe(true);
-  });
-
-  it('accepts tag18 and a 50-EMA trail', () => {
-    const cfg = parseFanBacktestBody({ strategy: 'tag18', trailEma: 50, breakevenAtR: 1 });
-    expect(cfg.strategy).toBe('tag18');
-    expect(cfg.trailEma).toBe(50);
-    expect(cfg.breakevenAtR).toBe(1);
-  });
-
-  it('accepts bunn_bounce without changing the default trail', () => {
-    const cfg = parseFanBacktestBody({ strategy: 'bunn_bounce' });
-    expect(cfg.strategy).toBe('bunn_bounce');
-    expect(cfg.trailEma).toBe(50);
-  });
-
-  it('accepts bunn_cont', () => {
-    const cfg = parseFanBacktestBody({ strategy: 'bunn_cont' });
-    expect(cfg.strategy).toBe('bunn_cont');
-    expect(cfg.trailEma).toBe(50);
-  });
-
-  it('accepts the 2.5–3R target window and turns the trail off', () => {
-    const cfg = parseFanBacktestBody({ trailEma: null, targetWindow: true });
-    expect(cfg.targetWindow).toBe(true);
-    expect(cfg.trailEma).toBeNull();
-  });
-
-  it('accepts trailPivot and turns the EMA trail off', () => {
-    const cfg = parseFanBacktestBody({ trailPivot: true });
-    expect(cfg.trailPivot).toBe(true);
-    expect(cfg.trailEma).toBeNull();
-    expect(cfg.targetWindow).toBe(false);
-  });
-
-  it('maps legacy entry=match to onset and accepts custom horizons', () => {
-    const cfg = parseFanBacktestBody({ entry: 'match', horizons: [5, 15], macdWindow: false });
-    expect(cfg.strategy).toBe('onset');
+  it('accepts a preset id', () => {
+    const cfg = parseFanBacktestBody({ strategy: 'bunn_cont', horizons: [5, 15] });
+    expect(cfg.strategy).toEqual(presetById('bunn_cont'));
     expect(cfg.horizons).toEqual([5, 15]);
-    expect(cfg.macdWindow).toBe(false);
+  });
+
+  it('accepts a definition object', () => {
+    const def = { id: 'mine', name: 'Mine', steps: [{ id: 'a', type: 'fan_up', mode: 'slow', hold: true }], trade: { exit: { trailEma: null, targetR: 2 } } };
+    const cfg = parseFanBacktestBody({ strategy: def });
+    expect(cfg.strategy.id).toBe('mine');
+    expect(cfg.strategy.steps[0]).toMatchObject({ type: 'fan_up', mode: 'slow', hold: true });
+    expect(cfg.strategy.trade.exit.trailEma).toBeNull();
+    expect(cfg.strategy.trade.exit.targetR).toBe(2);
+  });
+
+  it('rejects an unknown preset id and an invalid definition as RequestError', () => {
+    expect(() => parseFanBacktestBody({ strategy: 'nope' })).toThrow(RequestError);
+    expect(() => parseFanBacktestBody({ strategy: { steps: [] } })).toThrow(RequestError);
+    expect(() => parseFanBacktestBody({ strategy: { steps: [{ type: 'ema_tag', hold: true }] } })).toThrow(RequestError);
   });
 
   it('forwards volume and market-cap floors', () => {
@@ -100,9 +73,7 @@ describe('parseFanBacktestBody', () => {
 
 describe('runFanBacktest', () => {
   it('returns entries and trade summary for synthetic universe (onset baseline)', () => {
-    const res = runFanBacktest(store.get(), {
-      strategy: 'onset', entry: 'match', targetR: 3, macdWindow: false, maxHoldBars: 60, horizons: [5, 10],
-    });
+    const res = runFanBacktest(store.get(), { strategy: presetById('onset'), horizons: [5, 10] });
     expect(res.universe).toBe(44);
     expect(res.totalEntries).toBeGreaterThan(0);
     expect(res.forwardHorizons.length).toBe(2);
@@ -119,7 +90,7 @@ describe('POST /backtest NDJSON', () => {
     const r = await fetch(`http://127.0.0.1:${port}/backtest`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ strategy: 'onset', macdWindow: false, horizons: [5] }),
+      body: JSON.stringify({ strategy: 'onset', horizons: [5] }),
     });
     expect(r.status).toBe(200);
     expect(r.headers.get('content-type')).toContain('ndjson');
@@ -128,6 +99,45 @@ describe('POST /backtest NDJSON', () => {
     expect(lines.some((l) => l.type === 'progress')).toBe(true);
     const result = lines.find((l) => l.type === 'result');
     expect(result?.totalEntries).toBeGreaterThan(0);
+    expect(result?.config.strategy.id).toBe('onset');
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  it('returns a JSON 400 for an invalid strategy definition', async () => {
+    const server = createScreenServer(store);
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const addr = server.address();
+    const port = typeof addr === 'object' && addr ? addr.port : 0;
+    const r = await fetch(`http://127.0.0.1:${port}/backtest`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ strategy: { steps: [] } }),
+    });
+    expect(r.status).toBe(400);
+    expect(((await r.json()) as { error: string }).error).toMatch(/at least one step/);
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+});
+
+describe('POST /signals', () => {
+  it('accepts a preset id or a definition and rejects a missing strategy', async () => {
+    const server = createScreenServer(store);
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const addr = server.address();
+    const port = typeof addr === 'object' && addr ? addr.port : 0;
+    const post = (body: unknown) => fetch(`http://127.0.0.1:${port}/signals`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+    const preset = await post({ strategy: 'onset' });
+    expect(preset.status).toBe(200);
+    const pj = (await preset.json()) as { strategy: string; strategyName: string; rows: unknown[] };
+    expect(pj.strategy).toBe('onset');
+    expect(pj.strategyName).toMatch(/onset/i);
+    const custom = await post({ strategy: { id: 'mine', name: 'Mine', steps: [{ id: 'a', type: 'fan_onset' }] } });
+    expect(custom.status).toBe(200);
+    expect(((await custom.json()) as { strategy: string }).strategy).toBe('mine');
+    const missing = await post({});
+    expect(missing.status).toBe(400);
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 });

@@ -1,0 +1,183 @@
+/* Help cards — the hover / pin documentation layer. */
+
+.help-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  pointer-events: none;
+}
+
+.help-card {
+  position: fixed;
+  width: 330px;
+  max-width: calc(100vw - 16px);
+  pointer-events: auto;
+  background: #1f2428;
+  color: #e6e8eb;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 10px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.25);
+  font-size: 12.5px;
+  line-height: 1.5;
+  animation: popin 0.12s ease-out;
+  -webkit-font-smoothing: antialiased;
+}
+/* A hover card is a passing answer, not a panel, so it stays slightly
+   see-through: the number it landed next to is still readable underneath it,
+   and it goes solid the moment the pointer enters it to read or pin it. A
+   pinned card was parked deliberately and stays opaque. */
+.help-card:not(.is-pinned) {
+  opacity: 0.92;
+  animation: help-popin 0.12s ease-out;
+  transition: opacity 0.1s ease-out;
+}
+.help-card:not(.is-pinned):hover { opacity: 1; }
+@keyframes help-popin {
+  from { transform: translateY(10px) scale(0.98); opacity: 0; }
+  to { transform: none; opacity: 0.92; }
+}
+
+.help-card.is-pinned {
+  border-color: rgba(126, 226, 184, 0.45);
+  box-shadow: 0 0 0 1px rgba(126, 226, 184, 0.15), 0 18px 48px rgba(0, 0, 0, 0.4);
+}
+.help-card.is-measuring { visibility: hidden; animation: none; }
+
+.help-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  user-select: none;
+}
+.is-pinned .help-card__head { cursor: grab; }
+.is-pinned .help-card__head:active { cursor: grabbing; }
+.help-card__title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.01em;
+}
+.help-card__kind {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: #1f2428;
+  background: #9aa4ad;
+  flex-shrink: 0;
+}
+.help-card__btn {
+  border: 0;
+  background: transparent;
+  color: #9aa4ad;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0;
+  font-family: inherit;
+  flex-shrink: 0;
+}
+.help-card__btn:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+
+.help-card__body {
+  padding: 9px 12px 10px;
+  max-height: 46vh;
+  overflow: auto;
+}
+.help-card__body p { margin: 0 0 8px; }
+.help-card__body p:last-child, .help-card__body ul:last-child { margin-bottom: 0; }
+.help-card__body ul { margin: 0 0 8px; padding-left: 18px; }
+.help-card__body li { margin: 2px 0; }
+.help-card__body::-webkit-scrollbar-thumb { background: #3a4249; border-color: #1f2428; }
+
+.help-term {
+  color: #7ee2b8;
+  font-weight: 600;
+  border-bottom: 1px dotted rgba(126, 226, 184, 0.6);
+  cursor: help;
+  transition: background 0.1s;
+  border-radius: 2px;
+}
+.help-term:hover { background: rgba(126, 226, 184, 0.14); }
+
+.help-card__related {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 0 12px 10px;
+}
+.help-card__chip {
+  font-size: 11px;
+  font-weight: 600;
+  color: #c9d1d8;
+  padding: 2px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  cursor: help;
+}
+.help-card__chip:hover { border-color: #7ee2b8; color: #7ee2b8; }
+
+.help-card__foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  font-size: 10.5px;
+  color: #8b959e;
+  user-select: none;
+}
+.help-card kbd {
+  display: inline-block;
+  min-width: 16px;
+  padding: 0 4px;
+  margin-right: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  color: #d5dbe0;
+  text-align: center;
+  line-height: 15px;
+}
+
+/* The whisper — the gesture, mentioned beside the pointer when a target has
+   been sat on long enough to be a question. Deliberately not a panel: it is a
+   caption on the app, so the halo does the work a background would. */
+.help-whisper {
+  position: fixed;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: #5b6168;
+  white-space: nowrap;
+  text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 7px #fff, 0 1px 2px rgba(255, 255, 255, 0.9);
+  animation: sd-fade 0.14s ease-out;
+}
+.help-whisper b { color: #06865a; font-weight: 700; }
+
+/* The instance line — what a chart card knows that the glossary cannot: the
+   bar this mark printed on and why it qualified. Above the body, because it is
+   the answer to the question that was asked; the topic below it is the
+   background. */
+.help-card__instance {
+  margin: 9px 12px 0;
+  padding: 6px 9px;
+  border-radius: 6px;
+  background: rgba(126, 226, 184, 0.1);
+  border-left: 2px solid rgba(126, 226, 184, 0.55);
+  color: #cfe8dd;
+  font-size: 11.5px;
+  line-height: 1.45;
+}

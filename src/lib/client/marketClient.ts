@@ -20,7 +20,8 @@
 
 import type { InstrumentBars } from '../market';
 import type { FanRow } from '../fan';
-import type { FanBacktestConfig, FanBacktestProgress, FanBacktestResult, FanStrategyId } from '../fanBacktest';
+import type { FanBacktestConfig, FanBacktestProgress, FanBacktestResult } from '../fanBacktest';
+import type { StrategyDef } from '../strategy/types';
 import type { FanSignalRow } from '../fanSignals';
 
 export type { FanRow };
@@ -35,9 +36,10 @@ export interface ScreenResp {
 }
 
 // Live "current entry" screen (per strategy). The client carries the strategy
-// and the universe floors the server reuses to build the scan config.
+// (a preset id, or the full definition of a saved custom strategy) and the
+// universe floors the server reuses to build the scan config.
 export interface SignalsRequest {
-  strategy: FanStrategyId;
+  strategy: string | StrategyDef;
   minAvgVol?: number;
   minMarketCap?: number;
   ema200RisingBars?: number;
@@ -45,7 +47,8 @@ export interface SignalsRequest {
 export interface SignalsResp {
   universe: number;
   elapsedMs: number;
-  strategy: FanStrategyId;
+  strategy: string;
+  strategyName: string;
   rows: FanSignalRow[];
 }
 

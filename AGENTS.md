@@ -31,21 +31,21 @@ Run `npm run test` and `npm run lint` before considering any change done.
   `src/components/` the UI.
 - `server/` — API + dev dataset handlers, screening/backtest logic.
 - `tools/` — data-import scripts (eod-import, yahoo-fetch).
-- `backlog/` — the project's work items and architecture (see the workflow below).
-- `workflow/` — the agentic sprint/board system. **Read `workflow/AGENTS.md` before
-  touching anything under `workflow/` or `backlog/`.**
+- `docs/` — `development-diary.md` (the running record of what changed and why) and
+  per-feature implementation plans (`strategy-builder-plan.md`, `screener-parity-plan.md`).
 
 ## Conventions
-- TypeScript throughout; keep changes within a story's declared **Touch scope**.
+- TypeScript throughout; keep changes within the plan's declared **Touch scope**.
 - Prefer editing existing modules over adding new ones; watch the size/coupling of
   `src/store.ts` and `src/lib/fanBacktest.ts`.
 - Async/error-state discipline is the known rework class — handle loading/error
   paths explicitly.
 
 ## How work is governed (short version)
-This repo runs a lightweight agentic Scrum. **Disk is the source of truth**
-(`backlog/board/` folders + frontmatter); the conversation is disposable and the
-`SessionStart` hook re-injects the live sprint/WIP state, so you never hand-maintain
-"where we are" here. The board is mutated **only** through `workflow/tools/board.py`
-(hooks block manual file moves). Run `python3 workflow/tools/board.py status` to see
-where things stand and the next step. Full rules: **`workflow/AGENTS.md`**.
+There is no sprint board any more (removed 2026-09-04, commit a45325d). Work is driven
+from **`docs/development-diary.md`** and plain git history:
+- Non-trivial features start as a plan in `docs/<feature>-plan.md` with phases, touch
+  scope, tests and verification steps. Work one phase per branch/PR.
+- When a phase or feature lands, add a dated entry to the diary (what changed, where it
+  lives, how to test) and mark the plan's status line.
+- Run `git log --oneline` and read the latest diary entry to find out where things stand.

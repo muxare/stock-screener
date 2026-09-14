@@ -70,12 +70,8 @@ export function useChartViewport(total: number, initial: Viewport) {
     setState((s) => ({ ...s, view: s.def }));
   }, []);
 
-  const setRange = useCallback((from: number, to: number) => {
-    setState((s) => ({ ...s, view: clampView(from, to, total) }));
-  }, [total]);
-
   const view = state.view;
   const isDefault = view.from === state.def.from && view.to === state.def.to;
 
-  return { view, zoomAtBar, panByBars, setRange, reset, isDefault };
+  return { view, zoomAtBar, panByBars, reset, isDefault };
 }

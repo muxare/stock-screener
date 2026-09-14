@@ -1,26 +1,27 @@
 // fanSignals.ts — live "current entry" screen.
 //
-// Reuses the fan-strategy detector (fanBacktest.findFanEntries) and surfaces the
-// ONE entry per name whose simulated trade is still open on the latest bar —
-// i.e. it entered and has not yet tagged the stop or the target. That is a
-// live, actionable setup: entry price, 1R stop, and a 2.5–3R exit window.
+// Reuses the strategy engine (strategy/engine.ts) and surfaces the ONE entry
+// per name whose simulated trade is still open on the latest bar — i.e. it
+// entered and has not yet tagged the stop or the target. That is a live,
+// actionable setup: entry price, 1R stop, and a 2.5–3R exit window.
 //
 // The scan runs a deliberately un-managed trade (hard 3R target, no trail/
 // breakeven, no max hold) so "open" means exactly "price is still between the
 // initial stop and the target while the fan holds" — nothing fancier.
 
 import {
-  findFanEntries,
+  findStrategyEntries,
   passesFanUniverseFilters,
   BUNN_WINDOW_LO,
   BUNN_WINDOW_HI,
   DEFAULT_FAN_BACKTEST_CONFIG,
-  FAN_STRATEGIES,
   type FanBacktestConfig,
   type FanBacktestSubject,
   type FanEntryEvent,
-  type FanStrategyId,
 } from './fanBacktest.ts';
+import type { StrategyDef } from './strategy/types.ts';
+import { buildSnapshot, type IndicatorSnapshot } from './screen/snapshot.ts';
+import { filterRows, type ScreenFilters } from './screen/filters.ts';
 
 /** Displayed exit window, in R multiples of the initial risk. */
 export const SIGNAL_TARGET_LO_R = BUNN_WINDOW_LO; // 2.5
@@ -40,7 +41,8 @@ export interface FanSignalRow {
   sector: string;
   price: number;
   changePct: number;
-  strategy: FanStrategyId;
+  /** Strategy id (preset or saved). */
+  strategy: string;
   /** Calendar date of the entry bar when the subject carries dates. */
   entryDate: string | null;
   /** Bars between the entry and the latest bar (0 = entered on the last bar). */
@@ -60,33 +62,39 @@ export interface FanSignalRow {
   avgVol20: number;
   marketCap: number | null;
   sparkline: number[];
-}
-
-/** Human label for a strategy id (falls back to the id when unknown). */
-export function strategyLabel(id: FanStrategyId): string {
-  return FAN_STRATEGIES.find((s) => s.id === id)?.label ?? id;
+  /** Same last-bar snapshot the fan rows carry, so both tables share columns. */
+  snapshot: IndicatorSnapshot;
 }
 
 /**
- * Build the scan config for the live-entry screen: the chosen strategy, the
- * universe filters carried from the main filter bar (volume / cap / 200-EMA
- * slope), and a fixed, un-managed 3R trade so "open" is unambiguous.
+ * Build the scan config for the live-entry screen: the chosen strategy with its
+ * exit management replaced by a fixed, un-managed 3R trade (its fan-break exit
+ * is kept), plus the universe filters carried from the main filter bar
+ * (volume / cap / 200-EMA slope).
  */
 export function signalScanConfig(
-  strategy: FanStrategyId,
+  def: StrategyDef,
   filters: Pick<FanBacktestConfig, 'minAvgVol' | 'minMarketCap' | 'ema200RisingBars'> = {},
 ): FanBacktestConfig {
+  const strategy: StrategyDef = {
+    ...def,
+    trade: {
+      ...def.trade,
+      exit: {
+        targetR: SIGNAL_TARGET_HI_R,
+        targetWindow: false,
+        trailEma: null,
+        trailPivot: false,
+        breakevenAtR: null,
+        maxHoldBars: null,
+        macdExit: false,
+        fanExit: def.trade.exit.fanExit,
+      },
+    },
+  };
   return {
     ...DEFAULT_FAN_BACKTEST_CONFIG,
     strategy,
-    entry: 'match',
-    targetR: SIGNAL_TARGET_HI_R,
-    targetWindow: false,
-    trailEma: null,
-    trailPivot: false,
-    breakevenAtR: null,
-    macdWindow: false,
-    maxHoldBars: null,
     minAvgVol: filters.minAvgVol ?? 0,
     minMarketCap: filters.minMarketCap ?? 0,
     ema200RisingBars: filters.ema200RisingBars ?? DEFAULT_FAN_BACKTEST_CONFIG.ema200RisingBars,
@@ -119,7 +127,7 @@ export function signalRowFromEntry(
     sector: s.sector,
     price: s.price,
     changePct: s.changePct,
-    strategy: e.strategy,
+    strategy: e.strategyId,
     entryDate: e.date,
     barsAgo: Math.max(0, seriesLength - 1 - e.barIndex),
     entryPrice,
@@ -134,6 +142,12 @@ export function signalRowFromEntry(
     avgVol20: s.avgVol20 ?? 0,
     marketCap: s.marketCap ?? null,
     sparkline: s.sparkline ?? [],
+    snapshot: buildSnapshot({
+      closes: s.closes,
+      volumes: s.volumes,
+      highs: s.highs,
+      lows: s.lows,
+    }),
   };
 }
 
@@ -145,7 +159,7 @@ function byFreshnessThenTicker(a: FanSignalRow, b: FanSignalRow): number {
 /**
  * Scan a universe for names with a live open entry under `config.strategy`.
  * Volume / cap floors are applied here; the 200-EMA slope is enforced by the
- * detector at the fill (config.ema200RisingBars).
+ * engine at the fill (config.ema200RisingBars).
  */
 export function screenFanSignals(
   subjects: FanSignalSubject[],
@@ -154,7 +168,7 @@ export function screenFanSignals(
   const out: FanSignalRow[] = [];
   for (const s of subjects) {
     if (!passesFanUniverseFilters(s, config)) continue;
-    const open = currentOpenEntry(findFanEntries(s, config));
+    const open = currentOpenEntry(findStrategyEntries(s, config));
     if (!open) continue;
     const row = signalRowFromEntry(s, open, s.closes.length);
     if (row) out.push(row);
@@ -171,18 +185,17 @@ export function fmtTargetWindow(row: FanSignalRow): string {
   return `${row.targetLoPrice.toFixed(2)}–${row.targetHiPrice.toFixed(2)} (${r})`;
 }
 
-/** Client-side facets the detector does not apply: sector, min price, search. */
+/**
+ * The clauses the scan could not apply itself. `signalFloorsOf` already sent
+ * volume / cap / slope to the server, so re-testing them here is a no-op; every
+ * other chip — sector, price, RSI, Stoch, performance — lands here. Signal rows
+ * carry no `ema200Ago`, so the slope clause passes them through (the engine
+ * enforced it at the fill).
+ */
 export function filterSignalRows(
   rows: FanSignalRow[],
   search: string,
-  sector: string,
-  minPrice: number,
+  filters: ScreenFilters,
 ): FanSignalRow[] {
-  const q = search.trim().toLowerCase();
-  return rows.filter((r) => {
-    if (sector && r.sector !== sector) return false;
-    if (minPrice > 0 && (!Number.isFinite(r.price) || r.price < minPrice)) return false;
-    if (q && !r.ticker.toLowerCase().includes(q) && !r.name.toLowerCase().includes(q)) return false;
-    return true;
-  });
+  return filterRows(rows, search, filters);
 }

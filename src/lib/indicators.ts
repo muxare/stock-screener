@@ -12,6 +12,7 @@
 //          values have accumulated, the true mean afterwards.
 //   rsi  — Wilder smoothing; the first `period` bars are backfilled with the
 //          first computed value (50 when the series is too short).
+//   atr14 — Wilder true range, EMA-smoothed.
 //   stochRsi / macd — composites over the above.
 
 export function ema(values: number[], period: number): number[] {
@@ -91,6 +92,19 @@ export function macd(closes: number[]): { line: number[]; signal: number[]; hist
   const signal = ema(line, 9);
   const hist = line.map((v, i) => v - signal[i]);
   return { line, signal, hist };
+}
+
+/**
+ * Wilder-style ATR(14) over the true range, smoothed with `ema`. Bar 0's true
+ * range is the bar's own high−low (there is no previous close); the output is
+ * full-length, like `ema`.
+ */
+export function atr14(h: number[], l: number[], c: number[]): number[] {
+  const tr = c.map((_, i) => {
+    if (i === 0) return Math.max(h[0] - l[0], 0);
+    return Math.max(h[i] - l[i], Math.abs(h[i] - c[i - 1]), Math.abs(l[i] - c[i - 1]));
+  });
+  return ema(tr, 14);
 }
 
 // EMA window choices offered in the custom-rule builder

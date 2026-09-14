@@ -1,68 +1,60 @@
-// fanBacktest.ts — fan-episode detection + 1R/3R trade simulation.
+// fanBacktest.ts — fan-strategy backtest: universe scan, trade statistics,
+// swing-account replay and trade stories.
 //
-// Strategies (long-only):
-//   onset     — first bar of 18>50>100>200 (baseline)
-//   cross     — 18 crosses up 50 while 50>100>200
-//   tag18     — bounce off the 18 after that cross (bone zone)
-//   tag50     — 50-EMA tag after the cross, ≤2 lower lows
-//   structure — tag50 + reversal/rejection + 18-50 MACD window
-//   dual_ema  — structure that tags both 18 and 50
-//   bunn_bounce — fan-intact reversal on 50/100/200; buy stop 2¢ above the bar
-//   bunn_cont   — 18 adversely crosses 50, bounce on 100/200, buy stop when the fan resumes
+// Entry detection lives in strategy/engine.ts: a strategy is a StrategyDef (an
+// ordered state machine of steps plus entry / stop / exit rows, see
+// strategy/types.ts). The eight former fixed strategies are presets built from
+// those steps (strategy/presets.ts). This module keeps the parts that do not
+// depend on how an entry was found — filters, aggregation, the cash book, and
+// the exit narratives — and re-exports the primitives and the trade simulator
+// so older imports keep resolving.
 //
-// Risk: 1R stop under the pullback / 50-EMA, padded by 0.25 ATR(14). Default
-// management: move stop to breakeven at 1R, then trail the 50. MACD window is
-// an entry filter only while trailing (it used to cut the trail). Continuation:
-// another pullback after a new swing high, one open trade at a time.
-// Swing account: last N months of those fills, sized at risk% of equity / 1R,
+// Swing account: last N months of the fills, sized at risk% of equity / 1R,
 // capped concurrent names, until the window ends or equity hits zero.
 // Illustrative only — no costs, slippage, or gap handling.
 
-import { classifyFanAtIndex, ema200RisingAt, FAN_ENTER_LOOKBACK, type FanStatus } from './fan.ts';
-import { ema, rsi, macd as classicMacd, stochRsi } from './indicators.ts';
 import type { HorizonStat } from './market.ts';
+import { findStrategyEntries } from './strategy/engine.ts';
+import { presetById } from './strategy/presets.ts';
+import type { FanEntryIndicators } from './strategy/primitives.ts';
+import type { FanSimulatedTrade, FanTradeExitReason } from './strategy/trade.ts';
+import type { StrategyDef, StrategyMark } from './strategy/types.ts';
 
-export type FanStrategyId = 'onset' | 'cross' | 'tag18' | 'tag50' | 'structure' | 'dual_ema' | 'bunn_bounce' | 'bunn_cont';
-/** Course “two pennies” offset for bounce buy-stops and stop wiggle. */
-export const BUNN_PENNY = 0.02;
-/** Mechanical target-window floor (exit). Cap 3R is unused for fill. */
-export const BUNN_WINDOW_LO = 2.5;
-export const BUNN_WINDOW_HI = 3;
-export type FanEntrySignal = 'near' | 'match';
-
-export const FAN_STRATEGIES: { id: FanStrategyId; label: string; hint: string }[] = [
-  { id: 'onset', label: 'Fan onset (baseline)', hint: 'First bar the full 18>50>100>200 stack appears.' },
-  { id: 'cross', label: 'Continuation cross', hint: '18 crosses up through 50 while 50>100>200 holds.' },
-  { id: 'tag18', label: '18-EMA tag (bone zone)', hint: 'Pullback tags the 18 and closes back above it while the stack holds.' },
-  { id: 'tag50', label: '50-EMA tag', hint: 'Bounce off the 50 after the cross; 0–2 lower lows, 50 still rising, 18>50>100>200.' },
-  { id: 'structure', label: 'Full structure', hint: '50-tag + reversal or rejection wick + 18-50 MACD still favorable.' },
-  { id: 'dual_ema', label: 'Dual-EMA test', hint: 'Full structure that trades through both 18 and 50.' },
-  { id: 'bunn_bounce', label: 'Bunn bounce', hint: 'Fan-intact reversal on the 50, 100, or 200; buy stop 2¢ above the trigger; R = bar height + 2¢.' },
-  { id: 'bunn_cont', label: 'Bunn continuation', hint: '18 adversely crosses 50, reversal bounce on 100 or 200, then buy stop 2¢ above the bar that resumes the full fan.' },
-];
+export {
+  BUNN_PENNY,
+  BUNN_WINDOW_LO,
+  BUNN_WINDOW_HI,
+  EMA_WARM,
+  MIN_R_FRAC,
+  macd1850,
+  slowFanUp,
+  fullFanUp,
+  crossUp,
+  crossDown,
+  crossUp18_50,
+  crossDown18_50,
+  isLongReversal,
+  isBunnLongReversal,
+  isLongPivotCandidate,
+  longPivotConfirmBar,
+  lastConfirmedPivotLow,
+  isMaBounce,
+  atr14,
+  slopeUp,
+  statusAt,
+  macdFav,
+  snapshotIndicators,
+} from './strategy/primitives.ts';
+export type { FanEntryIndicators } from './strategy/primitives.ts';
+export { simulateRTrade } from './strategy/trade.ts';
+export type { FanSimulatedTrade, FanTradeExitReason } from './strategy/trade.ts';
+export { findStrategyEntries, runStrategy } from './strategy/engine.ts';
+export type { StrategyDef, StrategyMark, StepKind, Step, EntrySpec, StopSpec, ExitSpec } from './strategy/types.ts';
 
 export interface FanBacktestConfig {
-  strategy: FanStrategyId;
-  /** Used only by onset (match vs approaching). */
-  entry: FanEntrySignal;
-  /** Target as a multiple of 1R. Ignored when trailEma is set. */
-  targetR: number;
-  /** Require 18-50 MACD line > signal on entry. Also exits on a flip unless trailing. */
-  macdWindow: boolean;
-  maxHoldBars: number | null;
+  /** The step machine + trade rows. Presets: strategy/presets.ts. */
+  strategy: StrategyDef;
   horizons: number[];
-  /** Another pullback after a new swing high in the same slow-fan episode. Default true. */
-  continueEpisode?: boolean;
-  /** Move stop to entry once unrealized R reaches this. Default 1. null = off. */
-  breakevenAtR?: number | null;
-  /** After breakeven, trail under this EMA. null = hard targetR instead. */
-  trailEma?: 18 | 50 | null;
-  /** Exit at 2.5R (course window floor). Ignored when trailEma or trailPivot is set. Default false. */
-  targetWindow?: boolean;
-  /** After entry, trail 2¢ under newly confirmed pivot lows. Mutually exclusive with trailEma. Default false. */
-  trailPivot?: boolean;
-  /** ATR(14) fraction padded under the structural stop. Default 0.25. */
-  stopAtrMult?: number;
   /** Same 20d avg-volume floor as the main filter bar. 0 = any. */
   minAvgVol?: number;
   /** Same market-cap floor as the main filter bar. 0 = any. Unknown cap fails. */
@@ -83,18 +75,8 @@ export interface FanBacktestConfig {
 }
 
 export const DEFAULT_FAN_BACKTEST_CONFIG: FanBacktestConfig = {
-  strategy: 'tag50',
-  entry: 'match',
-  targetR: 3,
-  macdWindow: false,
-  maxHoldBars: 20,
+  strategy: presetById('tag50'),
   horizons: [5, 10, 20, 40],
-  continueEpisode: true,
-  breakevenAtR: 1,
-  trailEma: 50,
-  targetWindow: false,
-  trailPivot: false,
-  stopAtrMult: 0.25,
   minAvgVol: 0,
   minMarketCap: 0,
   ema200RisingBars: 21,
@@ -104,63 +86,31 @@ export const DEFAULT_FAN_BACKTEST_CONFIG: FanBacktestConfig = {
   windowMonths: 3,
 };
 
-export type FanTradeExitReason =
-  | 'stop_r'
-  | 'target_r'
-  | 'target_window'
-  | 'breakeven'
-  | 'trail'
-  | 'pivot_trail'
-  | 'macd_window'
-  | 'slow_fan_break'
-  | 'fan_break'
-  | 'max_hold'
-  | 'end_of_data';
-
-export interface FanSimulatedTrade {
-  entryBar: number;
-  exitBar: number;
-  entryPrice: number;
-  exitPrice: number;
-  stopPrice: number;
-  targetPrice: number;
-  returnPct: number;
-  realizedR: number;
-  barsHeld: number;
-  maxFavorablePct: number;
-  maxAdversePct: number;
-  exitReason: FanTradeExitReason;
-  /** Calendar date of exitBar when the subject carries dates. */
-  exitDate?: string | null;
-}
-
 export interface FanEntryEvent {
   ticker: string;
   name: string;
   date: string | null;
+  /** Fill bar. */
   barIndex: number;
-  strategy: FanStrategyId;
-  signal: FanEntrySignal;
+  strategyId: string;
+  strategyName: string;
+  entryMode: 'buy_stop' | 'close';
+  /** One-line story of the steps and the entry rule (describeStrategy). */
+  summary: string;
   entryPrice: number;
   worstGap: number;
   forwardReturns: Record<number, number>;
   trade: FanSimulatedTrade | null;
-  /** First bar of this episode’s 18>50>100>200 stack (18/50 cross). */
+  /** One mark per fired step, in step order. */
+  marks: StrategyMark[];
+  /** First candle/tracker mark — where the setup began. */
   fanBar: number;
-  /** Pullback tag / fill. Same as barIndex. */
-  reactionBar: number;
-  /** Swing high that the pullback came off. */
+  /** Candle/tracker mark with the highest high (swing high). */
   impulseBar: number;
+  /** Last candle/tracker mark (the trigger). */
+  reactionBar: number;
   /** Classic MACD (12/26/9) + Stoch RSI (14/14/3/3) at the entry bar. */
   indicators: FanEntryIndicators | null;
-}
-
-export interface FanEntryIndicators {
-  macdLine: number;
-  macdSignal: number;
-  macdHist: number;
-  stochK: number;
-  stochD: number;
 }
 
 export interface FanFactorBucket {
@@ -243,46 +193,6 @@ export interface FanBacktestSubject {
   marketCap?: number | null;
 }
 
-const EMA_WARM = 200;
-const MIN_R_FRAC = 0.0015;
-
-export function macd1850(e18: number[], e50: number[]): { line: number[]; signal: number[]; hist: number[] } {
-  const line = e18.map((v, i) => v - e50[i]);
-  const signal = ema(line, 9);
-  const hist = line.map((v, i) => v - signal[i]);
-  return { line, signal, hist };
-}
-
-export function slowFanUp(e50: number[], e100: number[], e200: number[], i: number): boolean {
-  return e50[i] > e100[i] && e100[i] > e200[i];
-}
-
-/** Image uptrend fan: 18 > 50 > 100 > 200. */
-export function fullFanUp(e18: number[], e50: number[], e100: number[], e200: number[], i: number): boolean {
-  return e18[i] > e50[i] && slowFanUp(e50, e100, e200, i);
-}
-
-function isFiniteNum(v: number | null | undefined): v is number {
-  return typeof v === 'number' && Number.isFinite(v);
-}
-
-export function snapshotIndicators(
-  classic: { line: number[]; signal: number[]; hist: number[] },
-  stoch: { k: (number | null)[]; d: (number | null)[] },
-  i: number,
-): FanEntryIndicators | null {
-  const macdLine = classic.line[i];
-  const macdSignal = classic.signal[i];
-  const macdHist = classic.hist[i];
-  const stochK = stoch.k[i];
-  const stochD = stoch.d[i];
-  if (!isFiniteNum(macdLine) || !isFiniteNum(macdSignal) || !isFiniteNum(macdHist)
-    || !isFiniteNum(stochK) || !isFiniteNum(stochD)) {
-    return null;
-  }
-  return { macdLine, macdSignal, macdHist, stochK, stochD };
-}
-
 export function avgVol20Of(s: FanBacktestSubject): number {
   if (s.avgVol20 != null && Number.isFinite(s.avgVol20)) return s.avgVol20;
   const vols = s.volumes ?? [];
@@ -334,117 +244,6 @@ export function correlateFanFactors(entries: FanEntryEvent[]): FanFactorBucket[]
   });
 }
 
-export function crossUp18_50(e18: number[], e50: number[], i: number): boolean {
-  return i > 0 && e18[i - 1] <= e50[i - 1] && e18[i] > e50[i];
-}
-
-export function crossDown18_50(e18: number[], e50: number[], i: number): boolean {
-  return i > 0 && e18[i - 1] >= e50[i - 1] && e18[i] < e50[i];
-}
-
-export function isLongReversal(o: number[], h: number[], c: number[], i: number): boolean {
-  return i >= 1 && h[i] < h[i - 1] && c[i] > o[i] && o[i - 1] > c[i - 1];
-}
-
-/** Bunn long reversal: body above EMA support, tail through it and the prior low. */
-export function isBunnLongReversal(o: number[], l: number[], c: number[], ma: number[], i: number): boolean {
-  if (i < 1) return false;
-  const e = ma[i];
-  const open = o[i];
-  const close = c[i];
-  const low = l[i];
-  const priorLow = l[i - 1];
-  if (![e, open, close, low, priorLow].every(Number.isFinite)) return false;
-  return open > e && close > e && low < e && low < priorLow;
-}
-
-/** 3-bar long pivot: previous and subsequent lows are both higher than low[i]. */
-export function isLongPivotCandidate(l: number[], i: number): boolean {
-  if (i < 1 || i + 1 >= l.length) return false;
-  const prev = l[i - 1];
-  const pivot = l[i];
-  const next = l[i + 1];
-  if (![prev, pivot, next].every(Number.isFinite)) return false;
-  return prev > pivot && next > pivot;
-}
-
-/**
- * First bar at or after `fromBar` (and at least i+2) whose high exceeds high[i-1].
- * Null if `i` is not a candidate or the prior high is never taken out.
- */
-export function longPivotConfirmBar(h: number[], l: number[], i: number, fromBar: number): number | null {
-  if (!isLongPivotCandidate(l, i)) return null;
-  const priorHigh = h[i - 1];
-  if (!Number.isFinite(priorHigh)) return null;
-  const n = Math.min(h.length, l.length);
-  const start = Math.max(fromBar, i + 2);
-  for (let k = start; k < n; k++) {
-    if (Number.isFinite(h[k]) && h[k] > priorHigh) return k;
-  }
-  return null;
-}
-
-/** Most recent confirmed pivot low visible as of `asOfBar` (inclusive). */
-export function lastConfirmedPivotLow(
-  h: number[], l: number[], asOfBar: number, confirmAfterBar = -1,
-): number | null {
-  const n = Math.min(h.length, l.length);
-  let bestI = -1;
-  let bestLow: number | null = null;
-  for (let i = 1; i + 1 < asOfBar && i + 1 < n; i++) {
-    const k = longPivotConfirmBar(h, l, i, 0);
-    if (k == null || k > asOfBar || k <= confirmAfterBar) continue;
-    if (i > bestI) {
-      bestI = i;
-      bestLow = l[i];
-    }
-  }
-  return bestLow;
-}
-
-/** Close-back-above the MA with the close in the upper 40% of the bar. */
-export function isMaBounce(o: number[], h: number[], l: number[], c: number[], ma: number[], i: number): boolean {
-  const range = h[i] - l[i];
-  if (!(range > 0)) return false;
-  return l[i] <= ma[i] && c[i] >= ma[i] && c[i] > o[i] && (c[i] - l[i]) / range >= 0.6;
-}
-
-export function atr14(h: number[], l: number[], c: number[]): number[] {
-  const tr = c.map((_, i) => {
-    if (i === 0) return Math.max(h[0] - l[0], 0);
-    return Math.max(h[i] - l[i], Math.abs(h[i] - c[i - 1]), Math.abs(l[i] - c[i - 1]));
-  });
-  return ema(tr, 14);
-}
-
-function slopeUp(arr: number[], i: number, n = 5): boolean {
-  return i >= n && arr[i] > arr[i - n];
-}
-
-function trailEmaOf(config: FanBacktestConfig): 18 | 50 | null {
-  return config.trailEma === 18 || config.trailEma === 50 ? config.trailEma : null;
-}
-
-function breakevenAt(config: FanBacktestConfig): number | null {
-  if (config.breakevenAtR === null) return null;
-  if (config.breakevenAtR === undefined) return 1;
-  return config.breakevenAtR > 0 ? config.breakevenAtR : null;
-}
-
-function ema200RisingBarsOf(config: FanBacktestConfig): number {
-  return config.ema200RisingBars ?? 21;
-}
-
-function ohlc(s: FanBacktestSubject) {
-  const c = s.closes;
-  return { o: s.opens ?? c, h: s.highs ?? c, l: s.lows ?? c, c };
-}
-
-function scanStart(strategy: FanStrategyId, entry: FanEntrySignal): number {
-  if (strategy === 'onset' && entry === 'near') return EMA_WARM + FAN_ENTER_LOOKBACK;
-  return EMA_WARM;
-}
-
 function statHorizon(arr: number[]): Omit<HorizonStat, 'h'> {
   const n = arr.length;
   if (!n) return { n: 0, avg: 0, median: 0, winRate: 0, best: 0, worst: 0 };
@@ -454,474 +253,12 @@ function statHorizon(arr: number[]): Omit<HorizonStat, 'h'> {
   return { n, avg, median, winRate: (arr.filter((x) => x > 0).length / n) * 100, best: sorted[n - 1], worst: sorted[0] };
 }
 
-function statusAt(e18: number[], e50: number[], e100: number[], e200: number[], i: number): FanStatus {
-  return classifyFanAtIndex(e18, e50, e100, e200, i).status;
-}
-
-function macdFav(macd: { line: number[]; signal: number[]; hist: number[] }, i: number): boolean {
-  return macd.line[i] > macd.signal[i] && macd.hist[i] >= 0;
-}
-
-function forwardReturns(c: number[], i: number, horizons: number[]): Record<number, number> {
-  const out: Record<number, number> = {};
-  const px = c[i];
-  for (const h of horizons) {
-    if (i + h < c.length && px > 0) out[h] = ((c[i + h] - px) / px) * 100;
-  }
-  return out;
-}
-
-export function simulateRTrade(
-  bars: { o: number[]; h: number[]; l: number[]; c: number[] },
-  emas: { e18: number[]; e50: number[]; e100: number[]; e200: number[] },
-  macd: { line: number[]; signal: number[]; hist: number[] },
-  entryBar: number,
-  stopPrice: number,
-  targetPrice: number,
-  config: FanBacktestConfig,
-  fullFanExit: boolean,
-  fillPrice?: number,
-): FanSimulatedTrade | null {
-  const entryPrice = fillPrice ?? bars.c[entryBar];
-  if (!Number.isFinite(entryPrice) || entryPrice <= 0) return null;
-  if (!(stopPrice < entryPrice)) return null;
-  const rSize = entryPrice - stopPrice;
-  if (rSize / entryPrice < MIN_R_FRAC) return null;
-  const trailPivot = config.trailPivot === true;
-  const trailEma = trailPivot ? null : trailEmaOf(config);
-  const trailing = trailEma != null || trailPivot;
-  const windowOn = config.targetWindow === true && !trailing;
-  const exitLevel = windowOn ? entryPrice + BUNN_WINDOW_LO * rSize : targetPrice;
-  if (!trailing && !(exitLevel > entryPrice)) return null;
-
-  let stop = stopPrice;
-  const beAt = breakevenAt(config);
-  let maxFav = 0;
-  let maxAdv = 0;
-  const last = bars.c.length - 1;
-
-  for (let j = entryBar + 1; j <= last; j++) {
-    maxFav = Math.max(maxFav, ((bars.h[j] - entryPrice) / entryPrice) * 100);
-    maxAdv = Math.min(maxAdv, ((bars.l[j] - entryPrice) / entryPrice) * 100);
-
-    const hitStop = bars.l[j] <= stop;
-    const hitTarget = !trailing && bars.h[j] >= exitLevel;
-    if (hitStop && hitTarget) {
-      return finish(entryBar, j, entryPrice, stopPrice, stopPrice, targetPrice, -1, maxFav, maxAdv, 'stop_r');
-    }
-    if (hitStop) {
-      const raised = stop > stopPrice + 1e-12;
-      const reason: FanTradeExitReason = trailPivot && raised
-        ? 'pivot_trail'
-        : stop > entryPrice + 1e-12 ? 'trail' : Math.abs(stop - entryPrice) < 1e-12 ? 'breakeven' : 'stop_r';
-      const realizedR = (stop - entryPrice) / rSize;
-      return finish(entryBar, j, entryPrice, stop, stopPrice, targetPrice, realizedR, maxFav, maxAdv, reason);
-    }
-    if (hitTarget) {
-      if (windowOn) {
-        return finish(entryBar, j, entryPrice, exitLevel, stopPrice, exitLevel, BUNN_WINDOW_LO, maxFav, maxAdv, 'target_window');
-      }
-      return finish(entryBar, j, entryPrice, targetPrice, stopPrice, targetPrice, config.targetR, maxFav, maxAdv, 'target_r');
-    }
-    if (config.macdWindow && !trailing && macd.line[j] < macd.signal[j]) {
-      return finish(entryBar, j, entryPrice, bars.c[j], stopPrice, targetPrice, (bars.c[j] - entryPrice) / rSize, maxFav, maxAdv, 'macd_window');
-    }
-    if (fullFanExit && statusAt(emas.e18, emas.e50, emas.e100, emas.e200, j) !== 'match') {
-      return finish(entryBar, j, entryPrice, bars.c[j], stopPrice, targetPrice, (bars.c[j] - entryPrice) / rSize, maxFav, maxAdv, 'fan_break');
-    }
-    if (!fullFanExit && !slowFanUp(emas.e50, emas.e100, emas.e200, j)) {
-      return finish(entryBar, j, entryPrice, bars.c[j], stopPrice, targetPrice, (bars.c[j] - entryPrice) / rSize, maxFav, maxAdv, 'slow_fan_break');
-    }
-    const skipHold = trailing && slowFanUp(emas.e50, emas.e100, emas.e200, j);
-    if (!skipHold && config.maxHoldBars != null && j - entryBar >= config.maxHoldBars) {
-      return finish(entryBar, j, entryPrice, bars.c[j], stopPrice, targetPrice, (bars.c[j] - entryPrice) / rSize, maxFav, maxAdv, 'max_hold');
-    }
-
-    if (beAt != null && bars.h[j] >= entryPrice + beAt * rSize) {
-      stop = Math.max(stop, entryPrice);
-    }
-    if (stop >= entryPrice - 1e-12 && trailEma != null) {
-      const t = trailEma === 18 ? emas.e18[j] : emas.e50[j];
-      if (Number.isFinite(t)) stop = Math.max(stop, t);
-    }
-    if (trailPivot) {
-      const p = lastConfirmedPivotLow(bars.h, bars.l, j, entryBar);
-      if (p != null) stop = Math.max(stop, p - BUNN_PENNY);
-    }
-  }
-
-  const exitPrice = bars.c[last];
-  return finish(entryBar, last, entryPrice, exitPrice, stopPrice, targetPrice, (exitPrice - entryPrice) / rSize, maxFav, maxAdv, 'end_of_data');
-}
-
-function finish(
-  entryBar: number, exitBar: number, entryPrice: number, exitPrice: number,
-  stopPrice: number, targetPrice: number, realizedR: number,
-  maxFav: number, maxAdv: number, exitReason: FanTradeExitReason,
-): FanSimulatedTrade {
-  return {
-    entryBar, exitBar, entryPrice, exitPrice, stopPrice, targetPrice,
-    returnPct: ((exitPrice - entryPrice) / entryPrice) * 100,
-    realizedR, barsHeld: exitBar - entryBar, maxFavorablePct: maxFav, maxAdversePct: maxAdv, exitReason,
-  };
-}
-
-interface Episode {
-  crossBar: number;
-  swingHigh: number;
-  swingHighBar: number;
-  pullbackLow: number;
-  lastPullbackLow: number;
-  lowerLows: number;
-  taken: boolean;
-}
-
-function maybeEnter(
-  strategy: FanStrategyId,
-  i: number,
-  bars: { o: number[]; h: number[]; l: number[]; c: number[] },
-  e18: number[], e50: number[], e200: number[],
-  macd: { line: number[]; signal: number[]; hist: number[] },
-  ep: Episode,
-  macdWindow: boolean,
-  ema200RisingBars: number,
-): boolean {
-  const tag50 = bars.l[i] <= e50[i] && bars.c[i] >= e50[i];
-  const tag18 = bars.l[i] <= e18[i] && bars.c[i] >= e18[i];
-  const dual = tag50 && bars.h[i] >= e18[i];
-  const rev = isLongReversal(bars.o, bars.h, bars.c, i);
-  const bounce = isMaBounce(bars.o, bars.h, bars.l, bars.c, e50, i);
-  const macdOk = !macdWindow || macdFav(macd, i);
-  const pullbackOk = ep.lowerLows <= 2;
-  const rising50 = slopeUp(e50, i);
-
-  if (!ema200RisingAt(e200, i, ema200RisingBars)) return false;
-  if (strategy === 'cross') return i === ep.crossBar;
-  if (i === ep.crossBar) return false;
-  if (!rising50) return false;
-  if (!(e18[i] > e50[i])) return false;
-  if (strategy === 'tag18') return pullbackOk && tag18 && macdOk;
-  if (strategy === 'tag50') return pullbackOk && tag50 && macdOk;
-  if (strategy === 'structure') return pullbackOk && tag50 && (rev || bounce) && macdOk;
-  if (strategy === 'dual_ema') return pullbackOk && dual && (rev || bounce) && macdOk;
-  return false;
-}
-
+/** Entry events for one subject under `config.strategy`. Alias of findStrategyEntries. */
 export function findFanEntries(
   subject: FanBacktestSubject,
   config: FanBacktestConfig = DEFAULT_FAN_BACKTEST_CONFIG,
 ): FanEntryEvent[] {
-  const bars = ohlc(subject);
-  const { c } = bars;
-  const L = c.length;
-  const start = scanStart(config.strategy, config.entry);
-  // Leave one bar after the fill so the trade can be managed. Do not reserve
-  // horizon bars — that used to clip the last ~40 sessions, which emptied a
-  // 3-month account window.
-  if (L < start + 2) return [];
-
-  const e18 = ema(c, 18);
-  const e50 = ema(c, 50);
-  const e100 = ema(c, 100);
-  const e200 = ema(c, 200);
-  const macd = macd1850(e18, e50);
-  const classic = classicMacd(c);
-  const stoch = stochRsi(rsi(c, 14), 14, 3, 3);
-  const emas = { e18, e50, e100, e200 };
-
-  const atrs = atr14(bars.h, bars.l, bars.c);
-  if (config.strategy === 'onset') return findOnset(subject, bars, emas, macd, classic, stoch, atrs, config, start);
-  if (config.strategy === 'bunn_bounce') return findBunnBounce(subject, bars, emas, macd, classic, stoch, atrs, config, start);
-  if (config.strategy === 'bunn_cont') return findBunnCont(subject, bars, emas, macd, classic, stoch, atrs, config, start);
-
-  const out: FanEntryEvent[] = [];
-  let ep: Episode | null = null;
-  let lastExit = -1;
-  const continueEpisode = config.continueEpisode !== false;
-  const end = L - 1;
-
-  for (let i = start; i < end; i++) {
-    if (crossUp18_50(e18, e50, i) && slowFanUp(e50, e100, e200, i)) {
-      ep = {
-        crossBar: i,
-        swingHigh: bars.h[i],
-        swingHighBar: i,
-        pullbackLow: bars.l[i],
-        lastPullbackLow: bars.l[i],
-        lowerLows: 0,
-        taken: false,
-      };
-      if (i > lastExit && maybeEnter(config.strategy, i, bars, e18, e50, e200, macd, ep, config.macdWindow, ema200RisingBarsOf(config))) {
-        const ev = pushEntry(out, subject, bars, emas, macd, classic, stoch, atrs, config, i, ep.pullbackLow, false, {
-          fanBar: ep.crossBar, impulseBar: ep.swingHighBar,
-        });
-        if (ev) {
-          ep.taken = true;
-          if (ev.trade) lastExit = ev.trade.exitBar;
-        }
-      }
-      continue;
-    }
-    if (!ep) continue;
-    if (!fullFanUp(e18, e50, e100, e200, i)) { ep = null; continue; }
-
-    if (bars.h[i] >= ep.swingHigh) {
-      ep.swingHigh = bars.h[i];
-      ep.swingHighBar = i;
-      ep.lowerLows = 0;
-      ep.lastPullbackLow = bars.l[i];
-      ep.pullbackLow = bars.l[i];
-      if (continueEpisode) ep.taken = false;
-      continue;
-    }
-
-    if (ep.taken) continue;
-
-    if (bars.l[i] < ep.lastPullbackLow) {
-      ep.lowerLows += 1;
-      ep.lastPullbackLow = bars.l[i];
-      ep.pullbackLow = Math.min(ep.pullbackLow, bars.l[i]);
-    }
-    if (ep.lowerLows > 2) { ep = null; continue; }
-
-    if (i <= lastExit) continue;
-
-    if (maybeEnter(config.strategy, i, bars, e18, e50, e200, macd, ep, config.macdWindow, ema200RisingBarsOf(config))) {
-      const ev = pushEntry(out, subject, bars, emas, macd, classic, stoch, atrs, config, i, ep.pullbackLow, false, {
-        fanBar: ep.crossBar, impulseBar: ep.swingHighBar,
-      });
-      if (ev) {
-        ep.taken = true;
-        if (ev.trade) lastExit = ev.trade.exitBar;
-      }
-    }
-  }
-  return out;
-}
-
-function bunnBounceAt(
-  bars: { o: number[]; h: number[]; l: number[]; c: number[] },
-  e50: number[], e100: number[], e200: number[],
-  i: number,
-): boolean {
-  if (!slowFanUp(e50, e100, e200, i)) return false;
-  return isBunnLongReversal(bars.o, bars.l, bars.c, e50, i)
-    || isBunnLongReversal(bars.o, bars.l, bars.c, e100, i)
-    || isBunnLongReversal(bars.o, bars.l, bars.c, e200, i);
-}
-
-function findBunnBounce(
-  subject: FanBacktestSubject,
-  bars: { o: number[]; h: number[]; l: number[]; c: number[] },
-  emas: { e18: number[]; e50: number[]; e100: number[]; e200: number[] },
-  macd: ReturnType<typeof macd1850>,
-  classic: ReturnType<typeof classicMacd>,
-  stoch: ReturnType<typeof stochRsi>,
-  atrs: number[],
-  config: FanBacktestConfig,
-  start: number,
-): FanEntryEvent[] {
-  const out: FanEntryEvent[] = [];
-  const { e50, e100, e200 } = emas;
-  const L = bars.c.length;
-  let lastExit = -1;
-  let pending: { trigger: number; buyStop: number; height: number } | null = null;
-
-  for (let i = start; i < L - 1; i++) {
-    if (pending) {
-      if (!slowFanUp(e50, e100, e200, i)) {
-        pending = null;
-        continue;
-      }
-      if (bars.h[i] >= pending.buyStop) {
-        if (config.macdWindow && !macdFav(macd, i)) { pending = null; continue; }
-        if (!ema200RisingAt(e200, i, ema200RisingBarsOf(config))) { pending = null; continue; }
-        const fillPrice = pending.buyStop;
-        const stopPrice = fillPrice - (pending.height + BUNN_PENNY);
-        const ev = pushEntry(out, subject, bars, emas, macd, classic, stoch, atrs, config, i, stopPrice, false, {
-          fanBar: pending.trigger,
-          impulseBar: Math.max(0, pending.trigger - 1),
-          reactionBar: pending.trigger,
-          fillPrice,
-          stopPrice,
-        });
-        pending = null;
-        if (ev?.trade) lastExit = ev.trade.exitBar;
-      }
-      continue;
-    }
-    if (i <= lastExit || i >= L - 2) continue;
-    if (!bunnBounceAt(bars, e50, e100, e200, i)) continue;
-    const height = bars.h[i] - bars.l[i];
-    if (!(height > 0)) continue;
-    pending = { trigger: i, buyStop: bars.h[i] + BUNN_PENNY, height };
-  }
-  return out;
-}
-
-function bunnSlowBounceAt(
-  bars: { o: number[]; h: number[]; l: number[]; c: number[] },
-  e100: number[], e200: number[],
-  i: number,
-): boolean {
-  return isBunnLongReversal(bars.o, bars.l, bars.c, e100, i)
-    || isBunnLongReversal(bars.o, bars.l, bars.c, e200, i);
-}
-
-function findBunnCont(
-  subject: FanBacktestSubject,
-  bars: { o: number[]; h: number[]; l: number[]; c: number[] },
-  emas: { e18: number[]; e50: number[]; e100: number[]; e200: number[] },
-  macd: ReturnType<typeof macd1850>,
-  classic: ReturnType<typeof classicMacd>,
-  stoch: ReturnType<typeof stochRsi>,
-  atrs: number[],
-  config: FanBacktestConfig,
-  start: number,
-): FanEntryEvent[] {
-  const out: FanEntryEvent[] = [];
-  const { e18, e50, e100, e200 } = emas;
-  const L = bars.c.length;
-  let lastExit = -1;
-  let ep: { adverseBar: number; bounceBar: number | null; bounceLow: number } | null = null;
-  let pending: {
-    buyStop: number; stopPrice: number;
-    fanBar: number; reactionBar: number; impulseBar: number;
-  } | null = null;
-
-  for (let i = start; i < L - 1; i++) {
-    if (pending) {
-      if (!slowFanUp(e50, e100, e200, i)) {
-        pending = null;
-        continue;
-      }
-      if (bars.h[i] >= pending.buyStop) {
-        if (config.macdWindow && !macdFav(macd, i)) { pending = null; continue; }
-        if (!ema200RisingAt(e200, i, ema200RisingBarsOf(config))) { pending = null; continue; }
-        const ev = pushEntry(out, subject, bars, emas, macd, classic, stoch, atrs, config, i, pending.stopPrice, false, {
-          fanBar: pending.fanBar,
-          impulseBar: pending.impulseBar,
-          reactionBar: pending.reactionBar,
-          fillPrice: pending.buyStop,
-          stopPrice: pending.stopPrice,
-        });
-        pending = null;
-        if (ev?.trade) lastExit = ev.trade.exitBar;
-      }
-      continue;
-    }
-
-    if (ep) {
-      if (!slowFanUp(e50, e100, e200, i)) {
-        ep = null;
-        continue;
-      }
-      if (bunnSlowBounceAt(bars, e100, e200, i)) {
-        ep.bounceBar = i;
-        ep.bounceLow = bars.l[i];
-      }
-      if (crossUp18_50(e18, e50, i) && fullFanUp(e18, e50, e100, e200, i)) {
-        if (ep.bounceBar != null && i < L - 2 && i > lastExit) {
-          const buyStop = bars.h[i] + BUNN_PENNY;
-          const stopPrice = ep.bounceLow - BUNN_PENNY;
-          if (stopPrice < buyStop) {
-            pending = {
-              buyStop, stopPrice,
-              fanBar: ep.adverseBar,
-              reactionBar: ep.bounceBar,
-              impulseBar: i,
-            };
-          }
-        }
-        ep = null;
-      }
-      continue;
-    }
-
-    if (i <= lastExit) continue;
-    if (crossDown18_50(e18, e50, i) && slowFanUp(e50, e100, e200, i)) {
-      ep = { adverseBar: i, bounceBar: null, bounceLow: NaN };
-      if (bunnSlowBounceAt(bars, e100, e200, i)) {
-        ep.bounceBar = i;
-        ep.bounceLow = bars.l[i];
-      }
-    }
-  }
-  return out;
-}
-
-function findOnset(
-  subject: FanBacktestSubject,
-  bars: { o: number[]; h: number[]; l: number[]; c: number[] },
-  emas: { e18: number[]; e50: number[]; e100: number[]; e200: number[] },
-  macd: ReturnType<typeof macd1850>,
-  classic: ReturnType<typeof classicMacd>,
-  stoch: ReturnType<typeof stochRsi>,
-  atrs: number[],
-  config: FanBacktestConfig,
-  start: number,
-): FanEntryEvent[] {
-  const out: FanEntryEvent[] = [];
-  let prev = statusAt(emas.e18, emas.e50, emas.e100, emas.e200, start - 1);
-  const want = config.entry;
-  let lastExit = -1;
-  for (let i = start; i < bars.c.length - 1; i++) {
-    const now = statusAt(emas.e18, emas.e50, emas.e100, emas.e200, i);
-    if (now === want && prev !== want) {
-      if (config.macdWindow && !macdFav(macd, i)) { prev = now; continue; }
-      if (!ema200RisingAt(emas.e200, i, ema200RisingBarsOf(config))) { prev = now; continue; }
-      if (i <= lastExit) { prev = now; continue; }
-      const stop = Math.min(bars.l[i], emas.e50[i]);
-      const ev = pushEntry(out, subject, bars, emas, macd, classic, stoch, atrs, config, i, stop, true);
-      if (ev?.trade) lastExit = ev.trade.exitBar;
-    }
-    prev = now;
-  }
-  return out;
-}
-
-function pushEntry(
-  out: FanEntryEvent[],
-  subject: FanBacktestSubject,
-  bars: { o: number[]; h: number[]; l: number[]; c: number[] },
-  emas: { e18: number[]; e50: number[]; e100: number[]; e200: number[] },
-  macd: ReturnType<typeof macd1850>,
-  classic: ReturnType<typeof classicMacd>,
-  stoch: ReturnType<typeof stochRsi>,
-  atrs: number[],
-  config: FanBacktestConfig,
-  i: number,
-  stopHint: number,
-  fullFanExit: boolean,
-  setup?: { fanBar: number; impulseBar: number; reactionBar?: number; fillPrice?: number; stopPrice?: number },
-): FanEntryEvent | null {
-  const entryPrice = setup?.fillPrice ?? bars.c[i];
-  const pad = (config.stopAtrMult ?? 0.25) * (atrs[i] ?? 0);
-  const stopPrice = setup?.stopPrice ?? (Math.min(stopHint, emas.e50[i]) - pad);
-  const rSize = entryPrice - stopPrice;
-  if (!(rSize > 0) || rSize / entryPrice < MIN_R_FRAC) return null;
-  const targetMult = config.targetWindow ? BUNN_WINDOW_LO : config.targetR;
-  const targetPrice = entryPrice + targetMult * rSize;
-  const cls = classifyFanAtIndex(emas.e18, emas.e50, emas.e100, emas.e200, i);
-  const sim = simulateRTrade(bars, emas, macd, i, stopPrice, targetPrice, config, fullFanExit, setup?.fillPrice);
-  const event: FanEntryEvent = {
-    ticker: subject.ticker,
-    name: subject.name,
-    date: subject.dates?.[i] ?? null,
-    barIndex: i,
-    strategy: config.strategy,
-    signal: config.entry,
-    entryPrice,
-    worstGap: cls.worstGap,
-    forwardReturns: forwardReturns(bars.c, i, config.horizons),
-    trade: sim ? { ...sim, exitDate: subject.dates?.[sim.exitBar] ?? null } : null,
-    fanBar: setup?.fanBar ?? i,
-    reactionBar: setup?.reactionBar ?? i,
-    impulseBar: setup?.impulseBar ?? i,
-    indicators: snapshotIndicators(classic, stoch, i),
-  };
-  out.push(event);
-  return event;
+  return findStrategyEntries(subject, config);
 }
 
 function median(arr: number[]): number {
@@ -1156,7 +493,7 @@ export function backtestFanUniverse(
       continue;
     }
     stocksScanned += 1;
-    const entries = findFanEntries(subjects[si], config);
+    const entries = findStrategyEntries(subjects[si], config);
     if (entries.length) tickersWithEntries.add(subjects[si].ticker);
     for (const e of entries) {
       allEntries.push(e);
@@ -1253,17 +590,6 @@ const EXIT_STORY: Record<FanTradeExitReason, { title: string; body: string }> = 
   },
 };
 
-const ENTRY_STORY: Record<FanStrategyId, string> = {
-  onset: 'First bar the full 18 > 50 > 100 > 200 stack appeared.',
-  cross: '18 crossed up through 50 while 50 > 100 > 200 still held.',
-  tag18: 'Pullback tagged the 18-EMA (bone zone) and closed back above it, 0–2 lower lows, 50 still rising.',
-  tag50: 'Pullback tagged the 50-EMA and closed back above it, 0–2 lower lows, 50 still rising, while 18 > 50 > 100 > 200 held.',
-  structure: '50-EMA tag plus a 2-bar reversal or rejection wick, with 18–50 MACD still favorable if that filter was on.',
-  dual_ema: 'Same structure as a 50-tag, but the bar also traded up through the 18.',
-  bunn_bounce: 'Reversal bar bounced on the 50, 100, or 200 while 50 > 100 > 200 held. Filled at a buy stop 2¢ above that bar; initial stop is the bar height plus 2¢.',
-  bunn_cont: '18 adversely crossed 50, price reversed on the 100 or 200, then the full fan resumed. Filled at a buy stop 2¢ above the resume bar; initial stop is 2¢ below that bounce low.',
-};
-
 export interface FanTradeStory {
   headline: string;
   entry: string;
@@ -1274,13 +600,14 @@ export interface FanTradeStory {
 export function explainFanTrade(event: FanEntryEvent): FanTradeStory {
   const t = event.trade;
   const when = event.date ?? 'this bar';
-  const fill = event.strategy === 'bunn_bounce' || event.strategy === 'bunn_cont'
+  const fill = event.entryMode === 'buy_stop'
     ? `Filled a buy stop on ${when} at ${event.entryPrice.toFixed(2)}.`
     : `Bought the close on ${when} at ${event.entryPrice.toFixed(2)}.`;
-  let entry = `${fill} ${ENTRY_STORY[event.strategy]}`;
-  if (event.strategy !== 'bunn_bounce' && event.strategy !== 'bunn_cont' && event.fanBar < event.barIndex) {
+  let entry = `${fill} Setup: ${event.summary}`;
+  if (event.fanBar < event.barIndex) {
     const n = event.barIndex - event.fanBar;
-    entry += ` Fan first stacked ${n} bar${n === 1 ? '' : 's'} earlier.`;
+    const first = event.marks.find((m) => m.bar === event.fanBar);
+    entry += ` The setup began ${n} bar${n === 1 ? '' : 's'} earlier${first ? ` (${first.label})` : ''}.`;
   }
   if (!t) {
     return {
@@ -1301,7 +628,14 @@ export function explainFanTrade(event: FanEntryEvent): FanTradeStory {
   };
 }
 
-/** Slice of history to draw around a trade. `extra` bars (fan/impulse) expand the window. */
+/** Bars before the entry that a mark may still expand the default window to. */
+export const TRADE_CHART_MAX_LOOKBACK = 160;
+
+/**
+ * Slice of history to draw around a trade. `extra` bars (marks) expand the
+ * window, clamped to TRADE_CHART_MAX_LOOKBACK bars before the entry — a held
+ * fan step can fire hundreds of bars before the fill.
+ */
 export function tradeChartRange(
   entryBar: number,
   exitBar: number,
@@ -1311,7 +645,8 @@ export function tradeChartRange(
   extra: number[] = [],
 ): { from: number; to: number } {
   if (n < 1) return { from: 0, to: 0 };
-  const left = Math.min(entryBar - before, ...extra.map((b) => b - 8));
+  const floor = entryBar - TRADE_CHART_MAX_LOOKBACK;
+  const left = Math.min(entryBar - before, ...extra.map((b) => Math.max(floor, b - 8)));
   const right = Math.max(Math.max(entryBar, exitBar) + after, ...extra.map((b) => b + 2));
   const from = Math.max(0, left);
   const to = Math.min(n - 1, right);

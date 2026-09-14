@@ -167,9 +167,8 @@ export function createScreenServer(store: UniverseStore = productionUniverse) {
     if (req.method === 'POST' && url === '/signals') {
       readJsonBody(req)
         .then((body) => {
-          const parsed = parseFanSignalsBody(body);
-          if (!parsed) { sendJson(res, 400, { error: 'unknown or missing strategy' }); return; }
-          const result = handleSignals(store.get(), parsed.config);
+          const config = parseFanSignalsBody(body);
+          const result = handleSignals(store.get(), config);
           sendJson(res, 200, result);
         })
         .catch((err: unknown) => sendError(res, err, url));

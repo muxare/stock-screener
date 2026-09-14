@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { FanBacktestConfig } from '../../lib/fanBacktest';
-import { buildFanExample } from '../../lib/fanExample';
+import { buildStrategyExample, type ExampleMark } from '../../lib/strategy/example';
+import type { StepKind } from '../../lib/strategy/types';
 
 const PRICE_H = 248;
 const VOL_H = 36;
@@ -14,9 +15,23 @@ const E200 = '#9b51e0';
 const UP = '#06a96b';
 const DN = '#e23d3d';
 
+/** Same colours and glyphs the trade review uses, so a step reads the same in both charts. */
+const MARK_COLOR: Record<StepKind, string> = {
+  candle: '#c47a14',
+  instant: '#7c5cbf',
+  tracker: '#0f9d8f',
+  guard: '#8b9298',
+};
+
+function markColor(m: ExampleMark): string {
+  if (m.kind === 'entry') return '#06865a';
+  if (m.kind === 'exit') return DN;
+  return MARK_COLOR[m.kind];
+}
+
 export function FanExampleChart({ config }: { config: FanBacktestConfig }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const example = useMemo(() => buildFanExample(config), [config]);
+  const example = useMemo(() => buildStrategyExample(config), [config]);
   const cssH = PAD_T + PRICE_H + 8 + VOL_H + (example.showMacd ? 8 + MACD_H : 0) + PAD_B;
 
   useEffect(() => {
@@ -97,11 +112,11 @@ export function FanExampleChart({ config }: { config: FanBacktestConfig }) {
       ctx.textBaseline = 'top';
       ctx.font = "9px 'Helvetica Neue', Helvetica, Arial, sans-serif";
       for (const p of ex.phases) {
-        if (p.to - p.from < 1 && p.id !== 'tag' && p.id !== 'bounce') continue;
         const cx = (x(p.from) + x(p.to)) / 2;
+        const room = Math.max(24, x(p.to) - x(p.from) + cw);
+        const chars = Math.max(3, Math.floor(room / 5.2));
         ctx.fillStyle = '#5b6168';
-        const label = p.label.length > 18 ? p.label.slice(0, 16) + '…' : p.label;
-        ctx.fillText(label, cx, PAD_T + 4);
+        ctx.fillText(p.label.length > chars ? p.label.slice(0, chars - 1) + '…' : p.label, cx, PAD_T + 4);
       }
 
       let vmax = 1;
@@ -151,42 +166,62 @@ export function FanExampleChart({ config }: { config: FanBacktestConfig }) {
         ctx.fillText(lv.label, padL + 4, yy - 2);
       }
 
-      for (const m of ex.marks) {
-        if (m.bar < 0 || m.bar >= N) continue;
-        const cx = x(m.bar), cy = py(m.price);
-        ctx.fillStyle = m.kind === 'exit' ? DN : m.kind === 'entry' ? UP : m.kind === 'adverse' ? DN : '#c47a14';
+      // One glyph per step mark, drawn by kind; steps that share a bar and price
+      // stack upwards so none is hidden.
+      const glyph = (m: ExampleMark, cx: number, cy: number, color: string) => {
+        ctx.fillStyle = color;
+        ctx.beginPath();
         if (m.kind === 'entry') {
-          ctx.beginPath();
-          ctx.moveTo(cx, cy - 8);
-          ctx.lineTo(cx - 5, cy + 3);
-          ctx.lineTo(cx + 5, cy + 3);
+          ctx.moveTo(cx, cy - 8); ctx.lineTo(cx - 5, cy + 3); ctx.lineTo(cx + 5, cy + 3);
           ctx.closePath();
           ctx.fill();
-        } else if (m.kind === 'exit') {
+          return;
+        }
+        if (m.kind === 'exit') {
           ctx.fillRect(cx - 3.5, cy - 3.5, 7, 7);
           ctx.strokeStyle = '#fff';
           ctx.lineWidth = 1.2;
           ctx.strokeRect(cx - 3.5, cy - 3.5, 7, 7);
-        } else if (m.kind === 'impulse') {
-          ctx.beginPath();
-          ctx.moveTo(cx, cy + 7);
-          ctx.lineTo(cx - 4, cy - 2);
-          ctx.lineTo(cx + 4, cy - 2);
+          return;
+        }
+        if (m.kind === 'tracker') {
+          ctx.moveTo(cx, cy + 7); ctx.lineTo(cx - 4, cy - 2); ctx.lineTo(cx + 4, cy - 2);
           ctx.closePath();
           ctx.fill();
+          return;
+        }
+        if (m.kind === 'instant') {
+          ctx.arc(cx, cy, 3.6, 0, Math.PI * 2);
+          ctx.fill();
+          return;
+        }
+        const r = m.kind === 'guard' ? 3.6 : 4.4;
+        ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r, cy); ctx.lineTo(cx, cy + r); ctx.lineTo(cx - r, cy);
+        ctx.closePath();
+        if (m.kind === 'guard') {
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
         } else {
-          ctx.beginPath();
-          ctx.moveTo(cx, cy - 4);
-          ctx.lineTo(cx + 4, cy);
-          ctx.lineTo(cx, cy + 4);
-          ctx.lineTo(cx - 4, cy);
-          ctx.closePath();
           ctx.fill();
         }
+      };
+
+      const taken = new Map<string, number>();
+      for (const m of ex.marks) {
+        if (m.bar < 0 || m.bar >= N || !Number.isFinite(m.price)) continue;
+        const color = markColor(m);
+        const cx = x(m.bar), at = py(m.price);
+        const slot = `${m.bar}:${Math.round(at / 11)}`;
+        const stacked = taken.get(slot) ?? 0;
+        taken.set(slot, stacked + 1);
+        const cy = at - stacked * 12;
+        glyph(m, cx, cy, color);
+        ctx.fillStyle = color;
         ctx.font = "9px 'Helvetica Neue', Helvetica, Arial, sans-serif";
-        ctx.textAlign = 'left';
+        ctx.textAlign = m.bar > N - 6 ? 'right' : 'left';
         ctx.textBaseline = 'bottom';
-        ctx.fillText(m.label, cx + 6, cy - 2);
+        ctx.fillText(m.clamped ? `${m.label} ‹` : m.label, cx + (m.bar > N - 6 ? -6 : 6), cy - 2);
       }
 
       ctx.font = "10px 'Helvetica Neue', Helvetica, Arial, sans-serif";
@@ -264,28 +299,53 @@ export function FanExampleChart({ config }: { config: FanBacktestConfig }) {
         <div style={{ fontSize: 13, fontWeight: 700, color: '#1f2328' }}>{example.title}</div>
         <div style={{ fontSize: 12, color: '#6b7280', marginTop: 3, lineHeight: 1.45 }}>{example.caption}</div>
       </div>
-      <div style={{ position: 'relative', minWidth: 0 }}>
-        <canvas
-          ref={canvasRef}
-          role="img"
-          aria-label={`${example.title} candlestick schematic`}
-          style={{ display: 'block' }}
-        />
-      </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-        {example.phases.map((p) => (
-          <span
-            key={`${p.id}-${p.from}`}
-            style={{
-              fontSize: 10.5, fontWeight: 650, color: '#3b4046',
-              background: p.fill, border: '1px solid #eef0f1',
-              borderRadius: 999, padding: '3px 8px',
-            }}
-          >
-            {p.label}
-          </span>
-        ))}
-      </div>
+      {example.failure && (
+        <div style={{
+          border: '1px solid #f3d7d7', background: '#fdf5f5', borderRadius: 9,
+          padding: '9px 11px', fontSize: 12, color: '#8a3b3b', lineHeight: 1.45,
+        }}>
+          <strong>{example.failure.label}</strong> never completed on the schematic.
+          <div style={{ marginTop: 2 }}>{example.failure.message}</div>
+        </div>
+      )}
+      {example.bars.length > 1 && (
+        <>
+          <div style={{ position: 'relative', minWidth: 0 }}>
+            <canvas
+              ref={canvasRef}
+              role="img"
+              aria-label={`${example.title} candlestick schematic`}
+              style={{ display: 'block' }}
+            />
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {example.phases.map((p) => (
+              <span
+                key={`${p.id}-${p.from}`}
+                style={{
+                  fontSize: 10.5, fontWeight: 650, color: '#3b4046',
+                  background: p.fill, border: '1px solid #eef0f1',
+                  borderRadius: 999, padding: '3px 8px',
+                }}
+              >
+                {p.label}
+              </span>
+            ))}
+          </div>
+        </>
+      )}
+      {example.checks.length > 0 && (
+        <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {example.checks.map((c) => (
+            <li key={c.stepIndex} style={{ fontSize: 12, color: c.ok ? '#3b4046' : '#8a3b3b', lineHeight: 1.4 }}>
+              <span style={{ color: c.ok ? '#06865a' : '#e23d3d', fontWeight: 700, marginRight: 6 }}>{c.ok ? '✓' : '✗'}</span>
+              <strong>{c.label}</strong>
+              <span style={{ color: '#6b7280' }}> — {c.detail}{c.bar != null ? ` (bar ${c.bar})` : ''}</span>
+              {c.reason && <div style={{ color: '#8a3b3b', paddingLeft: 18 }}>{c.reason}</div>}
+            </li>
+          ))}
+        </ul>
+      )}
       <ul style={{ margin: 0, padding: '0 0 0 16px', fontSize: 12, color: '#5b6168', lineHeight: 1.5 }}>
         {example.notes.map((n) => (
           <li key={n}>{n}</li>

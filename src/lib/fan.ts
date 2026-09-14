@@ -6,6 +6,7 @@
 //   none:  otherwise
 
 import { ema, sma } from './indicators.ts';
+import { buildSnapshot, type IndicatorSnapshot } from './screen/snapshot.ts';
 
 export const FAN_PERIODS = [18, 50, 100, 200] as const;
 /** Relative inversion allowed on the worst adjacent pair to count as "close". */
@@ -50,7 +51,8 @@ export interface FanSubject {
   price: number;
   changePct: number;
   sparkline: number[];
-  full: { c: number[]; v?: number[] };
+  /** Highs and lows are optional: without them the snapshot's ATR% is NaN. */
+  full: { c: number[]; v?: number[]; h?: number[]; l?: number[] };
   avgVol20?: number;
   relVol?: number;
   marketCap?: number | null;
@@ -73,6 +75,8 @@ export interface FanRow {
   avgVol20: number;
   relVol: number;
   marketCap: number | null;
+  /** Last-bar RSI / Stoch RSI / volatility / performance, for columns and filters. */
+  snapshot: IndicatorSnapshot;
 }
 
 function last<T>(arr: T[]): T {
@@ -239,6 +243,12 @@ function toRow(s: FanSubject, c: FanClassification, e200: number[]): FanRow {
     ema200Ago: ema200AgoOf(e200),
     worstGap: c.worstGap,
     sparkline: s.sparkline,
+    snapshot: buildSnapshot({
+      closes: s.full.c,
+      volumes: s.full.v,
+      highs: s.full.h,
+      lows: s.full.l,
+    }),
     ...liquidityFromSubject(s),
   };
 }

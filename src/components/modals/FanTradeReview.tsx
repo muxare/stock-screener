@@ -5,9 +5,9 @@ import {
   explainFanTrade,
   tradeChartRange,
   type FanEntryEvent,
+  type StepKind,
 } from '../../lib/fanBacktest';
 import { useChartViewport } from '../../lib/chart/viewport';
-import { barIndexAtX, drawZoomSelection, isInPlot, type ZoomSelection } from '../../lib/chart/interactions';
 import { drawMacdPane, drawStochPane } from '../../lib/chart/panes';
 import { HButton } from '../ui/Hoverable';
 import { ChartControls } from '../ui/ChartControls';
@@ -27,8 +27,20 @@ const E18 = '#06a96b';
 const E50 = '#3aa0ff';
 const E100 = '#d9871f';
 const E200 = '#9b51e0';
-const FAN = '#7c5cbf';
-const IMPULSE = '#c47a14';
+
+/** One colour + glyph per step kind; every fired step gets a mark on the chart. */
+const MARK_COLOR: Record<StepKind, string> = {
+  candle: '#c47a14',
+  instant: '#7c5cbf',
+  tracker: '#0f9d8f',
+  guard: '#8b9298',
+};
+const MARK_GLYPH: Record<StepKind, string> = {
+  candle: '\u25c6',
+  instant: '\u25cf',
+  tracker: '\u25be',
+  guard: '\u25c7',
+};
 
 const fmt = (v: number, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '—');
 
@@ -62,10 +74,8 @@ export function FanTradeReview({
   position?: string | null;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const overlayRef = useRef<HTMLCanvasElement>(null);
   const layoutRef = useRef({ padL: 8, plotW: 1, visible: 1, from: 0, to: 0, bottom: 0 });
   const dragRef = useRef({ active: false, lastX: 0, acc: 0 });
-  const selectionRef = useRef<ZoomSelection>({ active: false, startBar: 0, endBar: 0 });
   const [macdOn, setMacdOn] = useState(true);
   const [stochOn, setStochOn] = useState(true);
 
@@ -80,10 +90,8 @@ export function FanTradeReview({
     const L = stock.full.c.length;
     const entryBar = trade?.entryBar ?? event.barIndex;
     const exitBar = trade?.exitBar ?? entryBar;
-    const fanBar = event.fanBar ?? event.barIndex;
-    const reactionBar = event.reactionBar ?? event.barIndex;
-    const impulseBar = event.impulseBar ?? fanBar;
-    return tradeChartRange(entryBar, exitBar, L, 80, 20, [fanBar, impulseBar, reactionBar]);
+    const extra = event.marks.length ? event.marks.map((m) => m.bar) : [event.fanBar ?? event.barIndex];
+    return tradeChartRange(entryBar, exitBar, L, 80, 20, extra);
   }, [stock, event, trade]);
 
   const series = useMemo(() => {
@@ -99,7 +107,7 @@ export function FanTradeReview({
     };
   }, [stock]);
 
-  const { view, zoomAtBar, panByBars, setRange, reset, isDefault } = useChartViewport(total, defWin);
+  const { view, zoomAtBar, panByBars, reset, isDefault } = useChartViewport(total, defWin);
 
   const chartH = PAD_T + PRICE_H + 10 + VOL_H
     + (macdOn ? 8 + MACD_H : 0)
@@ -115,9 +123,9 @@ export function FanTradeReview({
     if (N < 1) return;
 
     const entryBar = trade?.entryBar ?? event.barIndex;
-    const fanBar = event.fanBar ?? event.barIndex;
-    const reactionBar = event.reactionBar ?? event.barIndex;
-    const impulseBar = event.impulseBar ?? fanBar;
+    /** The setup starts at the first bar-pinning mark (a candle or the swing high). */
+    const setupBar = event.marks.find((m) => m.kind === 'candle' || m.kind === 'tracker')?.bar
+      ?? event.fanBar ?? event.barIndex;
 
     const o = full.o ?? full.c;
     const h = full.h ?? full.c;
@@ -135,13 +143,6 @@ export function FanTradeReview({
       cv.height = Math.floor(chartH * dpr);
       cv.style.width = cssW + 'px';
       cv.style.height = chartH + 'px';
-      const ov = overlayRef.current;
-      if (ov) {
-        ov.width = cv.width;
-        ov.height = cv.height;
-        ov.style.width = cssW + 'px';
-        ov.style.height = chartH + 'px';
-      }
       const ctx = cv.getContext('2d');
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -186,11 +187,9 @@ export function FanTradeReview({
         ctx.fillText(val.toFixed(val < 50 ? 2 : 1), padL + plotW + 6, yy);
       }
 
-      const setupLo = Math.min(fanBar, impulseBar, reactionBar);
-      const setupHi = Math.max(fanBar, reactionBar);
-      if (setupHi > setupLo) {
-        const sx0 = x(Math.max(from, setupLo));
-        const sx1 = x(Math.min(to, setupHi));
+      if (entryBar > setupBar) {
+        const sx0 = x(Math.max(from, setupBar));
+        const sx1 = x(Math.min(to, entryBar));
         ctx.fillStyle = 'rgba(124,92,191,0.08)';
         ctx.fillRect(Math.min(sx0, sx1), PAD_T, Math.max(4, Math.abs(sx1 - sx0)), PRICE_H);
       }
@@ -237,50 +236,62 @@ export function FanTradeReview({
       line(e100, E100);
       line(e200, E200);
 
-      const markLine = (bar: number, color: string) => {
-        if (bar < from || bar > to) return;
-        const cx = x(bar);
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1;
-        ctx.setLineDash([3, 3]);
-        ctx.beginPath(); ctx.moveTo(cx, PAD_T); ctx.lineTo(cx, PAD_T + PRICE_H); ctx.stroke();
-        ctx.setLineDash([]);
-      };
-      markLine(fanBar, FAN);
-      if (impulseBar !== fanBar) markLine(impulseBar, IMPULSE);
-
-      const diamond = (bar: number, price: number, color: string, tag: string) => {
-        if (bar < from || bar > to) return;
-        const cx = x(bar), cy = py(price), s = 5;
-        ctx.fillStyle = color;
+      // One mark per fired step: a dashed bar line, a glyph at the step's price, and
+      // its step number + label. Steps that fire on the same bar stack their labels.
+      const glyph = (kind: StepKind, cx: number, cy: number, color: string) => {
         ctx.beginPath();
-        ctx.moveTo(cx, cy - s);
-        ctx.lineTo(cx + s, cy);
-        ctx.lineTo(cx, cy + s);
-        ctx.lineTo(cx - s, cy);
+        if (kind === 'tracker') {
+          ctx.moveTo(cx, cy + 8); ctx.lineTo(cx - 5, cy - 2); ctx.lineTo(cx + 5, cy - 2);
+          ctx.closePath();
+          ctx.fillStyle = color;
+          ctx.fill();
+          return;
+        }
+        if (kind === 'instant') {
+          ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+          ctx.fillStyle = color;
+          ctx.fill();
+          return;
+        }
+        const r = kind === 'guard' ? 4 : 5;
+        ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r, cy); ctx.lineTo(cx, cy + r); ctx.lineTo(cx - r, cy);
         ctx.closePath();
-        ctx.fill();
+        if (kind === 'guard') {
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        } else {
+          ctx.fillStyle = color;
+          ctx.fill();
+        }
+      };
+
+      const linedBars = new Set<number>();
+      // Steps often share a bar and a price (an ema_cross and a fan_up both sit on the
+      // 50-EMA); stack colliding marks upwards so none is hidden.
+      const taken = new Map<string, number>();
+      for (const m of event.marks) {
+        if (m.bar < from || m.bar > to || !Number.isFinite(m.price)) continue;
+        const color = MARK_COLOR[m.kind];
+        const cx = x(m.bar), at = py(m.price);
+        if (!linedBars.has(m.bar)) {
+          linedBars.add(m.bar);
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1;
+          ctx.setLineDash([3, 3]);
+          ctx.beginPath(); ctx.moveTo(cx, PAD_T); ctx.lineTo(cx, PAD_T + PRICE_H); ctx.stroke();
+          ctx.setLineDash([]);
+        }
+        const slot = `${m.bar}:${Math.round(at / 11)}`;
+        const stacked = taken.get(slot) ?? 0;
+        taken.set(slot, stacked + 1);
+        const cy = at - stacked * 12;
+        glyph(m.kind, cx, cy, color);
+        ctx.fillStyle = color;
         ctx.font = "10px 'Helvetica Neue', Helvetica, Arial, sans-serif";
         ctx.textAlign = 'left';
         ctx.textBaseline = 'bottom';
-        ctx.fillText(tag, cx + 7, cy - 2);
-      };
-      diamond(fanBar, c[fanBar], FAN, 'fan');
-      if (impulseBar !== fanBar && impulseBar !== reactionBar) {
-        const cx = x(impulseBar), cy = py(h[impulseBar]);
-        if (impulseBar >= from && impulseBar <= to) {
-          ctx.fillStyle = IMPULSE;
-          ctx.beginPath();
-          ctx.moveTo(cx, cy + 8);
-          ctx.lineTo(cx - 5, cy - 2);
-          ctx.lineTo(cx + 5, cy - 2);
-          ctx.closePath();
-          ctx.fill();
-          ctx.font = "10px 'Helvetica Neue', Helvetica, Arial, sans-serif";
-          ctx.textAlign = 'left';
-          ctx.textBaseline = 'bottom';
-          ctx.fillText('high', cx + 7, cy - 2);
-        }
+        ctx.fillText(`${m.stepIndex + 1} ${m.label}`, cx + 7, cy - 2);
       }
 
       const hline = (price: number, color: string, dash: number[], tag: string) => {
@@ -316,7 +327,7 @@ export function FanTradeReview({
         ctx.font = "10px 'Helvetica Neue', Helvetica, Arial, sans-serif";
         ctx.textAlign = 'left';
         ctx.textBaseline = 'bottom';
-        ctx.fillText(fanBar === entryBar ? 'fan / tag' : 'tag', cx + 8, cy - 6);
+        ctx.fillText('entry', cx + 8, cy - 6);
       }
       if (trade && trade.exitBar >= from && trade.exitBar <= to) {
         const cx = x(trade.exitBar), cy = py(trade.exitPrice);
@@ -330,18 +341,29 @@ export function FanTradeReview({
       ctx.font = "11px 'Helvetica Neue', Helvetica, Arial, sans-serif";
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
+      const tail = '\u25b2 entry   \u25a0 exit   ';
+      const emaLegend = [['18', E18], ['50', E50], ['100', E100], ['200', E200]] as const;
+      const tailW = ctx.measureText(tail).width
+        + emaLegend.reduce((w, [lab]) => w + ctx.measureText(lab + '  ').width, 0);
+      const legendMax = padL + plotW - tailW - 12;
       let lx = padL + 4;
-      ctx.fillStyle = FAN;
-      ctx.fillText('◆ fan', lx, 6);
-      lx += ctx.measureText('◆ fan   ').width;
-      ctx.fillStyle = IMPULSE;
-      ctx.fillText('▾ high', lx, 6);
-      lx += ctx.measureText('▾ high   ').width;
+      for (const m of event.marks) {
+        const text = `${MARK_GLYPH[m.kind]} ${m.stepIndex + 1} ${m.label}`;
+        const w = ctx.measureText(text + '   ').width;
+        if (lx + w > legendMax) {
+          ctx.fillStyle = '#9aa1a8';
+          ctx.fillText('\u2026   ', lx, 6);
+          lx += ctx.measureText('\u2026   ').width;
+          break;
+        }
+        ctx.fillStyle = MARK_COLOR[m.kind];
+        ctx.fillText(text, lx, 6);
+        lx += w;
+      }
       ctx.fillStyle = '#6b7280';
-      const prefix = '▲ tag   ■ exit   ';
-      ctx.fillText(prefix, lx, 6);
-      lx += ctx.measureText(prefix).width;
-      for (const [lab, colr] of [['18', E18], ['50', E50], ['100', E100], ['200', E200]] as const) {
+      ctx.fillText(tail, lx, 6);
+      lx += ctx.measureText(tail).width;
+      for (const [lab, colr] of emaLegend) {
         ctx.fillStyle = colr;
         ctx.fillText(lab, lx, 6);
         lx += ctx.measureText(lab + '  ').width;
@@ -359,42 +381,9 @@ export function FanTradeReview({
       }
     };
 
-    const hideOverlay = () => {
-      const ov = overlayRef.current;
-      const g = ov?.getContext('2d');
-      if (ov && g) {
-        const dpr = window.devicePixelRatio || 1;
-        g.setTransform(dpr, 0, 0, dpr, 0, 0);
-        g.clearRect(0, 0, ov.width, ov.height);
-      }
-    };
-
-    const drawSelection = (mx: number, my: number) => {
-      const ov = overlayRef.current, cvEl = canvasRef.current;
-      if (!ov || !cvEl) return;
-      const layout = layoutRef.current;
-      if (!selectionRef.current.active || !isInPlot(mx, my, layout, PAD_T)) {
-        hideOverlay();
-        return;
-      }
-      const dpr = window.devicePixelRatio || 1;
-      const ctx = ov.getContext('2d');
-      if (!ctx) return;
-      const cssW = cvEl.getBoundingClientRect().width;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, cssW, chartH);
-      drawZoomSelection(ctx, layout, selectionRef.current.startBar, selectionRef.current.endBar, PAD_T);
-    };
-
     const onMove = (e: MouseEvent) => {
       const rect = cv.getBoundingClientRect();
       const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-      if (selectionRef.current.active) {
-        selectionRef.current.endBar = barIndexAtX(mx, layoutRef.current);
-        drawSelection(mx, my);
-        return;
-      }
       if (!dragRef.current.active) return;
       const { plotW, visible } = layoutRef.current;
       const barsPerPx = visible / Math.max(1, plotW);
@@ -406,31 +395,10 @@ export function FanTradeReview({
     };
     const onDown = (e: MouseEvent) => {
       const rect = cv.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-      const layout = layoutRef.current;
-      if (e.shiftKey && isInPlot(mx, my, layout, PAD_T)) {
-        const bar = barIndexAtX(mx, layout);
-        selectionRef.current = { active: true, startBar: bar, endBar: bar };
-        hideOverlay();
-        cv.style.cursor = 'crosshair';
-        drawSelection(mx, my);
-        return;
-      }
-      dragRef.current = { active: true, lastX: mx, acc: 0 };
+      dragRef.current = { active: true, lastX: e.clientX - rect.left, acc: 0 };
       cv.style.cursor = 'grabbing';
     };
     const endPointer = () => {
-      if (selectionRef.current.active) {
-        const { startBar, endBar } = selectionRef.current;
-        selectionRef.current.active = false;
-        hideOverlay();
-        cv.style.cursor = 'grab';
-        if (startBar !== endBar) {
-          setRange(Math.min(startBar, endBar), Math.max(startBar, endBar));
-        }
-        return;
-      }
       if (!dragRef.current.active) return;
       dragRef.current.active = false;
       cv.style.cursor = 'grab';
@@ -460,7 +428,7 @@ export function FanTradeReview({
       cv.removeEventListener('wheel', onWheel);
       window.removeEventListener('mouseup', endPointer);
     };
-  }, [stock, series, event, trade, trailEma, view.from, view.to, macdOn, stochOn, chartH, panByBars, zoomAtBar, setRange]);
+  }, [stock, series, event, trade, trailEma, view.from, view.to, macdOn, stochOn, chartH, panByBars, zoomAtBar]);
 
   const center = (view.from + view.to) / 2;
 
@@ -542,7 +510,6 @@ export function FanTradeReview({
           />
           <div style={{ position: 'relative' }}>
             <canvas ref={canvasRef} role="img" aria-label={`${event.ticker} trade candlestick chart`} style={{ display: 'block' }} />
-            <canvas ref={overlayRef} style={{ display: 'block', position: 'absolute', left: 0, top: 0, pointerEvents: 'none' }} />
           </div>
         </div>
       )}

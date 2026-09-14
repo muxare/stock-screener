@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { useScreener } from '../../store';
 import { HButton } from '../ui/Hoverable';
 import { Disclosure } from '../ui/Disclosure';
-import { FAN_STRATEGIES, fanEntryIndex, type FanStrategyId } from '../../lib/fanBacktest';
-import { AVG_VOL_PRESETS, MARKET_CAP_PRESETS, EMA200_RISING_PRESETS } from '../../lib/filters';
+import { fanEntryIndex } from '../../lib/fanBacktest';
+import { StrategyBuilder } from './StrategyBuilder';
+import { AVG_VOL_PRESETS, MARKET_CAP_PRESETS, EMA200_RISING_PRESETS } from '../../lib/screen/filters';
 import { FanTradeReview } from './FanTradeReview';
 import { FanExampleChart } from './FanExampleChart';
 
@@ -21,10 +22,9 @@ const card: React.CSSProperties = {
   background: '#fafbfb', border: '1px solid #eef0f1', borderRadius: 10, padding: '12px 14px',
 };
 const nf = (v: number, d = 2) => (Number.isFinite(v) ? v.toFixed(d) : '—');
-
-function Stat({ k, v, sub }: { k: string; v: string; sub?: string }) {
+function Stat({ k, v, sub, help }: { k: string; v: string; sub?: string; help?: string }) {
   return (
-    <div style={card}>
+    <div data-help={help} style={card}>
       <div style={{ fontSize: 10, color: '#98a0a8', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700 }}>{k}</div>
       <div style={{ fontSize: 20, fontWeight: 700, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>{v}</div>
       {sub && <div style={{ fontSize: 11, color: '#8b9298', marginTop: 2 }}>{sub}</div>}
@@ -76,7 +76,8 @@ export function FanBacktestModal() {
   const pct = (v: number) => `${v >= 0 ? '+' : ''}${nf(v)}%`;
   const usd = (v: number) => `${v < 0 ? '-' : ''}$${Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
   const usd2 = (v: number) => `${v < 0 ? '-' : ''}$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  const hint = FAN_STRATEGIES.find((s) => s.id === bt.config.strategy)?.hint;
+  const def = bt.config.strategy;
+  const exit = def.trade.exit;
   const reason = (s: string) => s.replace(/_/g, ' ');
   const inspectIdx = inspecting && r ? fanEntryIndex(r.entries, inspecting) : -1;
   const pageStart = safePage * PAGE_SIZE;
@@ -100,22 +101,22 @@ export function FanBacktestModal() {
         }}
       >
         <div style={{ padding: '20px 24px 15px', borderBottom: '1px solid #f0f1f2', flexShrink: 0 }}>
-          <div style={{ fontSize: 17, fontWeight: 700 }}>Fan strategy backtest</div>
+          <div data-help="backtest" style={{ fontSize: 17, fontWeight: 700 }}>Fan strategy backtest</div>
           <div style={{ fontSize: 12.5, color: '#8b9298', marginTop: 3 }}>
             Long-only. 1R under the pullback/50-EMA
-            {bt.config.trailEma === 50
+            {exit.trailEma === 50
               ? ', then trail the 50 after 1R breakeven. MACD does not cut a trailed trade.'
-              : bt.config.trailPivot
+              : exit.trailPivot
                 ? ', then trail 2¢ under confirmed pivot lows. MACD does not cut a trailed trade.'
-                : bt.config.targetWindow
+                : exit.targetWindow
                   ? ', exit at 2.5R (course target window).'
-                  : `, ${bt.config.targetR}R target.`}
+                  : `, ${exit.targetR}R target.`}
             {' '}Default is a 50-EMA tag while 18&gt;50&gt;100&gt;200. Swing account sizes each fill at 1R and stops at the window or ruin.
           </div>
         </div>
 
         <div style={{
-          flex: 1, minHeight: 0, display: 'flex', flexWrap: 'wrap',
+          flex: 1, minHeight: 0, display: 'flex', flexWrap: 'nowrap',
           overflow: inspecting ? 'auto' : 'hidden',
         }}>
           {inspecting ? (
@@ -124,7 +125,7 @@ export function FanBacktestModal() {
                 event={inspecting}
                 stock={inspectStock}
                 status={inspectStatus}
-                trailEma={bt.config.trailEma ?? null}
+                trailEma={exit.trailPivot ? null : exit.trailEma}
                 onClose={closeReview}
                 onRetry={() => retryDisplayed(inspecting.ticker)}
                 onPrev={() => stepReview(-1)}
@@ -137,118 +138,14 @@ export function FanBacktestModal() {
           ) : (
             <>
           <div style={{
-            flex: '1 1 520px', minWidth: 0, overflowY: 'auto',
+            flex: '1 1 520px', minWidth: 0, minHeight: 0, overflowY: 'auto',
             padding: '18px 24px', display: 'flex', flexDirection: 'column', gap: 16,
           }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 0.8fr 0.8fr', gap: 12 }}>
-            <div>
-              <label style={label}>Strategy</label>
-              <select
-                value={bt.config.strategy}
-                disabled={bt.running}
-                onChange={(e) => setCfg('strategy', e.target.value as FanStrategyId)}
-                style={field}
-              >
-                {FAN_STRATEGIES.map((s) => (
-                  <option key={s.id} value={s.id}>{s.label}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label style={label}>Target</label>
-              <select
-                value={
-                  bt.config.trailPivot ? 'pivot'
-                    : bt.config.targetWindow ? 'window'
-                      : bt.config.trailEma === 50 ? 'trail50'
-                        : String(bt.config.targetR)
-                }
-                disabled={bt.running}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (v === 'trail50') {
-                    setCfg('trailPivot', false);
-                    setCfg('targetWindow', false);
-                    setCfg('trailEma', 50);
-                  } else if (v === 'window') {
-                    setCfg('trailPivot', false);
-                    setCfg('trailEma', null);
-                    setCfg('targetWindow', true);
-                  } else if (v === 'pivot') {
-                    setCfg('trailEma', null);
-                    setCfg('targetWindow', false);
-                    setCfg('trailPivot', true);
-                  } else {
-                    setCfg('trailPivot', false);
-                    setCfg('targetWindow', false);
-                    setCfg('trailEma', null);
-                    setCfg('targetR', Number(v));
-                  }
-                }}
-                style={field}
-              >
-                <option value="2">2R</option>
-                <option value="3">3R</option>
-                <option value="4">4R</option>
-                <option value="window">2.5–3R window</option>
-                <option value="trail50">Trail 50-EMA</option>
-                <option value="pivot">Trail pivots</option>
-              </select>
-            </div>
-            <div>
-              <label style={label}>Max hold</label>
-              <select
-                value={bt.config.maxHoldBars == null ? '' : String(bt.config.maxHoldBars)}
-                disabled={bt.running}
-                onChange={(e) => setCfg('maxHoldBars', e.target.value === '' ? null : Number(e.target.value))}
-                style={field}
-              >
-                <option value="10">10 bars</option>
-                <option value="15">15 bars</option>
-                <option value="20">20 bars</option>
-                <option value="40">40 bars</option>
-                <option value="">Until exit</option>
-              </select>
-            </div>
-          </div>
-
-          {hint && <div style={{ fontSize: 12.5, color: '#6b7280', marginTop: -8 }}>{hint}</div>}
-
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#5b6168' }}>
-            <input
-              type="checkbox"
-              checked={bt.config.macdWindow}
-              disabled={bt.running}
-              onChange={(e) => setCfg('macdWindow', e.target.checked)}
-            />
-            {bt.config.trailEma || bt.config.trailPivot
-              ? '18–50 MACD window (entry filter only; does not cut a trailed trade)'
-              : '18–50 MACD window (entry filter + exit when line < signal)'}
-          </label>
-
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#5b6168' }}>
-            <input
-              type="checkbox"
-              checked={bt.config.continueEpisode !== false}
-              disabled={bt.running || bt.config.strategy === 'onset' || bt.config.strategy === 'bunn_bounce' || bt.config.strategy === 'bunn_cont'}
-              onChange={(e) => setCfg('continueEpisode', e.target.checked)}
-            />
-            Continuation pullbacks (re-arm after a new swing high)
-          </label>
-
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#5b6168' }}>
-            <input
-              type="checkbox"
-              checked={bt.config.breakevenAtR != null && bt.config.breakevenAtR > 0}
-              disabled={bt.running}
-              onChange={(e) => setCfg('breakevenAtR', e.target.checked ? 1 : null)}
-            />
-            Move stop to breakeven at 1R
-          </label>
+          <StrategyBuilder def={def} disabled={bt.running} />
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
             <div>
-              <label style={label}>Avg volume (20d)</label>
+              <label data-help="avg-volume" style={label}>Avg volume (20d)</label>
               <select
                 value={String(bt.config.minAvgVol ?? 0)}
                 disabled={bt.running}
@@ -262,7 +159,7 @@ export function FanBacktestModal() {
               </select>
             </div>
             <div>
-              <label style={label}>Market cap</label>
+              <label data-help="market-cap" style={label}>Market cap</label>
               <select
                 value={String(bt.config.minMarketCap ?? 0)}
                 disabled={bt.running}
@@ -276,7 +173,7 @@ export function FanBacktestModal() {
               </select>
             </div>
             <div>
-              <label style={label}>200-EMA slope</label>
+              <label data-help="ema200-slope" style={label}>200-EMA slope</label>
               <select
                 value={String(bt.config.ema200RisingBars ?? 21)}
                 disabled={bt.running}
@@ -295,10 +192,10 @@ export function FanBacktestModal() {
           </div>
 
           <div>
-            <div style={{ ...label, marginBottom: 8 }}>Swing account</div>
+            <div data-help="swing-account" style={{ ...label, marginBottom: 8 }}>Swing account</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 12 }}>
               <div>
-                <label style={label}>Starting cash</label>
+                <label data-help="swing-account" style={label}>Starting cash</label>
                 <select
                   value={String(bt.config.startCash ?? 10_000)}
                   disabled={bt.running}
@@ -313,7 +210,7 @@ export function FanBacktestModal() {
                 </select>
               </div>
               <div>
-                <label style={label}>Risk / trade</label>
+                <label data-help="risk-per-trade" style={label}>Risk / trade</label>
                 <select
                   value={String(bt.config.riskPct ?? 1)}
                   disabled={bt.running}
@@ -328,7 +225,7 @@ export function FanBacktestModal() {
                 </select>
               </div>
               <div>
-                <label style={label}>Max names</label>
+                <label data-help="max-names" style={label}>Max names</label>
                 <select
                   value={String(bt.config.maxPositions ?? 4)}
                   disabled={bt.running}
@@ -343,7 +240,7 @@ export function FanBacktestModal() {
                 </select>
               </div>
               <div>
-                <label style={label}>Window</label>
+                <label data-help="backtest-window" style={label}>Window</label>
                 <select
                   value={String(bt.config.windowMonths ?? 3)}
                   disabled={bt.running}
@@ -379,14 +276,14 @@ export function FanBacktestModal() {
           {r && (
             <>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
-                <Stat k="Entries" v={String(r.totalEntries)} sub={`${r.stocksWithEntries} names`} />
-                <Stat k="Win rate" v={`${nf(r.trades.winRate, 1)}%`} sub={`${r.trades.count} trades`} />
-                <Stat k="Expectancy" v={`${r.trades.avgR >= 0 ? '+' : ''}${nf(r.trades.avgR, 2)}R`} sub={`median ${nf(r.trades.medianR, 2)}R`} />
-                <Stat k="Hit target" v={`${nf(r.trades.hitTargetPct, 1)}%`} sub={`avg hold ${nf(r.trades.avgBarsHeld, 1)} bars`} />
+                <Stat help="backtest-entries" k="Entries" v={String(r.totalEntries)} sub={`${r.stocksWithEntries} names`} />
+                <Stat help="win-rate" k="Win rate" v={`${nf(r.trades.winRate, 1)}%`} sub={`${r.trades.count} trades`} />
+                <Stat help="expectancy" k="Expectancy" v={`${r.trades.avgR >= 0 ? '+' : ''}${nf(r.trades.avgR, 2)}R`} sub={`median ${nf(r.trades.medianR, 2)}R`} />
+                <Stat help="hit-target" k="Hit target" v={`${nf(r.trades.hitTargetPct, 1)}%`} sub={`avg hold ${nf(r.trades.avgBarsHeld, 1)} bars`} />
               </div>
 
               {Object.keys(r.trades.byExitReason).length > 0 && (
-                <div style={{ fontSize: 12, color: '#6b7280' }}>
+                <div data-help="exit-reasons" style={{ fontSize: 12, color: '#6b7280' }}>
                   Exits: {Object.entries(r.trades.byExitReason)
                     .sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))
                     .map(([k, v]) => `${reason(k)} ${v}`)
@@ -405,21 +302,25 @@ export function FanBacktestModal() {
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
                     <Stat
+                      help="swing-account"
                       k="End equity"
                       v={usd(r.account.endEquity)}
                       sub={`from ${usd(r.account.startCash)}`}
                     />
                     <Stat
+                      help={r.account.endReason === 'ruin' ? 'ruin' : 'swing-account'}
                       k="Return"
                       v={pct(r.account.returnPct)}
                       sub={r.account.endReason === 'ruin' ? 'stopped at ruin' : 'window ended'}
                     />
                     <Stat
+                      help="max-drawdown"
                       k="Max DD"
                       v={`${nf(r.account.maxDrawdownPct, 1)}%`}
                       sub="on realized equity"
                     />
                     <Stat
+                      help="taken-skipped"
                       k="Taken"
                       v={String(r.account.taken)}
                       sub={`${r.account.candidates} signals · skipped ${r.account.skipped.total}`}
@@ -427,12 +328,12 @@ export function FanBacktestModal() {
                   </div>
                   {r.account.curve.length > 1 && (
                     <div style={{ ...card, marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                      <div style={{ fontSize: 11, color: '#8b9298' }}>Equity after each exit</div>
+                      <div data-help="equity-curve" style={{ fontSize: 11, color: '#8b9298' }}>Equity after each exit</div>
                       <EquitySpark points={r.account.curve} />
                     </div>
                   )}
                   {r.account.skipped.total > 0 && (
-                    <div style={{ fontSize: 12, color: '#6b7280', marginTop: 8 }}>
+                    <div data-help="taken-skipped" style={{ fontSize: 12, color: '#6b7280', marginTop: 8 }}>
                       Skipped: no cash/size {r.account.skipped.noCash} · max names {r.account.skipped.maxPositions}
                     </div>
                   )}
@@ -501,7 +402,7 @@ export function FanBacktestModal() {
               )}
 
               <div>
-                <div style={{ ...label, marginBottom: 8 }}>Forward returns from entry (naive, ignore stops)</div>
+                <div data-help="forward-returns" style={{ ...label, marginBottom: 8 }}>Forward returns from entry (naive, ignore stops)</div>
                 <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.max(1, r.forwardHorizons.length)}, 1fr)`, gap: 8 }}>
                   {r.forwardHorizons.map((h) => (
                     <div key={h.h} style={card}>
@@ -515,7 +416,7 @@ export function FanBacktestModal() {
 
               {r.factors.some((f) => f.n > 0) && (
                 <div>
-                  <div style={{ ...label, marginBottom: 8 }}>MACD / Stoch RSI at entry vs realized R</div>
+                  <div data-help="indicators-at-entry" style={{ ...label, marginBottom: 8 }}>MACD / Stoch RSI at entry vs realized R</div>
                   <div style={{ border: '1px solid #eef0f1', borderRadius: 10, overflow: 'hidden', fontSize: 12.5 }}>
                     <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 56px 72px 72px', gap: 8, padding: '8px 12px', background: '#f7f8f8', fontWeight: 700, color: '#98a0a8', fontSize: 10.5, textTransform: 'uppercase' }}>
                       <div>Factor</div><div>Bucket</div>
@@ -632,7 +533,7 @@ export function FanBacktestModal() {
           <Disclosure note="Simulation is naive: stop wins ties with the target on the same bar; trail/breakeven update after the bar; no costs or gaps. Stops sit 0.25 ATR under the swing. The swing account sizes 1R from the initial stop, exits before same-day entries, and does not re-arm a name when a fill is skipped for cash or slots." />
           </div>
           <div style={{
-            flex: '1 1 460px', minWidth: 320, maxWidth: 560,
+            flex: '1 1 460px', minWidth: 320, maxWidth: 560, minHeight: 0,
             overflowY: 'auto', padding: '18px 20px 18px 18px',
             borderLeft: '1px solid #f0f1f2', background: '#fcfcfd',
           }}>

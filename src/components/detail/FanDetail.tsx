@@ -1,10 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Stock } from '../../lib/market';
 import { ema, macd, rsi, stochRsi } from '../../lib/indicators';
 import { classifyCloses } from '../../lib/fan';
 import { useChartViewport } from '../../lib/chart/viewport';
-import { barIndexAtX, drawZoomSelection, isInPlot, type ZoomSelection } from '../../lib/chart/interactions';
+import { bandAt, barCenterX, barIndexAtX, boxAt, isInPlot, type Band } from '../../lib/chart/interactions';
 import { drawMacdPane, drawStochPane } from '../../lib/chart/panes';
+import { drawPatternLayer, type PatternChip } from '../../lib/chart/patternLayer';
+import {
+  countsInRange, detectPatterns, markersAtBar, patternMeta, DEFAULT_PATTERNS, PATTERN_IDS,
+  type PatternId, type PatternMarker,
+} from '../../lib/patterns';
+import { toViewport, useHelpAnchor, type VirtualAnchor } from '../../help/anchors';
 import { HButton } from '../ui/Hoverable';
 import { ChartControls } from '../ui/ChartControls';
 import { Disclosure } from '../ui/Disclosure';
@@ -25,6 +31,10 @@ const PAD_T = 8;
 const PAD_B = 24;
 const PAD_L = 8;
 const PAD_R = 58;
+/** patterns listed in the crosshair readout before it collapses to a count */
+const MAX_READOUT_PATTERNS = 4;
+/** slack around a chip, so a 13 px tall label does not need to be hit exactly */
+const CHIP_PAD = 3;
 
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const col = (c: number) => (c >= 0 ? '#06a96b' : '#e23d3d');
@@ -44,10 +54,27 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
   const readoutRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef({ padL: PAD_L, plotW: 1, visible: 1, from: 0, to: 0, bottom: 0 });
   const dragRef = useRef({ active: false, lastX: 0, acc: 0 });
-  const selectionRef = useRef<ZoomSelection>({ active: false, startBar: 0, endBar: 0 });
+  // What the last draw put where, so a pointer position can be turned back
+  // into the thing under it. Filled in by `draw`, read by the help hit-test.
+  const hitRef = useRef({
+    chips: [] as PatternChip[],
+    bands: [] as Band[],
+    py: ((): number => 0) as (v: number) => number,
+    priceTop: PAD_T,
+    priceBottom: PAD_T + PRICE_H,
+  });
+  const publishHelp = useHelpAnchor();
 
   const [macdOn, setMacdOn] = useState(true);
   const [stochOn, setStochOn] = useState(true);
+  const [patterns, setPatterns] = useState<PatternId[]>(() => [...DEFAULT_PATTERNS]);
+
+  const togglePattern = useCallback((id: PatternId) => {
+    setPatterns((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+  }, []);
+  const setAllPatterns = useCallback((on: boolean) => {
+    setPatterns(on ? [...PATTERN_IDS] : []);
+  }, []);
 
   const cls = classifyCloses(stock.full.c);
   const emas = Number.isFinite(cls.emas.ema18) ? cls.emas : null;
@@ -65,7 +92,17 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
     };
   }, [stock]);
 
-  const { view, zoomAtBar, panByBars, setRange, reset, isDefault } = useChartViewport(
+  // Every detector runs over the full history — not the visible window, so
+  // panning never changes what a pattern is, and not only the selected ones, so
+  // the chooser can show how many of each are there before you turn it on. The
+  // chart then draws the subset that is selected.
+  const allMarkers = useMemo(() => detectPatterns(stock.full, PATTERN_IDS), [stock.full]);
+  const markers = useMemo(
+    () => allMarkers.filter((m) => patterns.includes(m.id)),
+    [allMarkers, patterns],
+  );
+
+  const { view, zoomAtBar, panByBars, reset, isDefault } = useChartViewport(
     nBars,
     { from: 0, to: Math.max(0, nBars - 1) },
   );
@@ -187,6 +224,17 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
         ctx.stroke();
       }
 
+      const chips = drawPatternLayer({
+        ctx, bars: stock.full, markers, from, to, x, py, cw, top: priceTop, height: PRICE_H,
+      });
+
+      // The panes document themselves: each is one rectangle with one topic
+      // behind it, which is the whole of their hit-test.
+      const bands: Band[] = [{ top: volTop, bottom: volTop + VOL_H, topic: 'volume' }];
+      if (macdOn) bands.push({ top: macdTop, bottom: macdTop + MACD_H, topic: 'macd' });
+      if (stochOn) bands.push({ top: stochTop, bottom: stochTop + STOCH_H, topic: 'stoch-rsi' });
+      hitRef.current = { chips, bands, py, priceTop, priceBottom: priceTop + PRICE_H };
+
       ctx.textAlign = 'left';
       let lx = padL + 4;
       for (const e of EMA_COLORS) {
@@ -246,13 +294,13 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
     const drawCrosshair = (mx: number, my: number) => {
       const cvEl = canvasRef.current, ov = overlayRef.current, readout = readoutRef.current;
       if (!cvEl || !ov || !readout) return;
-      const { padL, plotW, visible, from, to, bottom } = layoutRef.current;
-      if (mx < padL || mx > padL + plotW || my < PAD_T || my > bottom) {
+      const layout = layoutRef.current;
+      if (!isInPlot(mx, my, layout, PAD_T)) {
         hideCrosshair();
         return;
       }
-      const i = Math.max(from, Math.min(to, from + Math.round((mx - padL) / (plotW / visible) - 0.5)));
-      const snapX = padL + (i - from + 0.5) * (plotW / visible);
+      const i = barIndexAtX(mx, layout);
+      const snapX = barCenterX(i, layout);
       const dpr = window.devicePixelRatio || 1;
       const ctx = ov.getContext('2d');
       if (!ctx) return;
@@ -262,40 +310,81 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
       ctx.strokeStyle = 'rgba(21,23,26,0.35)';
       ctx.lineWidth = 1;
       ctx.setLineDash([4, 3]);
-      ctx.beginPath(); ctx.moveTo(snapX, PAD_T); ctx.lineTo(snapX, bottom); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(snapX, PAD_T); ctx.lineTo(snapX, layout.bottom); ctx.stroke();
       ctx.setLineDash([]);
       const bar = stock.full;
       const iso = bar.d?.[i] ?? '';
+      const hits = markersAtBar(markers, i);
+      const lines = [`${iso}  O ${fmt(bar.o[i])}  H ${fmt(bar.h[i])}  L ${fmt(bar.l[i])}  C ${fmt(bar.c[i])}`];
+      for (const m of hits.slice(0, MAX_READOUT_PATTERNS)) lines.push(`• ${m.note}`);
+      if (hits.length > MAX_READOUT_PATTERNS) lines.push(`• +${hits.length - MAX_READOUT_PATTERNS} more`);
       readout.style.display = 'block';
-      readout.textContent = `${iso}  O ${fmt(bar.o[i])}  H ${fmt(bar.h[i])}  L ${fmt(bar.l[i])}  C ${fmt(bar.c[i])}`;
+      readout.textContent = lines.join('\n');
     };
 
-    const drawSelection = (mx: number, my: number) => {
-      const ov = overlayRef.current, cvEl = canvasRef.current;
-      if (!ov || !cvEl) return;
+    /**
+     * What the pointer is on, as a help target. Cheapest first, and each step
+     * is more specific than the one after it: a chip is a label you aimed at, a
+     * marker on the hovered bar is the pattern you are pointing into, a pane is
+     * the indicator you are looking at.
+     *
+     * The card is kept off the bars it explains by handing the help layer the
+     * half of the plot the mark is in as its host rect: `placeNear` docks
+     * beside that, so the card lands in the quieter half rather than over the
+     * candles that are the answer.
+     */
+    const helpAt = (mx: number, my: number): VirtualAnchor | null => {
       const layout = layoutRef.current;
-      if (!selectionRef.current.active || !isInPlot(mx, my, layout, PAD_T)) {
-        hideCrosshair();
-        return;
+      const hit = hitRef.current;
+      if (mx < layout.padL || mx > layout.padL + layout.plotW) return null;
+      const origin = cv.getBoundingClientRect();
+      const mid = layout.padL + layout.plotW / 2;
+      const anchor = (key: string, topic: string, box: { left: number; top: number; right: number; bottom: number }, instance?: string) => {
+        const half = (box.left + box.right) / 2 < mid
+          ? { left: layout.padL, right: mid }
+          : { left: mid, right: layout.padL + layout.plotW };
+        return {
+          key,
+          topic,
+          instance,
+          rect: toViewport(box, origin),
+          host: toViewport({ ...half, top: PAD_T, bottom: layout.bottom }, origin),
+        };
+      };
+      const ofMarker = (m: PatternMarker) => {
+        const iso = stock.full.d?.[m.index];
+        return `${iso ? iso + ' — ' : ''}${m.note}`;
+      };
+
+      const chip = boxAt(mx, my, hit.chips, CHIP_PAD);
+      if (chip) {
+        const topic = patternMeta(chip.marker.id)?.help;
+        if (topic) return anchor(`chip:${chip.marker.id}@${chip.marker.index}`, topic, chip, ofMarker(chip.marker));
       }
-      const dpr = window.devicePixelRatio || 1;
-      const ctx = ov.getContext('2d');
-      if (!ctx) return;
-      const cssW = cvEl.getBoundingClientRect().width;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, cssW, chartH);
-      drawZoomSelection(ctx, layout, selectionRef.current.startBar, selectionRef.current.endBar, PAD_T);
+
+      if (my >= hit.priceTop && my <= hit.priceBottom) {
+        // No chip under the pointer: the patterns covering the hovered bar,
+        // best-ranked first — the same list the crosshair readout is printing.
+        const i = barIndexAtX(mx, layout);
+        const m = markersAtBar(markers, i)[0];
+        const topic = m && patternMeta(m.id)?.help;
+        if (!m || !topic) return null;
+        const cx = barCenterX(i, layout);
+        const y = hit.py(m.price);
+        return anchor(`mark:${m.id}@${m.index}`, topic, { left: cx - 6, right: cx + 6, top: y - 8, bottom: y + 8 }, ofMarker(m));
+      }
+
+      const band = bandAt(my, hit.bands);
+      if (!band) return null;
+      return anchor(`pane:${band.topic}`, band.topic, {
+        left: layout.padL, right: layout.padL + layout.plotW, top: band.top, bottom: band.bottom,
+      });
     };
 
     const onMove = (e: MouseEvent) => {
       const rect = cv.getBoundingClientRect();
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
-      if (selectionRef.current.active) {
-        selectionRef.current.endBar = barIndexAtX(mx, layoutRef.current);
-        drawSelection(mx, my);
-        return;
-      }
       if (dragRef.current.active) {
         const { plotW, visible } = layoutRef.current;
         const barsPerPx = visible / Math.max(1, plotW);
@@ -307,43 +396,27 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
         return;
       }
       drawCrosshair(mx, my);
+      publishHelp(helpAt(mx, my));
     };
 
     const onDown = (e: MouseEvent) => {
       const rect = cv.getBoundingClientRect();
       const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-      const layout = layoutRef.current;
-      if (e.shiftKey && isInPlot(mx, my, layout, PAD_T)) {
-        const bar = barIndexAtX(mx, layout);
-        selectionRef.current = { active: true, startBar: bar, endBar: bar };
-        hideCrosshair();
-        cv.style.cursor = 'crosshair';
-        drawSelection(mx, my);
-        return;
-      }
       dragRef.current = { active: true, lastX: mx, acc: 0 };
       cv.style.cursor = 'grabbing';
       hideCrosshair();
+      // Everything under the pointer is about to move; the target it named is
+      // no longer where it was.
+      publishHelp(null);
     };
 
     const endPointer = () => {
-      if (selectionRef.current.active) {
-        const { startBar, endBar } = selectionRef.current;
-        selectionRef.current.active = false;
-        hideCrosshair();
-        cv.style.cursor = 'grab';
-        if (startBar !== endBar) {
-          setRange(Math.min(startBar, endBar), Math.max(startBar, endBar));
-        }
-        return;
-      }
       if (!dragRef.current.active) return;
       dragRef.current.active = false;
       cv.style.cursor = 'grab';
     };
 
-    const onLeave = () => { hideCrosshair(); };
+    const onLeave = () => { hideCrosshair(); publishHelp(null); };
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
@@ -371,10 +444,15 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
       cv.removeEventListener('mouseleave', onLeave);
       cv.removeEventListener('wheel', onWheel);
       window.removeEventListener('mouseup', endPointer);
+      publishHelp(null);
     };
-  }, [stock, series, view.from, view.to, macdOn, stochOn, chartH, nBars, panByBars, zoomAtBar, setRange]);
+  }, [stock, series, markers, view.from, view.to, macdOn, stochOn, chartH, nBars, panByBars, zoomAtBar, publishHelp]);
 
   const center = (view.from + view.to) / 2;
+  const patternCounts = useMemo(
+    () => countsInRange(allMarkers, view.from, view.to),
+    [allMarkers, view.from, view.to],
+  );
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#fff', overflow: 'hidden' }}>
@@ -436,6 +514,12 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
                 onZoomOut={() => zoomAtBar(center, 1.3)}
                 onReset={reset}
                 canReset={!isDefault}
+                patterns={{
+                  selected: patterns,
+                  counts: patternCounts,
+                  onToggle: togglePattern,
+                  onAll: setAllPatterns,
+                }}
               />
             </div>
             <div style={{ position: 'relative', padding: '10px 14px 0 14px' }}>
@@ -447,7 +531,7 @@ export function FanDetail({ stock, onClose }: { stock: Stock; onClose: () => voi
                   position: 'absolute', left: 20, top: 16, display: 'none', pointerEvents: 'none',
                   background: 'rgba(255,255,255,0.92)', border: '1px solid #ececef', borderRadius: 7,
                   padding: '6px 9px', fontSize: 11, lineHeight: 1.5, zIndex: 2,
-                  fontVariantNumeric: 'tabular-nums',
+                  fontVariantNumeric: 'tabular-nums', whiteSpace: 'pre-line', maxWidth: 380,
                 }}
               />
             </div>
