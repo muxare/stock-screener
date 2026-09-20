@@ -206,9 +206,20 @@ gained a `.claude/` section**: A.1–A.4 built rules, skills, agents and hooks t
 had no pointer to from the one file it always reads.
 
 - Touch scope: `.claude/**`, `README.md`, `AGENTS.md`, `CLAUDE.md`.
-- Verify: `/verify` runs and reports; editing a `.ts` file triggers the lint hook; a
-  write to `dev-market.db` is refused; `/touch-scope` on this branch lists nothing outside
-  `.claude/**` and the four docs.
+- Verify, phase A's shared clauses (A.2's and A.3's): `/verify` runs and reports; editing
+  a `.ts` file triggers the lint hook; a write to `dev-market.db` is refused;
+  `/touch-scope` on this branch lists nothing outside `.claude/**`, `README.md`,
+  `AGENTS.md`, `CLAUDE.md`, the plan and the diary — six paths, not the "four docs" this
+  line said until 2026-09-20, since the plan and the diary are in scope by the skill's own
+  step 4 and not by this declaration.
+- Verify, A.5's own (added 2026-09-20, after `plan-auditor` made the same finding it made
+  on A.4 — three of the four clauses above test A.2's and A.3's artifacts, which this
+  phase does not touch, so on its own deliverables the phase had no acceptance test):
+  `diff CLAUDE.md AGENTS.md` prints nothing, which is the check phase B automates;
+  `~/.claude/CLAUDE.md` exists, carries only conventions that are true in every repository
+  and names no path in this one; and `README.md` takes a reader who has just cloned this
+  from nothing to a running app and to `docs/` without opening another file — `npm install`,
+  `npm run dev`, the three intents, and where the plans and the diary live.
 
 ---
 

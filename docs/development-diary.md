@@ -62,11 +62,25 @@ A.4 and A.5. That is the documented behaviour (sub-phases live inside the sectio
 ever widens an advisory warning, and `/touch-scope` with the model reads the per-sub-phase
 line properly. It is worth knowing before phase B makes a scope check blocking.
 
+`plan-auditor` ran on the branch before the PR, as A.4 established. Scope 5/5 inside,
+diary entry and status line present, and one finding worth acting on: three of A.5's four
+Verify clauses test A.2's and A.3's artifacts, which this branch does not touch, so the
+phase had **no acceptance test of its own three deliverables** — the same defect the same
+agent found in A.4. Twice in two phases is structural rather than an oversight: phase A
+was written with one shared Verify pair at the end, and every sub-phase after the first
+inherits clauses about somebody else's work. A.5 now carries a second Verify line for the
+user-level file, the README and the `diff`, and the shared line names the six paths it
+actually means instead of "the four docs", which was short by one. The audit was also
+right that it could not confirm the three shared clauses from reading the diff — they are
+run-time observations, and the fix is for the run to be visible, so their outputs go in
+the PR body rather than being asserted.
+
 ### Where it lives
 `~/.claude/CLAUDE.md` (new, outside the repository), `README.md` (rewritten from the Vite
 template), `CLAUDE.md` (rewritten: shared title, hierarchy note, `.claude/` section,
 `/verify`), `AGENTS.md` (`cp` of it). The plan's A.5 text carries a dated *Landed*
-paragraph with the three corrections, and the status line now reads phase A complete.
+paragraph with the three corrections, a Verify line of its own added from the audit, and
+the status line now reads phase A complete.
 
 ### How to test
 ```bash
