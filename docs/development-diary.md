@@ -1,5 +1,103 @@
 # Development diary
 
+## 2026-09-20 — CCA-F A.4: three review subagents, and the read-only frontmatter that does not exist
+
+### What changed
+Phase A.4 of `docs/cca-f-learning-plan.md`: `backtest-reviewer`, `plan-auditor` and
+`diary-writer` as project subagents. A.2 removed the dangling symlink that used to stand
+where `.claude/agents/` is, so this is the first time anything can load from there.
+
+All three are reviewers in the exam's sense — a separate context that gathers, judges and
+*returns findings*, leaving the decision and the edit with the session that asked. That is
+the whole design constraint, and the phase turned on being unable to state it the way the
+plan assumed.
+
+- **The plan said "read-only tools", and a subagent's `tools:` cannot say that.** The field
+  is whole-tool granularity: `Bash(git diff:*)` there does not narrow Bash, it fails to
+  match Bash and removes the shell outright, and a reviewer that cannot run `git diff` cannot
+  review a branch. Dropping Bash and reviewing through Read and Grep alone was the other
+  option and was rejected for the same reason — the unit of review here is a diff. So the
+  narrowing is a fourth hook, `.claude/hooks/read-only-shell.sh`, attached to each agent
+  through the `hooks:` map in **its own frontmatter** rather than through
+  `.claude/settings.json`: per-agent, so the main session keeps a full shell and only the
+  reviewers are constrained. This is the idiom the subagent documentation uses for exactly
+  this case, which is another point for the A.1–A.3 habit of reading the frontmatter
+  reference before writing frontmatter.
+- **The hook is an allowlist and is conservative where it cannot be sure.** Redirection,
+  backticks, `&` and `;` are refused up front — they exist to make something happen, and
+  without them a first-word allowlist is enough to reason about. Then every segment of a
+  pipeline is validated on its own first word against a short read-only git list
+  (`log diff show status blame merge-base rev-parse …`), `gh pr view|diff|list|checks`, and
+  the ordinary reading tools; `npm`, `npx`, `node`, `pnpm` and `yarn` get their own refusal
+  that names `/verify` and CI as where the gates belong, because "run the suite to check"
+  is the plausible-sounding thing a reviewer would otherwise do. Command substitutions are
+  peeled innermost-first and each half checked, since
+  `git diff $(git merge-base HEAD main)..HEAD` is the idiom every skill in this repo uses
+  and it has to pass. Anything unbalanced or nested more than eight deep is refused rather
+  than guessed at.
+- **`diary-writer` carries the same guard, which changes what its instructions are.** "Do
+  not commit, do not push, do not touch the code" was an instruction the model might follow;
+  now `git commit` returns a deny with a reason, and the entry-writing loop is structurally
+  incapable of landing its own entry. Writing *this* entry hit it on the first call: a
+  compound `git diff --stat … ; git log …` was refused and had to be split.
+- **`/diary-entry` is now a six-line wrapper over the agent.** The skill used to carry the
+  whole house format inline; it now sets `context: fork` and `agent: diary-writer` and adds
+  only what is specific to being invoked as a command (resolve the phase from the branch
+  name when no argument is given; print the entry in full, because reviewing it in the
+  reply is cheaper than reviewing it as a diff). Its `allowed-tools` line is gone — the
+  agent's `tools:` governs a forked agent, and two tool lists would have drifted. The format
+  is stated once, in `.claude/agents/diary-writer.md`.
+- **`plan-auditor` does not restate the touch-scope rule, it points at it.** Section 1 of
+  its audit is "read `.claude/skills/touch-scope/SKILL.md` and follow its steps 1–4" — the
+  same pointer-not-copy discipline A.1 established for documents, for the same reason: two
+  copies of a scope rule drift, and the copy that drifts is the one nobody is reading. Its
+  other two sections are the `Verify:` line, clause by clause into met / not met / needs a
+  human with a `path:line` citation required for *met*, and whether the diary entry and the
+  status line exist. It ends explicitly without making the merge call, because a touch scope
+  can be widened deliberately and that is the author's decision to record. Its output block
+  is kept parseable because phase B runs this same agent headless in CI.
+- **`backtest-reviewer` encodes the 2026-09-14 measurements, not general advice.** Its five
+  checks are hardening 6.2's, in the order they bite on this engine: no cost field on
+  `FanBacktestConfig` and stops tight enough that a 1.5% round trip takes the dev dataset's
+  mean R from +0.506 to −0.068; the t > 3.0 threshold that follows from the builder being a
+  search machine; month-clustered standard errors (ICC 0.08–0.11, kaggle 4.53 naive → 2.24
+  clustered), so a per-trade t is always a finding; look-ahead; survivorship. Its
+  description names `src/lib/fanBacktest.ts`, `fan.ts`, `fanSignals.ts` and
+  `src/lib/strategy/**` and says "use proactively", which is what gets it dispatched
+  automatically on the diffs that need it. It is told to name the checks it *could not* run —
+  a skipped check that goes unmentioned is the one failure mode this agent cannot afford.
+- **A.4 has no `Verify:` line of its own.** Phase A carries a single Touch scope / Verify
+  pair at the end of A.5, and its clauses are A.3's (the lint hook fires, a write to
+  `dev-market.db` is refused). By `plan-auditor`'s own rule that is a gap in the plan rather
+  than a pass, so it is recorded here; the manual checks below are what stands in for it.
+
+The plan's A.4 text now carries a dated *Landed* paragraph recording the first two of these
+corrections, and the status line is updated to name A.4.
+
+### Where it lives
+`.claude/agents/{backtest-reviewer,plan-auditor,diary-writer}.md` (new),
+`.claude/hooks/read-only-shell.sh` (new — a fourth hook, not wired into
+`.claude/settings.json`; it is referenced only from the three agents' frontmatter), and
+`.claude/skills/diary-entry/SKILL.md`, reduced to the wrapper.
+
+### How to test
+Agents and their hooks are read when a session starts, so restart Claude Code in the repo
+first. Then: `/diary-entry A.4` should fork into `diary-writer` rather than run inline; ask
+`plan-auditor` to audit this branch and it should report against
+`docs/cca-f-learning-plan.md` phase A.4 without editing anything; ask any of the three to
+commit, run `npm test`, or post a PR comment and it should come back with the hook's refusal
+rather than a completed action.
+
+The hook also runs standalone on a line of JSON, which is how it was developed — the first
+prints a deny with a reason, the second prints nothing and exits 0:
+
+```bash
+printf '{"tool_name":"Bash","tool_input":{"command":"git commit -m x"}}' \
+  | bash .claude/hooks/read-only-shell.sh
+printf '{"tool_name":"Bash","tool_input":{"command":"git diff $(git merge-base HEAD main)..HEAD"}}' \
+  | bash .claude/hooks/read-only-shell.sh
+```
+
 ## 2026-09-20 — CCA-F A.3: three hooks, and the one the plan asked for that cannot exist
 
 ### What changed
