@@ -1,13 +1,45 @@
 {
   "hooks": {
     "PreToolUse": [
-      
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/guard-paths.sh"],
+            "statusMessage": "Checking the write target",
+            "timeout": 15
+          }
+        ]
+      }
     ],
-    "UserPromptSubmit": [
-      
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/lint-edited.sh"],
+            "statusMessage": "Linting the edited file",
+            "timeout": 60
+          }
+        ]
+      }
     ],
-    "SessionStart": [
-      
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/test-if-code-changed.sh"],
+            "statusMessage": "Running the test suite",
+            "timeout": 180
+          }
+        ]
+      }
     ]
   },
   "env": {
