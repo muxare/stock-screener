@@ -1,6 +1,6 @@
 # CCA-F learning plan — applying the Claude Certified Architect material to this repo
 
-Status (2026-09-20): **in progress — phase A started (A.1 landed)**. Written from Mikael's question of
+Status (2026-09-20): **in progress — phase A in progress (A.1 and A.2 landed)**. Written from Mikael's question of
 what to implement here to enforce the learning of the Anthropic *Claude Certified
 Architect – Foundations* (CCA-F) certification content. Intent 3 of
 `docs/platform-hardening-plan.md` already names CCA-F as a product goal; this document is
@@ -34,7 +34,7 @@ Measured against the domains, not against the hardening plan:
 |---|---|---|
 | 1 Agentic | Hardening stage 7 sketches the single-call → tool-runner → managed-agent ladder | Nothing built. No Agent SDK use, no subagent orchestration anywhere |
 | 2 Tools / MCP | `server/handlers.ts` is a transport-agnostic seam — tools can wrap it without touching the engine | No MCP server, no tool definitions, no structured tool errors |
-| 3 Claude Code | `CLAUDE.md` (+ `AGENTS.md` copy), `ACRONYMS.md`, one CI workflow | `.claude/agents`, `.claude/commands`, `.claude/skills` are **empty**; every hook array in `.claude/settings.json` is empty; no `.claude/rules/`; `README.md` is still the Vite template |
+| 3 Claude Code | `CLAUDE.md` (+ `AGENTS.md` copy), `ACRONYMS.md`, one CI workflow | `.claude/agents`, `.claude/commands`, `.claude/skills` are **dangling symlinks** into the deleted `workflow/` (removed in A.2); every hook array in `.claude/settings.json` is empty; no `.claude/rules/`; `README.md` is still the Vite template |
 | 4 Prompting / output | Stage 3 of the hardening plan specifies structured outputs and per-row confidence | Nothing built. No nullable-field rule, no retry loop, no batch path |
 | 5 Context / reliability | `docs/development-diary.md` is the cross-session memory; plan docs carry decisions | No eval harness, no error-propagation design, no cost/rate controls, no log redaction |
 
