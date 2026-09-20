@@ -1,6 +1,6 @@
 # CCA-F learning plan — applying the Claude Certified Architect material to this repo
 
-Status (2026-09-20): **in progress — phase A in progress (A.1, A.2 and A.3 landed)**. Written from Mikael's question of
+Status (2026-09-20): **in progress — phase A in progress (A.1, A.2, A.3 and A.4 landed)**. Written from Mikael's question of
 what to implement here to enforce the learning of the Anthropic *Claude Certified
 Architect – Foundations* (CCA-F) certification content. Intent 3 of
 `docs/platform-hardening-plan.md` already names CCA-F as a product goal; this document is
@@ -110,7 +110,9 @@ The mapping to maintain is *source glob → rule → doc pointer*, and `docs/` s
 it is legible (split it for human reasons past ~15 files, then fix the pointers).
 
 **A.2 — Skills (slash commands).** In `.claude/skills/`, each with `allowed-tools`
-declared and `context: fork` where the work should not pollute the main session:
+declared and `context: fork` where the work should not pollute the main session (A.4
+amended this for `/diary-entry`: a skill that forks to a named agent declares no
+`allowed-tools` of its own, because the agent's `tools:` governs and two tool lists drift):
 
 - `/diary-entry <phase>` — appends a dated entry in the house format from the current
   diff and the plan's phase text. Reads git; writes only `docs/development-diary.md`.
@@ -156,6 +158,30 @@ plans that use one — the authoritative check remains `/touch-scope` and, from 
   trial count recorded) and returns findings, not edits.
 - `plan-auditor` — read-only; checks a PR against its plan's touch scope and verify steps.
 - `diary-writer` — the agent behind `/diary-entry`, so the format lives in one place.
+
+*Landed 2026-09-20, with two corrections to the text above.* "Read-only tools" cannot be
+said in a subagent's frontmatter: `tools:` is whole-tool granularity, so `Bash(git diff:*)`
+there removes Bash entirely rather than narrowing it, and a reviewer with no shell cannot
+read a diff. The enforcement is therefore a fourth file,
+`.claude/hooks/read-only-shell.sh`, attached to each agent through the `hooks:` map in its
+own frontmatter — the idiom the subagent documentation itself uses for a read-only agent
+that still needs a shell. `diary-writer` carries the same guard, which turns "do not commit,
+do not push" from an instruction into a refusal. And `plan-auditor` does **not** restate the
+touch-scope rule: it points at `.claude/skills/touch-scope/SKILL.md`, the same
+pointer-not-copy discipline A.1 established for documents, because two copies of a scope
+rule drift.
+
+- Touch scope: `.claude/agents/**`, `.claude/hooks/read-only-shell.sh`,
+  `.claude/skills/diary-entry/SKILL.md`.
+- Verify (added 2026-09-20, after `plan-auditor` audited its own branch and found that A.4
+  had no acceptance test of its own — phase A's shared Verify line at the end of A.5 is
+  A.2's and A.3's): in a **restarted** session, since agents and their frontmatter hooks
+  load at session start, all three agents appear — malformed YAML in a `hooks:` map drops
+  an agent silently, so "it loads" is the first clause; `/diary-entry <phase>` forks into
+  `diary-writer` rather than running inline; `git diff $(git merge-base HEAD main)..HEAD`
+  runs inside any of the three, while asking one to commit, to run `npm test`, or to
+  comment on a PR comes back as the hook's refusal with its reason; `plan-auditor` audits a
+  branch and changes no file.
 
 **A.5 — CLAUDE.md hierarchy and README.** Add a *user-level* `~/.claude/CLAUDE.md`
 for personal conventions (language of commit messages, preferred verbosity) so the project
