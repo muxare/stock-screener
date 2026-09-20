@@ -1,6 +1,6 @@
 # CCA-F learning plan — applying the Claude Certified Architect material to this repo
 
-Status (2026-09-20): **in progress — phase A in progress (A.1, A.2, A.3 and A.4 landed)**. Written from Mikael's question of
+Status (2026-09-20): **in progress — phase A complete (A.1–A.5 landed); phase B is next**. Written from Mikael's question of
 what to implement here to enforce the learning of the Anthropic *Claude Certified
 Architect – Foundations* (CCA-F) certification content. Intent 3 of
 `docs/platform-hardening-plan.md` already names CCA-F as a product goal; this document is
@@ -190,10 +190,36 @@ the app is, the three intents, how to run, where the plans live. Keep `AGENTS.md
 byte-identical copy of `CLAUDE.md` (it is today except for the title line) and add a
 CI check for that in phase B.
 
+*Landed 2026-09-20, with three corrections to the text above.* **Byte-identical and
+"except for the title line" cannot both hold**, and phase B's check is a plain `diff`, so
+the shared text now opens with a title that is true under either name
+(`# stock-screener — agent guide`) and a line telling the reader which of the two files
+they are in; `cp CLAUDE.md AGENTS.md` is the whole maintenance rule. A symlink would have
+made the check unnecessary and was rejected on this repo's own evidence — the dangling
+`.claude/{skills,agents,commands}` symlinks A.2 removed had made that directory a no-op for
+months without anyone noticing. **The user-level file is new guidance, not a migration**:
+the plan framed it as relief for the project file, but `CLAUDE.md` carried no personal
+conventions to move out, so `~/.claude/CLAUDE.md` was written from how the work here has
+actually been asked for. It also sits outside the repository, which no touch scope can
+cover and no diff can show, so the diary entry records what it says. And **the project file
+gained a `.claude/` section**: A.1–A.4 built rules, skills, agents and hooks that a session
+had no pointer to from the one file it always reads.
+
 - Touch scope: `.claude/**`, `README.md`, `AGENTS.md`, `CLAUDE.md`.
-- Verify: `/verify` runs and reports; editing a `.ts` file triggers the lint hook; a
-  write to `dev-market.db` is refused; `/touch-scope` on this branch lists nothing outside
-  `.claude/**` and the four docs.
+- Verify, phase A's shared clauses (A.2's and A.3's): `/verify` runs and reports; editing
+  a `.ts` file triggers the lint hook; a write to `dev-market.db` is refused;
+  `/touch-scope` on this branch lists nothing outside `.claude/**`, `README.md`,
+  `AGENTS.md`, `CLAUDE.md`, the plan and the diary — six paths, not the "four docs" this
+  line said until 2026-09-20, since the plan and the diary are in scope by the skill's own
+  step 4 and not by this declaration.
+- Verify, A.5's own (added 2026-09-20, after `plan-auditor` made the same finding it made
+  on A.4 — three of the four clauses above test A.2's and A.3's artifacts, which this
+  phase does not touch, so on its own deliverables the phase had no acceptance test):
+  `diff CLAUDE.md AGENTS.md` prints nothing, which is the check phase B automates;
+  `~/.claude/CLAUDE.md` exists, carries only conventions that are true in every repository
+  and names no path in this one; and `README.md` takes a reader who has just cloned this
+  from nothing to a running app and to `docs/` without opening another file — `npm install`,
+  `npm run dev`, the three intents, and where the plans and the diary live.
 
 ---
 

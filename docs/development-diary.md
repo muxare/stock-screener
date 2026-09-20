@@ -1,5 +1,100 @@
 # Development diary
 
+## 2026-09-20 — CCA-F A.5: the three levels of guidance, and a README that describes this repo
+
+### What changed
+Phase A.5 of `docs/cca-f-learning-plan.md`, which closes phase A: a user-level
+`~/.claude/CLAUDE.md`, a real `README.md`, and `CLAUDE.md`/`AGENTS.md` made genuinely
+identical rather than nearly so.
+
+The exam objective behind this phase is the CLAUDE.md hierarchy — user, project,
+directory — and the point of the hierarchy is that each level answers a different
+question. Writing it out is what exposed that two of the three levels here were carrying
+the wrong thing.
+
+- **The user level was empty, and nothing moved into it.** The plan framed
+  `~/.claude/CLAUDE.md` as relief for the project file, "so the project file stops carrying
+  them". It was not carrying them: `CLAUDE.md` held stack, commands, layout and process,
+  all of it project-true, and no personal preference at all. So the user file is new
+  guidance rather than a migration, written from how the work in this repo has actually
+  been asked for over the A.1–A.4 branches: do the ordinary things without asking and stop
+  at the gates that leave the machine; English in every file whatever language the chat is
+  in; short in chat, prose in documents, absolute dates; conventional-commit subjects with
+  a scope, a branch per unit of work, and commit only when asked. It deliberately names no
+  path in this repository, because it loads in every other one too.
+- **That file is outside the repository, which is the part worth recording.** No touch
+  scope covers it, no diff shows it, and a fresh clone does not get it — so this entry is
+  the only record in the repo that it exists and what it says. Anyone reconstructing this
+  machine's setup reads it here.
+- **`README.md` was still the Vite template**, four screens of advice about enabling
+  type-aware lint rules, which is the one thing in the repo that told a first-time reader
+  nothing true. It now says what the app does (screen, detail, backtest, strategy builder,
+  with the paths), the three intents from `docs/platform-hardening-plan.md`, how to run it,
+  where the data comes from and that `.db` files are generated, and how the work is
+  governed. It also carries the warning that a backtest number is not self-evidently
+  meaningful — costs unmodelled, per-trade *t* overstated, phase 6.2 for the measurements —
+  because the README is where someone who has just cloned this will form their first
+  impression of what the numbers mean.
+- **"Byte-identical except for the title line" is not a thing, and phase B needs it to
+  be.** `CLAUDE.md` and `AGENTS.md` differed in exactly one line: their own names. Phase B
+  wants `diff CLAUDE.md AGENTS.md` as a plain shell step — the exam point being to know
+  when *not* to spend a model call — and that step cannot have an exception for line 1. The
+  shared text now opens with a title true under either name, `# stock-screener — agent
+  guide`, and a second line telling the reader which of the two files they are holding and
+  that `cp CLAUDE.md AGENTS.md` is the whole maintenance rule. A symlink would have made
+  the check moot; it was rejected on this repo's own evidence, since the dangling
+  `.claude/{skills,agents,commands}` symlinks that A.2 removed had quietly made that whole
+  directory a no-op since the workflow layer was deleted.
+- **The project file now points at what A.1–A.4 built.** Four kinds of configuration —
+  rules, skills, agents, hooks — had landed without the one file every session reads
+  mentioning any of them, so a session only found `/verify` or `backtest-reviewer` by
+  listing the directory. `CLAUDE.md` gained a short section naming each, and the "run test
+  and lint before considering any change done" line now names `/verify`, which runs all
+  three gates even when an earlier one fails. It also states the hierarchy rule explicitly
+  at the top: personal conventions go in the user file, path-specific guidance goes in
+  `.claude/rules/`, and neither belongs here.
+
+Phase A's shared Verify line is A.2's and A.3's, and running it against this branch is what
+this phase gets to claim: the gates pass, both hooks behave, and the scope resolver reads
+this branch correctly. One observation from doing so — `.claude/hooks/plan-scope.sh`
+resolves a branch to the `Phase A` *section* and therefore unions the Touch scope lines of
+A.4 and A.5. That is the documented behaviour (sub-phases live inside the section), it only
+ever widens an advisory warning, and `/touch-scope` with the model reads the per-sub-phase
+line properly. It is worth knowing before phase B makes a scope check blocking.
+
+`plan-auditor` ran on the branch before the PR, as A.4 established. Scope 5/5 inside,
+diary entry and status line present, and one finding worth acting on: three of A.5's four
+Verify clauses test A.2's and A.3's artifacts, which this branch does not touch, so the
+phase had **no acceptance test of its own three deliverables** — the same defect the same
+agent found in A.4. Twice in two phases is structural rather than an oversight: phase A
+was written with one shared Verify pair at the end, and every sub-phase after the first
+inherits clauses about somebody else's work. A.5 now carries a second Verify line for the
+user-level file, the README and the `diff`, and the shared line names the six paths it
+actually means instead of "the four docs", which was short by one. The audit was also
+right that it could not confirm the three shared clauses from reading the diff — they are
+run-time observations, and the fix is for the run to be visible, so their outputs go in
+the PR body rather than being asserted.
+
+### Where it lives
+`~/.claude/CLAUDE.md` (new, outside the repository), `README.md` (rewritten from the Vite
+template), `CLAUDE.md` (rewritten: shared title, hierarchy note, `.claude/` section,
+`/verify`), `AGENTS.md` (`cp` of it). The plan's A.5 text carries a dated *Landed*
+paragraph with the three corrections, a Verify line of its own added from the audit, and
+the status line now reads phase A complete.
+
+### How to test
+```bash
+diff CLAUDE.md AGENTS.md                   # no output — this is phase B's check
+npm run typecheck && npm run lint && npm run test
+bash .claude/hooks/plan-scope.sh           # the scope this branch is measured against
+printf '{"session_id":"t","tool_input":{"file_path":"'$PWD'/dev-market.db"}}' \
+  | bash .claude/hooks/guard-paths.sh      # deny, with the reason
+```
+For the lint hook, write a one-line `.ts` file with an unused constant, feed its path to
+`.claude/hooks/lint-edited.sh` the same way, and read the `additionalContext` it returns;
+a clean file returns nothing, which is the hook working, not the hook missing. `/verify`
+reported `typecheck pass`, `lint pass`, `test pass (541 passed)` on this branch.
+
 ## 2026-09-20 — CCA-F A.4: three review subagents, and the read-only frontmatter that does not exist
 
 ### What changed
