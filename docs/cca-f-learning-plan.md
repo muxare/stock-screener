@@ -110,7 +110,9 @@ The mapping to maintain is *source glob → rule → doc pointer*, and `docs/` s
 it is legible (split it for human reasons past ~15 files, then fix the pointers).
 
 **A.2 — Skills (slash commands).** In `.claude/skills/`, each with `allowed-tools`
-declared and `context: fork` where the work should not pollute the main session:
+declared and `context: fork` where the work should not pollute the main session (A.4
+amended this for `/diary-entry`: a skill that forks to a named agent declares no
+`allowed-tools` of its own, because the agent's `tools:` governs and two tool lists drift):
 
 - `/diary-entry <phase>` — appends a dated entry in the house format from the current
   diff and the plan's phase text. Reads git; writes only `docs/development-diary.md`.
@@ -168,6 +170,18 @@ do not push" from an instruction into a refusal. And `plan-auditor` does **not**
 touch-scope rule: it points at `.claude/skills/touch-scope/SKILL.md`, the same
 pointer-not-copy discipline A.1 established for documents, because two copies of a scope
 rule drift.
+
+- Touch scope: `.claude/agents/**`, `.claude/hooks/read-only-shell.sh`,
+  `.claude/skills/diary-entry/SKILL.md`.
+- Verify (added 2026-09-20, after `plan-auditor` audited its own branch and found that A.4
+  had no acceptance test of its own — phase A's shared Verify line at the end of A.5 is
+  A.2's and A.3's): in a **restarted** session, since agents and their frontmatter hooks
+  load at session start, all three agents appear — malformed YAML in a `hooks:` map drops
+  an agent silently, so "it loads" is the first clause; `/diary-entry <phase>` forks into
+  `diary-writer` rather than running inline; `git diff $(git merge-base HEAD main)..HEAD`
+  runs inside any of the three, while asking one to commit, to run `npm test`, or to
+  comment on a PR comes back as the hook's refusal with its reason; `plan-auditor` audits a
+  branch and changes no file.
 
 **A.5 — CLAUDE.md hierarchy and README.** Add a *user-level* `~/.claude/CLAUDE.md`
 for personal conventions (language of commit messages, preferred verbosity) so the project

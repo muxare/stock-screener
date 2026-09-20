@@ -55,6 +55,13 @@ validate_segment() {
   case "$first" in
     git)
       [ -n "$second" ] || return 0
+      # `git branch` reads or destroys depending on its flags, so it cannot go in the
+      # subcommand list; the read-only forms are matched whole. Resolving the current
+      # branch is the first thing both auditors do.
+      case "$seg" in
+        "git branch"|"git branch -a"|"git branch --all"|"git branch -v"|"git branch -vv"|\
+        "git branch -av"|"git branch --show-current"|"git branch --list "*) return 0 ;;
+      esac
       case "$git_ok" in
         *" $second "*) return 0 ;;
         *) deny "\`git $second\` is refused: this agent is read-only and returns findings, not changes. The read-only git it has is:${git_ok}" ;;

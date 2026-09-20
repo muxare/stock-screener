@@ -66,10 +66,16 @@ plan assumed.
   `src/lib/strategy/**` and says "use proactively", which is what gets it dispatched
   automatically on the diffs that need it. It is told to name the checks it *could not* run —
   a skipped check that goes unmentioned is the one failure mode this agent cannot afford.
-- **A.4 has no `Verify:` line of its own.** Phase A carries a single Touch scope / Verify
-  pair at the end of A.5, and its clauses are A.3's (the lint hook fires, a write to
-  `dev-market.db` is refused). By `plan-auditor`'s own rule that is a gap in the plan rather
-  than a pass, so it is recorded here; the manual checks below are what stands in for it.
+- **A.4 had no `Verify:` line of its own, and its own auditor is what found that.** Phase A
+  carries a single Touch scope / Verify pair at the end of A.5 whose clauses are A.2's and
+  A.3's. Running `plan-auditor` on this branch before opening the PR returned
+  `Verify: 1/4 clauses met, 3 need a human` and made the point that by its own rule an
+  absent per-phase Verify is a gap in the plan rather than a pass. A.4 now carries one, and
+  it is the manual list below. The audit is worth reading as the first evidence that these
+  agents do the thing they were built for: it also caught that A.2's text still claims every
+  skill declares `allowed-tools` — which this branch made false — and that the new hook was
+  committed without its executable bit. Both are fixed here, and the guard learned the
+  read-only forms of `git branch`, which the audit hit three times.
 
 The plan's A.4 text now carries a dated *Landed* paragraph recording the first two of these
 corrections, and the status line is updated to name A.4.
