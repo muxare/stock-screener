@@ -1,5 +1,91 @@
 # Development diary
 
+## 2026-09-20 — CCA-F A.3: three hooks, and the one the plan asked for that cannot exist
+
+### What changed
+Phase A.3 of `docs/cca-f-learning-plan.md`: the empty hook arrays in
+`.claude/settings.json` are filled, by four scripts under `.claude/hooks/`.
+
+The exam's framing of hooks is "every time X happens", as against an instruction the model
+may or may not follow. The gap A.3 closes is local: `npm run lint` and `npm run test` are
+already enforced on every PR by `.github/workflows/ci.yml`, but nothing ran them between
+one edit and the next. CI stays the hard gate, so only the one hook that guards against a
+write that is always a mistake blocks anything.
+
+- **`PreToolUse` on `Edit|Write` → `guard-paths.sh`, the only hook here that refuses.**
+  A `*.db`, a `.env*`, anything under `dist/` or `node_modules/`: generated files and
+  secrets, never source, so the answer is `permissionDecision: "deny"` with a reason that
+  says which import command regenerates the database. Everything else it has to say about
+  a path, it says as `additionalContext` and gets out of the way.
+- **The touch-scope warning resolves the plan from the branch name, and stays silent when
+  it cannot.** `plan-scope.sh` maps `cca-f/phase-a-3-hooks` to `docs/cca-f-learning-plan.md`
+  phase A by longest-prefix match on the plan slugs, finds the `### Phase A` section, and
+  takes the backticked paths out of its `Touch scope:` line — backticks rather than comma
+  splitting, because that drops the prose ("as stage 3", "(new)", "plus") for free. Plans
+  that declare scope in a table column instead (borsdata, screener-parity) yield nothing
+  and the hook says nothing: a scope check that guesses is worse than none, and the
+  authoritative one is `/touch-scope`, which has a model to read the table. The warning
+  fires once per file per session, keyed on `session_id` under `$TMPDIR`, because a
+  warning repeated on every edit is how an advisory check teaches people to ignore it.
+  It also skips any path outside the repo, which is the first thing the live hook got
+  wrong: it warned about a scratchpad file, and a file that is not in the project is not
+  part of the branch.
+- **`PostToolUse` on `Edit|Write` → `lint-edited.sh` reports two things, not one.** The
+  obvious one is the problems `eslint --fix` could not repair. The one worth having is that
+  `--fix` *rewrote the file*, which it detects by hashing before and after: an edit built
+  against the pre-fix text would miss, and the model has no other way to know. It also says
+  so when eslint could not run at all, rather than reporting silence as a clean file.
+  **The `unix` formatter is gone from ESLint 10** — it exits 2 with "no longer part of core
+  ESLint" — so the hook parses `--format json` with `jq`. The first draft used `unix`, saw
+  exit 2, found no parseable lines, and reported nothing; that is the shape of bug a lint
+  hook is most likely to have and least likely to show.
+- **`Stop` → `test-if-code-changed.sh` runs the 541 tests in 2.7s when, and only when,
+  `git status --porcelain -- src server` is non-empty.** `git status` rather than
+  `git diff`, because `git diff` misses a new file that has not been added yet — the hooks
+  documentation makes the same point. Committed work is left alone: it was finished
+  deliberately and CI is about to run the same suite.
+- **A `Stop` hook has two ways to speak and they are not equivalent.** `decision: "block"`
+  is an error; `hookSpecificOutput.additionalContext` is non-error feedback that continues
+  the turn so Claude can act on it and is labelled *Stop hook feedback* in the transcript.
+  The second is what an advisory gate wants. Both run under the same loop protection —
+  `stop_hook_active` on the input, and an 8-continuation cap — and the hook checks
+  `stop_hook_active` first so a failing suite cannot spin the session.
+- **The plan asked for something that cannot exist: the `Stop` hook calling `/verify`.**
+  A command hook is a shell process; a skill is model-facing and only the model can invoke
+  one. The point of ordering A.2 first was to avoid a second copy of the gate sequence, and
+  that is still achieved, by narrowing rather than sharing: the hook runs the tests only,
+  lint having already run per edit and typecheck belonging to CI. Recorded in the plan too.
+- **The frontmatter was checked against the docs before it was written**, the A.1 and A.2
+  lesson applied again — and it caught the `unix` formatter and the `additionalContext`
+  question above. Hooks use exec form (`"command": "bash"`, `"args": ["${CLAUDE_PROJECT_DIR}/…"]`),
+  which the docs recommend whenever a path placeholder is involved, and which means the
+  scripts run whatever their local mode bit says. `statusMessage` puts a readable line in
+  the spinner instead of the command. The two settings arrays that A.3 does not fill,
+  `UserPromptSubmit` and `SessionStart`, are removed rather than left empty.
+
+### Where it lives
+`.claude/hooks/{guard-paths,lint-edited,test-if-code-changed,plan-scope}.sh` (new) and the
+`hooks` block of `.claude/settings.json`. `plan-scope.sh` is a plain resolver with no hook
+contract of its own — run it by hand to see what the guard will use, and phase B's CI check
+can call the same one.
+
+### How to test
+Hooks are read when a session starts, so restart Claude Code in the repo first. Then:
+editing any `.ts` file with a lint error produces the eslint report next to the edit;
+a write to `dev-market.db`, to `.env.local` or under `dist/` is refused with a reason; a
+write to `src/store.ts` on this branch warns once that it is outside the A.3 touch scope
+and then never again this session; leaving an uncommitted change under `src/` with a
+failing test and ending a turn produces the failure tally as Stop hook feedback.
+
+Each hook also runs standalone on a line of JSON, which is how they were developed:
+
+```bash
+printf '{"session_id":"t","tool_input":{"file_path":"'$PWD'/dev-market.db"}}' \
+  | bash .claude/hooks/guard-paths.sh
+printf '{"stop_hook_active":false}' | bash .claude/hooks/test-if-code-changed.sh
+CLAUDE_HOOK_BRANCH=cca-f/phase-b-ci bash .claude/hooks/plan-scope.sh
+```
+
 ## 2026-09-20 — CCA-F A.2: four skills, and the symlinks that made `.claude/` a no-op
 
 ### What changed

@@ -1,6 +1,6 @@
 # CCA-F learning plan — applying the Claude Certified Architect material to this repo
 
-Status (2026-09-20): **in progress — phase A in progress (A.1 and A.2 landed)**. Written from Mikael's question of
+Status (2026-09-20): **in progress — phase A in progress (A.1, A.2 and A.3 landed)**. Written from Mikael's question of
 what to implement here to enforce the learning of the Anthropic *Claude Certified
 Architect – Foundations* (CCA-F) certification content. Intent 3 of
 `docs/platform-hardening-plan.md` already names CCA-F as a product goal; this document is
@@ -34,7 +34,7 @@ Measured against the domains, not against the hardening plan:
 |---|---|---|
 | 1 Agentic | Hardening stage 7 sketches the single-call → tool-runner → managed-agent ladder | Nothing built. No Agent SDK use, no subagent orchestration anywhere |
 | 2 Tools / MCP | `server/handlers.ts` is a transport-agnostic seam — tools can wrap it without touching the engine | No MCP server, no tool definitions, no structured tool errors |
-| 3 Claude Code | `CLAUDE.md` (+ `AGENTS.md` copy), `ACRONYMS.md`, one CI workflow | `.claude/agents`, `.claude/commands`, `.claude/skills` are **dangling symlinks** into the deleted `workflow/` (removed in A.2); every hook array in `.claude/settings.json` is empty; no `.claude/rules/`; `README.md` is still the Vite template |
+| 3 Claude Code | `CLAUDE.md` (+ `AGENTS.md` copy), `ACRONYMS.md`, one CI workflow | `.claude/agents`, `.claude/commands`, `.claude/skills` are **dangling symlinks** into the deleted `workflow/` (removed in A.2); every hook array in `.claude/settings.json` is empty (filled in A.3); no `.claude/rules/`; `README.md` is still the Vite template |
 | 4 Prompting / output | Stage 3 of the hardening plan specifies structured outputs and per-row confidence | Nothing built. No nullable-field rule, no retry loop, no batch path |
 | 5 Context / reliability | `docs/development-diary.md` is the cross-session memory; plan docs carry decisions | No eval harness, no error-propagation design, no cost/rate controls, no log redaction |
 
@@ -139,6 +139,15 @@ The hooks shorten the feedback loop; CI stays the hard gate, so all three are ad
 
 Order A.2 before A.3: `/verify` gives the `Stop` hook one command to call instead of a
 second copy of the typecheck/lint/test sequence.
+
+*Landed 2026-09-20, with three corrections to the text above.* A command hook is a shell
+process and a skill is model-facing, so the `Stop` hook cannot call `/verify`; the overlap
+is avoided by narrowing the hook to the test suite, lint having already run per edit and
+typecheck being CI's. The trigger is `git status --porcelain` rather than `git diff`, which
+misses a file that has not been added yet. And the touch-scope warning resolves the plan
+and phase from the branch name in `.claude/hooks/plan-scope.sh`, which can read a
+`Touch scope:` line but not a scope declared in a table column, so it stays silent on the
+plans that use one — the authoritative check remains `/touch-scope` and, from phase B, CI.
 
 **A.4 — Subagents in `.claude/agents/`.**
 
