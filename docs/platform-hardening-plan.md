@@ -2,7 +2,8 @@
 
 Status (2026-09-14): **in progress — stage 1: phase 1.1 landed, 1.2–1.3 open**. Follows the
 Option C decision recorded in `docs/server-migration-plan.md`: the server stays TypeScript and gets hardened rather than
-ported. This document is the executable half.
+ported. This document is the executable half. The CCA-F track (stages 3 and 7 here) is
+expanded, with the Claude Code, MCP and Agent SDK gaps filled, in `docs/cca-f-learning-plan.md`.
 
 ## The three intents, and what each one demands
 

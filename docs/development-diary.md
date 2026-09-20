@@ -1,5 +1,46 @@
 # Development diary
 
+## 2026-09-20 — CCA-F: the exam material gets a plan, and the repo gets path-scoped rules
+
+### What changed
+`docs/cca-f-learning-plan.md` (new) and phase A.1 of it, `.claude/rules/`.
+
+Intent 3 of `docs/platform-hardening-plan.md` already names the Claude Certified Architect –
+Foundations certification as a product goal, but the hardening plan only covers two of the
+five exam domains — agentic architecture and structured output, in its stage 7. Tool design
+and MCP, Claude Code configuration, and context/reliability are 53% of the exam and barely
+appear in it. The new plan measures the repo against the domains rather than against the
+hardening plan, and lays out phases A–J ordered so the cheapest, highest-coverage gaps close
+first and nothing blocks the hardening plan's critical path (stages 1 → 2 → 4 → 5). Where a
+phase is already specified over there, this document points at it instead of respecifying it.
+
+- **Phase A.1 landed: three path-scoped rules.** `engine.md` (`src/lib/**`) — the engine runs
+  in the browser too, so no Node imports, no I/O, pure functions, and an indicator change
+  updates the golden tests. `server.md` (`server/**`) — `handlers.ts` stays
+  transport-agnostic, `RequestError` is the 400 signal, `/dev/*` stays behind `DEV_TOOLS`.
+  `docs.md` (`docs/**`) — the plan and diary formats this entry is written in.
+- **The frontmatter field is `paths:`, not `globs:`.** A rule with no `paths` loads every
+  session, like `.claude/CLAUDE.md`; that is the whole point of scoping them.
+- **Rules load, documents do not.** A matching glob pulls the rule's own text into context
+  and nothing else, so a plan is reached by a *pointer*: a rule scoped to the source path
+  names the document and the condition for reading it. `engine.md` carries the first —
+  change `fanBacktest.ts`, read hardening phase 6.2 first (costs modelled, month-clustered
+  t, trial count recorded). An `@import` inside a rule would load at launch and defeat it.
+- **`docs/` is deliberately not restructured to mirror the globs.** A rule scoped to
+  `docs/plans/**` fires only while a plan is being edited, which is when it is least needed.
+  The mapping worth maintaining is source glob → rule → doc pointer.
+- **No fourth rule for `server/claude/**` yet.** Those standing rules (model, thinking,
+  structured outputs, typed errors, redaction) are a phase C deliverable, written in the
+  branch that creates the directory — a rule whose `paths` match nothing is dead weight.
+
+### Where it lives
+`docs/cca-f-learning-plan.md` (new), `.claude/rules/{engine,server,docs}.md` (new), and a
+pointer to the plan from the top of `docs/platform-hardening-plan.md`.
+
+### How to test
+Open any file under `src/lib/`, `server/` or `docs/` in Claude Code and the matching rule
+appears in context; open something else and it does not.
+
 ## 2026-09-14 — CI: the checks stop being something you remember to run
 
 ### What changed
