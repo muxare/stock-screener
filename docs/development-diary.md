@@ -1,5 +1,59 @@
 # Development diary
 
+## 2026-09-20 — CCA-F A.2: four skills, and the symlinks that made `.claude/` a no-op
+
+### What changed
+Phase A.2 of `docs/cca-f-learning-plan.md`: `/verify`, `/touch-scope`, `/diary-entry` and
+`/phase-plan` as project skills.
+
+The phase began by finding that `.claude/skills`, `.claude/agents` and `.claude/commands`
+were not empty, as the plan assumed — they were **dangling symlinks** into `../workflow/`,
+tracked in git as mode 120000 since commit 37b7754, and left pointing at nothing when the
+workflow layer was deleted in a45325d. Nothing could load from them, and nothing could be
+written under them either. They are removed here, which is what makes A.2 possible at all
+and unblocks A.4 the same way.
+
+- **`/verify` runs all three gates, not the first one.** `npm run typecheck`, `npm run lint`,
+  `npm run test`, every time, even when an earlier one fails, and reports a three-line table
+  with at most five failures under it. It is `context: fork` with `agent: Explore` and
+  `background: false`: Explore has Bash but no Edit or Write, so the skill can run the gates
+  and cannot repair them, and the fork keeps a few hundred lines of vitest output out of the
+  session that asked. A.3's `Stop` hook calls this rather than carrying a second copy of the
+  sequence, which is why the plan ordered A.2 first.
+- **`/touch-scope` finds the plan the way CI will.** Argument first, then the PR body's
+  `Plan: docs/<x>-plan.md` line — the same convention phase B's CI check parses, so there is
+  one convention rather than two — then the branch name, and if all three fail it asks
+  instead of guessing. The diary and the plan itself are always in scope whatever the plan
+  says. It reports drift and names the two ways out (revert the strays, or widen the scope
+  deliberately and say so in the diary), and picks neither.
+- **The two writing skills are `disable-model-invocation: true`.** `/diary-entry` and
+  `/phase-plan` produce documents in a house format at a moment only the person knows has
+  arrived; a model that decides on its own to append a diary entry writes noise into the
+  record. `/verify` and `/touch-scope` stay model-invocable because they are read-only
+  checks, and a model that runs them unprompted is doing the right thing.
+- **The frontmatter was checked against the docs before it was written**, which is the A.1
+  lesson (`paths:`, not `globs:`) applied. `allowed-tools`, `context: fork`, `agent:`,
+  `background:`, `disable-model-invocation:` and `argument-hint:` are all real fields;
+  `background` defaults to `true` for a forked skill, so both forks set it to `false` or the
+  summary would arrive as a notification rather than in the reply. The command name comes
+  from the directory name, so no `name:` field can drift away from it.
+- **`/diary-entry` reads the date from `date +%F`.** Inferring it, or copying the date from
+  the entry above, is the failure mode that makes a diary useless as a record.
+
+### Where it lives
+`.claude/skills/{verify,touch-scope,diary-entry,phase-plan}/SKILL.md` (new), and the
+removal of the `.claude/{skills,agents,commands}` symlinks.
+
+### How to test
+Skills are registered when a session starts, so restart Claude Code in the repo first — in
+the session that wrote them, `/touch-scope` is still "Unknown skill". Then `/verify` prints
+the three-line table (typecheck, lint and 541 tests currently pass in about 2.3s);
+`/touch-scope` on this branch lists nothing outside `.claude/**`; `/phase-plan <slug>`
+refuses to overwrite an existing plan. Both forked skills should return their summary into
+the session rather than as a background notification. If `/verify` resolves to something
+other than this skill — a name shared with a built-in — rename the directory and update the
+reference in A.3.
+
 ## 2026-09-20 — CCA-F: the exam material gets a plan, and the repo gets path-scoped rules
 
 ### What changed
