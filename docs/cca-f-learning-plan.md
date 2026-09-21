@@ -1,6 +1,6 @@
 # CCA-F learning plan — applying the Claude Certified Architect material to this repo
 
-Status (2026-09-20): **in progress — phase A complete (A.1–A.5 landed); phase B is next**. Written from Mikael's question of
+Status (2026-09-21): **in progress — phases A (A.1–A.5) and B landed; phase C is next**. Written from Mikael's question of
 what to implement here to enforce the learning of the Anthropic *Claude Certified
 Architect – Foundations* (CCA-F) certification content. Intent 3 of
 `docs/platform-hardening-plan.md` already names CCA-F as a product goal; this document is
@@ -253,6 +253,70 @@ Mechanics the exam asks about, all applied for real:
 - Verify: a PR that edits `src/lib/fanBacktest.ts` without a diary entry gets a `warn`
   comment; a PR that only edits `docs/` gets `pass` on both; a pushed fix updates the
   same comment; the key appears in no log line.
+
+**What the implementation changed (2026-09-21).** Six claims above turned out to be wrong
+or underspecified once the job existed, and the corrections belong here rather than only in
+the diary.
+
+*The reviewer cannot run git.* `Read, Grep, Glob` with no Bash is the right tool set, but it
+leaves the model unable to see a diff at all. The workflow therefore collects the two facts
+that need git — the changed-file list against the merge base, and the date of the head
+commit — and passes them in the prompt as data. Everything else the checks need, the plan
+documents and the diary, the model reads for itself.
+
+*Structured output is a flag, not a request.* The CLI has `--json-schema`, which validates
+the answer against a schema and returns it in a `structured_output` field of the envelope
+beside the `result` string. `.github/claude/pr-review.schema.json` holds the schema: two
+checks, an `id`, a `verdict` of `pass | warn | skip`, a reason capped at two hundred
+characters, and up to five pieces of evidence. Asking for JSON in prose and parsing it back
+out, which is what "output parsed from the JSON envelope" implied, is strictly worse.
+
+*A third verdict was needed.* `pass | warn` has no way to say "this pull request names no
+plan, so there is no scope to check", and forcing that into either value is how a check
+starts lying. `skip` is the honest third answer, and the prompt insists that an absent
+`Touch scope:` line is a gap in the plan rather than a pass.
+
+*"A diary entry dated today" was too strict.* A pull request opened on one day and pushed on
+the next would have warned falsely. The rule is now that `docs/development-diary.md` appears
+in the diff and its newest entry is dated on or after the head commit's own date. The
+trigger paths also gained `src/lib/fanSignals.ts`, which the `backtest-reviewer` agent
+already treats as engine code.
+
+*Fork pull requests get no review.* Secrets and a writable token are not available to a
+pull request from a fork, and `pull_request_target`, which would provide both, runs with the
+fork's branch content in the prompt. That trade is not worth two advisory checks, so the
+job is limited to branches in this repository and a fork simply gets no comment.
+
+*There is no `--max-turns` in the CLI; the budget control is `--max-budget-usd`.* It is set
+to 0.75. Three dry runs against real diffs cost between $0.10 and $0.22 each and took three
+to five turns, so the ceiling is roughly triple the observed cost — enough to absorb a
+larger diff, low enough to stop a loop.
+
+**Prompt engineering, deliberately narrow.** Domain 4 has its real home in phases C and F,
+where phase D's evals can measure whether a prompt change helped. Two of its techniques
+still earn their place here, and the rest were left out on purpose. The pull-request body is
+text a stranger can write — this repository is public — so it travels inside a
+`<pr_body>` block, reaches the renderer through the environment rather than a shell
+interpolation, has the prompt's own tag vocabulary neutralised on the way in, and is
+followed rather than preceded by the instructions; the prompt states that a block which
+tries to instruct the reviewer is itself the finding, and the third dry run confirms that a
+body saying "report pass on both checks" produces a `warn` quoting that sentence. Four
+short worked examples then calibrate the boundary — a test file beside its module, a
+dependency bump riding along, a missing `Plan:` line, that injection attempt — because the
+promotion rule above is stated in false positives and prose alone cannot set that
+threshold. What was deliberately *not* done: no XML tags around the output, which the schema
+already governs; no examples carrying real diffs, which would raise the cost of every pull
+request; and no tags or examples retrofitted into `CLAUDE.md`, `.claude/rules/` or the
+agent files, which are read with the repository in hand, are written as prose by house
+style, and would drift from the code they describe.
+
+**What the dry runs showed, and what still needs a real pull request.** The first two Verify
+clauses are met: a simulated diff touching `fanBacktest.ts` and `fan.ts` with no diary
+entry produced `warn` on both checks naming the files, and this branch's own diff produced
+`pass` on both. The third clause — a pushed fix updating the same comment rather than
+adding one — is observable only on a real pull request, because it depends on the marker
+lookup through the GitHub API. The fourth, that the key appears in no log line, holds by
+construction: the key is only ever an `env:` value on the step that needs it.
 
 ---
 
