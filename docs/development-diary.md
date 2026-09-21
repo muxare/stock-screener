@@ -1,5 +1,124 @@
 # Development diary
 
+## 2026-09-21 — Hardening 1.2–1.3: a shutdown that actually ends, and a server README that is true
+
+### What changed
+Phases 1.2 and 1.3 of `docs/platform-hardening-plan.md`, done on one branch because they
+are the same fact from two sides: the service did something the documentation did not
+describe, and failed to do something the documentation implied. Stage 1 is now complete.
+
+**1.2.** `UniverseStore.close()` had existed since the SQLite reader landed and was never
+called by anything. There was no `SIGTERM` or `SIGINT` handler in `server/index.ts` at all,
+so every restart of the dev server abandoned an open read handle — invisible in normal use,
+but it is also why a re-import could find the database held by the process that was
+supposedly already gone, and from stage 4 onward this runs in a container where `SIGTERM`
+is the only way it is ever asked to stop.
+
+The plan's sentence for this phase was "wire signals to `server.close()` +
+`productionUniverse.close()`", and that turned out not to be a working shutdown. Two things
+it did not account for. `server.close()` stops the listener but waits for every open
+connection before it calls back, and the Vite dev proxy holds an idle keep-alive socket open
+indefinitely — so a shutdown built from `close()` alone never completes, and every Ctrl-C
+would hang until that socket happened to time out. Idle connections are therefore dropped
+immediately with `closeIdleConnections()`, and whatever is still running after a ten-second
+grace window is cut with `closeAllConnections()`. Ten seconds is not arbitrary: it is
+`docker stop`'s own default patience before SIGKILL, so the process always beats its
+executioner. A full `/backtest` is budgeted at 30 s (SAD#2.4) and will therefore be cut —
+that is deliberate, since this is a drain window and not a promise to finish the work, and
+the forced path logs that it had to force rather than exiting quietly.
+
+The ordering is the other decision, and it is the one the tests exist to protect: the
+listener stops accepting first, requests already in flight get the window, and the provider
+closes last, so a `/backtest` still streaming bars is never reading from a database that has
+already been closed. A second signal during the drain exits at once with code 1 — pressing
+Ctrl-C twice means "stop waiting", and the honest report of a shutdown that skipped its
+drain is a non-zero code rather than a clean-looking zero.
+
+`shutdown()` and `installShutdownHandlers()` take the server, the store, and injectable
+`exit`, `log` and `timeoutMs`, and the server parameter is a structural `ClosableServer`
+interface rather than `Pick<Server, …>` because `Server.close()` returns the server for
+chaining and a test double should not have to fabricate one. That injection is what makes
+the behaviour testable without ending the test runner's own process; the tests emit
+`SIGUSR2` rather than `SIGTERM` for the same reason.
+
+**1.3.** The plan named one drifted endpoint. The drift was wider. `POST /screen` was
+documented as taking `preset` / `rules` / `limit` / `offset` and returning `total` /
+`count` / `tickers` / `results`, none of which the service has ever accepted or returned —
+it ignores the body entirely and returns `{universe, elapsedMs, matches, near}`. But
+`/facts`, `/metrics`, `/signals` and the entire `DEV_TOOLS`-gated `/dev/*` surface were
+undocumented, `/backtest` was described with the request and result shape of a rule engine
+that was never built, and the file pointed at a `server/backtest.test.ts` that does not
+exist (the real one is `server/fanBacktest.test.ts`). The rewrite was done against
+responses captured from a running service rather than against the types alone, because the
+types would have reproduced the same class of error one level down.
+
+It also documents what the plan did not ask for and a reader needs first: the environment
+table (`PORT`, `HOST`, `MARKETDATA_DB`, `MARKETDATA_DIR`, `DEV_TOOLS`, `EOD_DATA_DIR`,
+`NODE_ENV`), the dataset precedence at boot, the error contract, and the body-size caps.
+Those are the things stage 4's container work will need, and leaving them out would have
+meant rewriting the file twice. The alternative considered and rejected was to defer the
+whole rewrite to stage 2.2, which replaces this prose with OpenAPI generated from route
+schemas so it cannot drift again — rejected because stage 2.2 is several phases away and
+the file is actively misleading now. The file says so in its own opening paragraph, so the
+next reader knows the prose is scheduled for deletion rather than maintenance.
+
+Two smaller corrections rode along: the Node floor in the README said ≥ 23.6 where
+`engines` says ≥ 24.2, and `/health` is now documented as a liveness probe that does
+readiness work — reporting the universe size builds the universe — with a pointer to phase
+4.4, which splits `/health` from `/ready`.
+
+**Two departures from the plan's own lines, both recorded in the plan itself.** The touch
+scope declared `.github/`, `server/index.ts` and `server/README.md`, with no test file;
+`server/index.test.ts` is new, because shutdown ordering and a grace-period cut-off are
+exactly the behaviour that regresses silently and a `kill -TERM` by hand cannot run in CI.
+And the verify line ("CI green; `kill -TERM` on the dev server closes the DB handle
+cleanly") tested 1.2 by hand and 1.3 not at all, so a second verify line was added beside
+it. Nothing under `.github/` was touched despite being in scope — phase 1.1 had already
+done that work.
+
+The `diary-writer` agent caught one inconsistency in the first draft of the README, which is
+worth recording because it is the failure mode the rewrite was meant to end: the `/health`
+example showed `"universe": 491` while `/facts`, `/screen` and `/signals` all showed 44,
+because the samples came from two capture sessions — one against the imported
+`dev-market.db`, the rest against the synthetic generator — and nothing in the file said so.
+Documentation assembled from real responses is only true if the responses came from the same
+system. Every example now comes from the synthetic dataset, and the file says which dataset
+that is.
+
+### Where it lives
+- `server/index.ts` — `SHUTDOWN_GRACE_MS`, the `ClosableServer` interface, `shutdown()`,
+  `installShutdownHandlers()`, and the `import.meta.main` block that now wires them to
+  `productionUniverse` before listening.
+- `server/index.test.ts` — new; the shutdown tests.
+- `server/README.md` — rewritten: run, environment, shutdown, every endpoint including the
+  dev surface, design notes, out of scope.
+- `docs/platform-hardening-plan.md` — status line, the two "what the implementation found"
+  paragraphs under phases 1.2 and 1.3, and the amended touch-scope and verify lines.
+
+### How to test
+```bash
+npm run test -- server/index.test.ts   # or /verify for all three gates
+```
+
+By hand, which is the part the tests cannot cover — run the dev server, hit it once from a
+browser so the Vite proxy is holding a keep-alive socket, then send it `SIGTERM`:
+
+```bash
+npm run dev:server
+kill -TERM <pid>
+```
+
+It should log `SIGTERM received — shutting down` and `shutdown complete` and exit within a
+second or so, not after ten. If it takes the full ten seconds and logs `grace period
+expired`, the idle-connection close has regressed. Pressing Ctrl-C twice in quick succession
+should print `second SIGINT — exiting without waiting` and exit non-zero.
+
+For the README, start the server with `DEV_TOOLS=1` and compare each documented shape
+against the real response — `curl localhost:8787/health`, `/facts`, `/metrics`,
+`/dev/databases`, `curl -X POST localhost:8787/screen`, and `curl -X POST -d
+'{"strategy":"onset"}' -H 'content-type: application/json' localhost:8787/signals`. Any
+field in the file that is not in a response is the drift coming back.
+
 ## 2026-09-21 — CCA-F B: two advisory checks in CI, and the prompt hardening they needed
 
 ### What changed

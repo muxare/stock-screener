@@ -216,6 +216,109 @@ export function createScreenServer(store: UniverseStore = productionUniverse) {
   });
 }
 
+// How long a shutdown waits for in-flight requests before it stops being polite.
+// A full-universe `/backtest` is budgeted at 30 s (SAD#2.4), which is longer than
+// any orchestrator will wait, so this is a drain window and not a promise to
+// finish the work: ten seconds covers a screen or a signals scan comfortably and
+// keeps `docker stop`, whose own default is ten, from escalating to SIGKILL.
+const SHUTDOWN_GRACE_MS = 10_000;
+
+// The slice of `http.Server` a shutdown uses, declared structurally rather than as
+// `Pick<Server, …>`: `Server.close()` returns the server for chaining, and a test
+// double should not have to fabricate one to stand in for a listener.
+export interface ClosableServer {
+  close(cb?: (err?: Error) => void): unknown;
+  closeIdleConnections(): void;
+  closeAllConnections(): void;
+}
+
+// Close the listener and then the market-data provider, in that order and once.
+// Resolves when the handles are released; never rejects.
+//
+// `UniverseStore.close()` releases the SQLite read handle, and until this existed
+// nothing ever called it — the handle leaked on every restart, which also meant a
+// re-import could be blocked by the dying process's own open connection. The
+// ordering is the part worth stating: the listener stops accepting first, requests
+// already running are given the grace window, and only then is the provider
+// closed, so a `/backtest` still streaming bars does not have the database pulled
+// out from under it.
+//
+// Idle keep-alive sockets are dropped immediately rather than waited for. The
+// Vite dev proxy holds one open indefinitely, so without `closeIdleConnections()`
+// `server.close()` would never call back and every Ctrl-C would take the full
+// grace period. Whatever is still running when the window expires is cut off, so
+// the process cannot hang; that path says so in the log rather than exiting
+// quietly, because a shutdown that had to force connections is worth noticing.
+export function shutdown(
+  server: ClosableServer,
+  store: Pick<UniverseStore, 'close'>,
+  opts: { timeoutMs?: number; log?: (msg: string) => void } = {},
+): Promise<void> {
+  const { timeoutMs = SHUTDOWN_GRACE_MS, log = (m: string) => console.log(m) } = opts;
+  return new Promise<void>((resolve) => {
+    let done = false;
+    const finish = (): void => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      // A provider that fails to close is logged and not thrown: we are on the way
+      // out, and an unhandled rejection here would turn a tidy exit into a crash.
+      try { store.close(); }
+      catch (err) { console.error('[server] closing the market-data provider failed:', err); }
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      log(`[server] ${timeoutMs}ms grace period expired; closing connections still open`);
+      server.closeAllConnections();
+      finish();
+    }, timeoutMs);
+    timer.unref?.();
+    server.close(() => finish());
+    server.closeIdleConnections();
+  });
+}
+
+// Wire SIGTERM and SIGINT to `shutdown`. From stage 4 onward this process runs in
+// a container, where SIGTERM is how it is asked to stop and an unhandled one is an
+// immediate kill with the database handle still open.
+//
+// A second signal during the drain exits at once with a non-zero code: someone
+// pressing Ctrl-C twice means "stop waiting", and the honest answer to that is an
+// unclean exit rather than a clean-looking zero. `exit` and `log` are injectable so
+// the behaviour can be tested without ending the test runner's own process.
+export function installShutdownHandlers(
+  server: ClosableServer,
+  store: Pick<UniverseStore, 'close'>,
+  opts: {
+    signals?: NodeJS.Signals[];
+    timeoutMs?: number;
+    exit?: (code: number) => void;
+    log?: (msg: string) => void;
+  } = {},
+): void {
+  const {
+    signals = ['SIGTERM', 'SIGINT'] as NodeJS.Signals[],
+    exit = (code: number) => process.exit(code),
+    log = (m: string) => console.log(m),
+  } = opts;
+  let closing = false;
+  for (const signal of signals) {
+    process.on(signal, () => {
+      if (closing) {
+        log(`[server] second ${signal} — exiting without waiting`);
+        exit(1);
+        return;
+      }
+      closing = true;
+      log(`[server] ${signal} received — shutting down`);
+      void shutdown(server, store, { timeoutMs: opts.timeoutMs, log }).then(() => {
+        log('[server] shutdown complete');
+        exit(0);
+      });
+    });
+  }
+}
+
 // Run as a script: warm the universe at boot so the first screen is already on
 // the warm-cache path (SAD#2.3), then listen.
 if (import.meta.main) {
@@ -224,7 +327,9 @@ if (import.meta.main) {
   // LAN. Set HOST=0.0.0.0 explicitly to expose it.
   const host = process.env.HOST || '127.0.0.1';
   productionUniverse.get();
-  createScreenServer().listen(port, host, () => {
+  const server = createScreenServer();
+  installShutdownHandlers(server, productionUniverse);
+  server.listen(port, host, () => {
     console.log(`screening service listening on http://${host}:${port}`);
   });
 }
