@@ -8,10 +8,11 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { devToolsEnabled, listImportOptions, runDevImport } from './devImport.ts';
+import { listImportOptions, runDevImport } from './devImport.ts';
 import { createUniverseStore } from './universe.ts';
 import { syntheticProvider } from '../src/lib/data/synthetic.ts';
 import { RequestError } from './handlers.ts';
+import { loadConfig } from './config.ts';
 
 const fixture = (name: string) => fileURLToPath(new URL('../tools/eod-import/fixtures/' + name, import.meta.url));
 
@@ -31,18 +32,13 @@ let dbPath: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'devimport-')); dbPath = join(dir, 'market.db'); });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
-describe('devToolsEnabled', () => {
-  it('is off by default and on only for an explicit flag', () => {
-    expect(devToolsEnabled({})).toBe(false);
-    expect(devToolsEnabled({ DEV_TOOLS: '0' })).toBe(false);
-    expect(devToolsEnabled({ DEV_TOOLS: '1' })).toBe(true);
-    expect(devToolsEnabled({ DEV_TOOLS: 'true' })).toBe(true);
-  });
-});
+// DEV_TOOLS itself is parsed and pinned in config.test.ts; hardening 4.1 moved
+// the flag out of this module so there is one reader of the environment.
+const cfg = (extra: Partial<NodeJS.ProcessEnv> = {}) => loadConfig(extra as NodeJS.ProcessEnv);
 
 describe('listImportOptions', () => {
   it('discovers the bundled configs and a default target DB', () => {
-    const opts = listImportOptions({});
+    const opts = listImportOptions(cfg());
     const names = opts.configs.map((c) => c.name);
     expect(names).toContain('config.example.json');
     expect(names).toContain('config.yahoo.json');
@@ -52,7 +48,7 @@ describe('listImportOptions', () => {
   });
 
   it('honours MARKETDATA_DB as the target', () => {
-    expect(listImportOptions({ MARKETDATA_DB: '/tmp/custom.db' }).targetDb).toBe('/tmp/custom.db');
+    expect(listImportOptions(cfg({ MARKETDATA_DB: '/tmp/custom.db' })).targetDb).toBe('/tmp/custom.db');
   });
 });
 

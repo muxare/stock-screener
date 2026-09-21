@@ -4,7 +4,7 @@
 // (tools/eod-import) inside the running screener so a developer can load CSV
 // dev/test data from the UI instead of dropping to a shell. It is gated behind
 // the DEV_TOOLS env flag and the routes are only registered when that flag is
-// on (server/index.ts), so it cannot exist in a production deployment.
+// on (server/app.ts), so it cannot exist in a production deployment.
 //
 // The importer itself is unchanged: this module only resolves the request
 // (which config, which input files, which target DB), delegates to runImport,
@@ -21,6 +21,8 @@ import { sqliteProvider } from '../src/lib/data/sqlite.ts';
 import { RequestError } from './handlers.ts';
 import { rememberDevDb } from './universe.ts';
 import type { UniverseStore } from './universe.ts';
+import { config } from './config.ts';
+import type { ServerConfig } from './config.ts';
 
 // Repo paths, anchored off this file so they hold regardless of cwd.
 const REPO_ROOT = resolve(import.meta.dirname, '..');
@@ -29,13 +31,6 @@ const TOOLS_DIR = join(REPO_ROOT, 'tools', 'eod-import');
 // root so a developer can point a future `MARKETDATA_DB` at the same file to
 // persist imported data across restarts.
 const DEFAULT_DB = join(REPO_ROOT, 'dev-market.db');
-
-// DEV_TOOLS gates the whole feature. Explicit opt-in (set by the dev:server
-// npm script) rather than NODE_ENV inference, so the same server entry run in
-// production without the flag never exposes the import surface.
-export function devToolsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.DEV_TOOLS === '1' || env.DEV_TOOLS === 'true';
-}
 
 // ---- options (GET /dev/import/options) ----
 
@@ -58,8 +53,8 @@ export interface ImportOptions {
 // The browsable root for the "Hybrid" file picker: EOD_DATA_DIR if set, else a
 // repo `data/` dir if present, else the importer's bundled fixtures (which ship
 // sample CSVs). Always returns a path even if it does not exist (entries empty).
-function dataRoot(env: NodeJS.ProcessEnv): string {
-  if (env.EOD_DATA_DIR) return resolve(env.EOD_DATA_DIR);
+function dataRoot(cfg: ServerConfig): string {
+  if (cfg.eodDataDir) return cfg.eodDataDir;
   const repoData = join(REPO_ROOT, 'data');
   if (existsSync(repoData)) return repoData;
   return join(TOOLS_DIR, 'fixtures');
@@ -73,8 +68,8 @@ function isWithin(root: string, p: string): boolean {
   const rel = relative(root, p);
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
-function assertAllowedPath(p: string, env: NodeJS.ProcessEnv, what: string): void {
-  const roots = [REPO_ROOT, dataRoot(env), tmpdir()];
+function assertAllowedPath(p: string, cfg: ServerConfig, what: string): void {
+  const roots = [REPO_ROOT, dataRoot(cfg), tmpdir()];
   if (!roots.some((r) => isWithin(r, p))) {
     throw new RequestError(`${what} must be under the repo, the data dir, or the temp dir: ${p}`);
   }
@@ -107,13 +102,13 @@ function listDataEntries(root: string): DataEntry[] {
   return out;
 }
 
-export function listImportOptions(env: NodeJS.ProcessEnv = process.env): ImportOptions {
-  const root = dataRoot(env);
+export function listImportOptions(cfg: ServerConfig = config): ImportOptions {
+  const root = dataRoot(cfg);
   return {
     configs: listConfigs(),
     dataDir: root,
     dataEntries: listDataEntries(root),
-    targetDb: env.MARKETDATA_DB || DEFAULT_DB,
+    targetDb: cfg.marketDataDb ?? DEFAULT_DB,
   };
 }
 
@@ -175,7 +170,7 @@ function writeUploads(uploads: UploadFile[], dir: string): string {
 export function runDevImport(
   req: DevImportRequest,
   store: UniverseStore,
-  env: NodeJS.ProcessEnv = process.env,
+  cfg: ServerConfig = config,
 ): DevImportResult {
   const configPath = resolveConfigPath(req.configName);
 
@@ -195,8 +190,8 @@ export function runDevImport(
     throw new RequestError(`could not load metadata file: ${(e as Error).message}`);
   }
 
-  const targetDb = resolve(req.targetDb || env.MARKETDATA_DB || DEFAULT_DB);
-  if (req.targetDb) assertAllowedPath(targetDb, env, 'targetDb');
+  const targetDb = resolve(req.targetDb || cfg.marketDataDb || DEFAULT_DB);
+  if (req.targetDb) assertAllowedPath(targetDb, cfg, 'targetDb');
 
   // Resolve the input: uploads take precedence; otherwise a server-side path.
   let tempDir: string | null = null;
@@ -206,7 +201,7 @@ export function runDevImport(
     inputPaths = [writeUploads(req.uploads, tempDir)];
   } else if (req.inputPath) {
     const p = resolve(req.inputPath);
-    assertAllowedPath(p, env, 'inputPath');
+    assertAllowedPath(p, cfg, 'inputPath');
     if (!existsSync(p)) throw new RequestError(`input path does not exist: ${p}`);
     inputPaths = [p];
   } else {

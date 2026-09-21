@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { syntheticProvider } from '../src/lib/data/synthetic.ts';
 import { createUniverseStore } from './universe.ts';
 import { runFanBacktest, parseFanBacktestBody } from './fanBacktest.ts';
-import { createScreenServer } from './index.ts';
+import { startApp } from './testHarness.ts';
 import { RequestError } from './handlers.ts';
 import { presetById } from '../src/lib/strategy/presets.ts';
 
@@ -83,11 +83,8 @@ describe('runFanBacktest', () => {
 
 describe('POST /backtest NDJSON', () => {
   it('streams progress then result', async () => {
-    const server = createScreenServer(store);
-    await new Promise<void>((resolve) => server.listen(0, resolve));
-    const addr = server.address();
-    const port = typeof addr === 'object' && addr ? addr.port : 0;
-    const r = await fetch(`http://127.0.0.1:${port}/backtest`, {
+    const { base, close } = await startApp(store);
+    const r = await fetch(`${base}/backtest`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ strategy: 'onset', horizons: [5] }),
@@ -100,32 +97,26 @@ describe('POST /backtest NDJSON', () => {
     const result = lines.find((l) => l.type === 'result');
     expect(result?.totalEntries).toBeGreaterThan(0);
     expect(result?.config.strategy.id).toBe('onset');
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await close();
   });
 
   it('returns a JSON 400 for an invalid strategy definition', async () => {
-    const server = createScreenServer(store);
-    await new Promise<void>((resolve) => server.listen(0, resolve));
-    const addr = server.address();
-    const port = typeof addr === 'object' && addr ? addr.port : 0;
-    const r = await fetch(`http://127.0.0.1:${port}/backtest`, {
+    const { base, close } = await startApp(store);
+    const r = await fetch(`${base}/backtest`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ strategy: { steps: [] } }),
     });
     expect(r.status).toBe(400);
     expect(((await r.json()) as { error: string }).error).toMatch(/at least one step/);
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await close();
   });
 });
 
 describe('POST /signals', () => {
   it('accepts a preset id or a definition and rejects a missing strategy', async () => {
-    const server = createScreenServer(store);
-    await new Promise<void>((resolve) => server.listen(0, resolve));
-    const addr = server.address();
-    const port = typeof addr === 'object' && addr ? addr.port : 0;
-    const post = (body: unknown) => fetch(`http://127.0.0.1:${port}/signals`, {
+    const { base, close } = await startApp(store);
+    const post = (body: unknown) => fetch(`${base}/signals`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
     });
     const preset = await post({ strategy: 'onset' });
@@ -138,6 +129,6 @@ describe('POST /signals', () => {
     expect(((await custom.json()) as { strategy: string }).strategy).toBe('mine');
     const missing = await post({});
     expect(missing.status).toBe(400);
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await close();
   });
 });

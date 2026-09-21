@@ -3,7 +3,7 @@ import { syntheticProvider } from '../src/lib/data/synthetic.ts';
 import { createUniverseStore } from './universe.ts';
 import { runFanScreen } from './screen.ts';
 import { handleScreen } from './handlers.ts';
-import { createScreenServer } from './index.ts';
+import { startApp } from './testHarness.ts';
 import { classifyCloses } from '../src/lib/fan.ts';
 import { EMPTY_SNAPSHOT } from '../src/lib/screen/snapshot.ts';
 
@@ -86,22 +86,16 @@ describe('warm-cache latency budget: p95 ≤ 3s', () => {
 
 describe('HTTP/JSON endpoint', () => {
   it('GET /health reports the warm universe size', async () => {
-    const server = createScreenServer(store);
-    await new Promise<void>((resolve) => server.listen(0, resolve));
-    const addr = server.address();
-    const port = typeof addr === 'object' && addr ? addr.port : 0;
-    const r = await fetch(`http://127.0.0.1:${port}/health`);
+    const { base, close } = await startApp(store);
+    const r = await fetch(`${base}/health`);
     expect(r.status).toBe(200);
     expect(await r.json()).toEqual({ ok: true, universe: 44 });
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await close();
   });
 
   it('POST /screen returns matches and near', async () => {
-    const server = createScreenServer(store);
-    await new Promise<void>((resolve) => server.listen(0, resolve));
-    const addr = server.address();
-    const port = typeof addr === 'object' && addr ? addr.port : 0;
-    const r = await fetch(`http://127.0.0.1:${port}/screen`, {
+    const { base, close } = await startApp(store);
+    const r = await fetch(`${base}/screen`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: '{}',
@@ -112,20 +106,17 @@ describe('HTTP/JSON endpoint', () => {
     expect(Array.isArray(body.matches)).toBe(true);
     expect(Array.isArray(body.near)).toBe(true);
     expect(typeof body.elapsedMs).toBe('number');
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await close();
   });
 
   it('POST /screen rejects invalid JSON with 400', async () => {
-    const server = createScreenServer(store);
-    await new Promise<void>((resolve) => server.listen(0, resolve));
-    const addr = server.address();
-    const port = typeof addr === 'object' && addr ? addr.port : 0;
-    const r = await fetch(`http://127.0.0.1:${port}/screen`, {
+    const { base, close } = await startApp(store);
+    const r = await fetch(`${base}/screen`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: '{ not json',
     });
     expect(r.status).toBe(400);
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await close();
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createScreenServer } from '../server/index.ts';
+import { startApp } from '../server/testHarness.ts';
 import { createUniverseStore } from '../server/universe.ts';
 import { syntheticProvider } from '../src/lib/data/synthetic.ts';
 
@@ -15,12 +15,9 @@ let close: () => Promise<void>;
 
 beforeAll(async () => {
   const store = createUniverseStore(syntheticProvider(7));
-  const server = createScreenServer(store);
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  const port = typeof addr === 'object' && addr ? addr.port : 0;
-  const base = `http://127.0.0.1:${port}`;
-  close = () => new Promise<void>((resolve) => server.close(() => resolve()));
+  const running = await startApp(store);
+  const base = running.base;
+  close = running.close;
 
   (globalThis as unknown as { localStorage: MemStorage }).localStorage = new MemStorage();
   const realFetch = globalThis.fetch.bind(globalThis);

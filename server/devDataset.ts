@@ -5,7 +5,7 @@
 // lets a developer *pick* an already-built market-data DB and switch the running
 // service onto it at runtime — without an import and without a restart. It is
 // gated behind the same DEV_TOOLS flag (the routes are only registered when the
-// flag is on, server/index.ts), so it cannot exist in a production deployment.
+// flag is on, server/app.ts), so it cannot exist in a production deployment.
 //
 // It does NOT touch the engine or handlers: switching datasets is a provider
 // swap behind the SAD#5.10 port (universe.ts `reload`), exactly like an import.
@@ -16,6 +16,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { RequestError } from './handlers.ts';
 import { rememberDevDb, forgetDevDb, providerForSource } from './universe.ts';
 import type { UniverseStore, DatasetSource } from './universe.ts';
+import { config } from './config.ts';
+import type { ServerConfig } from './config.ts';
 
 // Repo root, anchored off this file so it holds regardless of cwd — the default
 // place the importer writes DBs (devImport.ts DEFAULT_DB lives here too).
@@ -40,8 +42,8 @@ export interface DatabaseList {
 
 // The directory scanned for candidate DBs: MARKETDATA_DIR if set, else the repo
 // root (where imports land by default). Always returns a path even if empty.
-function databasesRoot(env: NodeJS.ProcessEnv): string {
-  return env.MARKETDATA_DIR ? resolve(env.MARKETDATA_DIR) : REPO_ROOT;
+function databasesRoot(cfg: ServerConfig): string {
+  return cfg.marketDataDir ?? REPO_ROOT;
 }
 
 // Open a candidate DB read-only and count its instruments. Returns null when the
@@ -67,8 +69,8 @@ function inspect(path: string): number | null {
 // Discover the candidate DB paths: every *.db file directly under the scan dir,
 // plus the currently-active DB (which may live elsewhere, e.g. MARKETDATA_DB
 // outside the repo). Resolved + de-duplicated so membership checks are exact.
-function discoverPaths(store: UniverseStore, env: NodeJS.ProcessEnv): string[] {
-  const root = databasesRoot(env);
+function discoverPaths(store: UniverseStore, cfg: ServerConfig): string[] {
+  const root = databasesRoot(cfg);
   const found = new Set<string>();
   if (existsSync(root)) {
     for (const name of readdirSync(root).sort()) {
@@ -82,10 +84,10 @@ function discoverPaths(store: UniverseStore, env: NodeJS.ProcessEnv): string[] {
   return [...found];
 }
 
-export function listDatabases(store: UniverseStore, env: NodeJS.ProcessEnv = process.env): DatabaseList {
+export function listDatabases(store: UniverseStore, cfg: ServerConfig = config): DatabaseList {
   const src = store.source();
   const activePath = src.kind === 'sqlite' ? resolve(src.path) : null;
-  const databases: DatabaseEntry[] = discoverPaths(store, env).map((path) => {
+  const databases: DatabaseEntry[] = discoverPaths(store, cfg).map((path) => {
     let sizeBytes = 0;
     try { sizeBytes = statSync(path).size; } catch { /* unreadable → 0 */ }
     const instruments = inspect(path);
@@ -100,7 +102,7 @@ export function listDatabases(store: UniverseStore, env: NodeJS.ProcessEnv = pro
   });
   // Stable, human-friendly order: by file name.
   databases.sort((a, b) => a.name.localeCompare(b.name));
-  return { activeKind: src.kind, activePath, scanDir: databasesRoot(env), databases };
+  return { activeKind: src.kind, activePath, scanDir: databasesRoot(cfg), databases };
 }
 
 // ---- activate (POST /dev/databases/activate) ----
@@ -122,7 +124,7 @@ export interface ActivateResult {
 export function activateDatabase(
   req: ActivateRequest,
   store: UniverseStore,
-  env: NodeJS.ProcessEnv = process.env,
+  cfg: ServerConfig = config,
   pointerPath?: string,
 ): ActivateResult {
   // Back to the generated dataset: swap onto synthetic and drop the dev pointer
@@ -142,7 +144,7 @@ export function activateDatabase(
   // Guard against arbitrary file access: only paths discoverDatabases() surfaced
   // are selectable (mirrors devImport's config allow-listing). A path outside the
   // scan dir that is not already active is rejected rather than opened.
-  const allowed = new Set(discoverPaths(store, env));
+  const allowed = new Set(discoverPaths(store, cfg));
   if (!allowed.has(target)) {
     throw new RequestError(`unknown database "${req.path}"`);
   }

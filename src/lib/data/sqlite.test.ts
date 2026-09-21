@@ -16,7 +16,8 @@ import { EodDatabase } from '../../../tools/eod-import/db.ts';
 import type { ParsedBar } from '../../../tools/eod-import/parse.ts';
 import { sqliteProvider } from './sqlite.ts';
 import type { MarketDataProvider } from './provider.ts';
-import { providerFromEnv, rememberDevDb, createUniverseStore } from '../../../server/universe.ts';
+import { providerFromConfig, rememberDevDb, createUniverseStore } from '../../../server/universe.ts';
+import { loadConfig } from '../../../server/config.ts';
 import { buildUniverse } from '../market.ts';
 
 // AAPL bars are deliberately written OUT of chronological order to prove the
@@ -147,14 +148,18 @@ describe('sqliteProvider', () => {
   });
 });
 
-describe('providerFromEnv (service seam)', () => {
+// The service seam takes a validated ServerConfig since hardening 4.1, so these
+// build one with the real loader rather than handing the module a raw env object.
+const cfg = (extra: Partial<NodeJS.ProcessEnv> = {}) => loadConfig(extra as NodeJS.ProcessEnv);
+
+describe('providerFromConfig (service seam)', () => {
   it('selects the SQLite adapter when MARKETDATA_DB is set', () => {
-    const p = track(providerFromEnv({ MARKETDATA_DB: dbPath } as NodeJS.ProcessEnv));
+    const p = track(providerFromConfig(cfg({ MARKETDATA_DB: dbPath })));
     expect(p.getUniverse().map((i) => i.ticker)).toEqual(['AAPL', 'MSFT']);
   });
 
   it('falls back to the synthetic adapter when MARKETDATA_DB is unset', () => {
-    const p = track(providerFromEnv({} as NodeJS.ProcessEnv));
+    const p = track(providerFromConfig(cfg()));
     // the synthetic universe is the 44-name mulberry32 fixture, not our 2 names
     expect(p.getUniverse().length).toBeGreaterThan(2);
     expect(p.getInstrument('AAPL')).not.toBeNull();
@@ -165,21 +170,21 @@ describe('providerFromEnv (service seam)', () => {
   it('boots from the persisted dev dataset when DEV_TOOLS is on and a pointer exists', () => {
     const pointer = join(dir, '.dev-active-db');
     rememberDevDb(dbPath, pointer);
-    const p = track(providerFromEnv({ DEV_TOOLS: '1' } as NodeJS.ProcessEnv, pointer));
+    const p = track(providerFromConfig(cfg({ DEV_TOOLS: '1' }), pointer));
     expect(p.getUniverse().map((i) => i.ticker)).toEqual(['AAPL', 'MSFT']);
   });
 
   it('ignores the pointer when DEV_TOOLS is off (no silent prod downgrade)', () => {
     const pointer = join(dir, '.dev-active-db');
     rememberDevDb(dbPath, pointer);
-    const p = track(providerFromEnv({} as NodeJS.ProcessEnv, pointer));
+    const p = track(providerFromConfig(cfg(), pointer));
     expect(p.getUniverse().length).toBeGreaterThan(2); // synthetic, not our 2 names
   });
 
   it('falls back to synthetic when the pointer references a deleted DB', () => {
     const pointer = join(dir, '.dev-active-db');
     rememberDevDb(join(dir, 'gone.db'), pointer);
-    const p = track(providerFromEnv({ DEV_TOOLS: '1' } as NodeJS.ProcessEnv, pointer));
+    const p = track(providerFromConfig(cfg({ DEV_TOOLS: '1' }), pointer));
     expect(p.getUniverse().length).toBeGreaterThan(2);
   });
 });
@@ -221,7 +226,7 @@ describe('provider lifecycle — close() (STORY-034)', () => {
   });
 
   it('synthetic adapter exposes no close() — an optional lifecycle, a no-op when absent', () => {
-    const synth = track(providerFromEnv({} as NodeJS.ProcessEnv)); // synthetic
+    const synth = track(providerFromConfig(cfg())); // synthetic
     expect(synth.close).toBeUndefined();
     expect(() => synth.close?.()).not.toThrow(); // callers guard with ?.()
   });

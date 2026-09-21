@@ -1,5 +1,191 @@
 # Development diary
 
+## 2026-09-21 — Hardening 2.1, 2.3 and 4.1: Fastify, pino, and one place that reads the environment
+
+### What changed
+The branch is named `platform-hardening/phase-2-1-fastify` and carries three phases of
+`docs/platform-hardening-plan.md`: **2.1** (Fastify), **2.3** (structured logging and
+integration tests) and **4.1** (one validated config surface), which is out of stage order.
+The reason is the same in both of the extra cases. 2.3 exists to replace `console.error`
+with a per-request logger, and the rewrite touched every line that logged; 4.1 exists to
+collect the scattered `process.env` reads into one validated surface, and the rewrite
+touched every module that read one. Doing either of them on a later branch would have meant
+editing the same lines twice, and in 4.1's case it would also have meant that `app.ts` was
+born reading `process.env.DEV_TOOLS` directly — a new site of the exact habit 4.1 removes.
+2.2 (schemas and OpenAPI) is deliberately still open: it is the one part of stage 2 that
+changes what the wire accepts, and this branch changed nothing about the wire on purpose.
+
+**2.1.** The hand-rolled router — a chain of `url.startsWith` checks with `readJsonBody`,
+`sendJson`, `sendError` and `requireJson` around it — is gone, and the service is a Fastify
+application with one plugin per surface. The plan named three route files; there are five.
+`/health` and `/metrics` are reads of process state rather than of the universe, so they
+went to `routes/system.ts`, which is also where phase 4.4 will split `/health` from
+`/ready`; `/facts`, `/signals` and `/backtest` sit beside `/screen` in `routes/screen.ts`,
+because all four are the engine answering questions about the warm universe. The fifth,
+`routes/deps.ts`, is the interface every plugin is handed: the routes take the
+`UniverseStore` through Fastify's register options instead of importing the module
+singleton, which is what lets `app.test.ts` drive the real application over a fixture
+universe and over a deliberately broken one. The `DEV_TOOLS` gate became structural, as
+planned — `app.ts` registers the dev plugin or it does not, so with the flag off those paths
+do not exist rather than being refused by a condition someone could edit.
+
+`handlers.ts` is byte-identical across the change. That was the plan's claim about the seam
+and it held exactly, which is the best evidence available that the seam was real.
+
+**Deleting `requireJson` was not free, and that is the most useful thing this phase found.**
+Fastify ships content-type parsers for `application/json` *and* `text/plain`, so simply
+dropping the hand-written check would have left a cross-origin `text/plain` form POST
+reaching `/dev/import` — precisely the request `requireJson` existed to stop. `app.ts`
+therefore calls `removeAllContentTypeParsers()` and registers exactly one parser, for JSON.
+All three content types a form can send without a preflight (`text/plain`,
+`application/x-www-form-urlencoded`, `multipart/form-data`) now stop at 415 before a body is
+read, and the protection widened from two dev routes to every route. The status moved with
+it: what `requireJson` answered as 400 is a 415 now, which is the accurate code. Two other
+Fastify defaults are not the old behaviour either. `readJsonBody` resolved an empty body as
+`{}` and the stock parser rejects one with a 400, so the registered parser keeps the old
+tolerance — `POST /screen` has always been a request with no body to speak of. And a body
+over the limit is a 413 rather than a 400; Fastify's default limit happens to be exactly the
+1 MiB the old reader enforced, and `/dev/import`'s 64 MiB is now a route option rather than
+a second constant. `/backtest` hijacks its reply and writes the raw socket, because
+Fastify's serialiser would hold the whole run and emit it at the end, which is the opposite
+of a progress stream; a hijacked reply is outside the normal response path, so that route
+logs its own completion.
+
+The phase-1.2 shutdown moved out of `index.ts` to `server/shutdown.ts`, and `index.test.ts`
+with it as `shutdown.test.ts`. Every guarantee 1.2 made is still asserted, now over
+Fastify's promise-returning `app.close()`. Fastify owns the first half — it stops the
+listener, runs its close hooks and resolves when the server is down — so there is no
+`server.close(cb)` left to wrap; the grace window, the forced cut and dropping idle sockets
+are still ours. The last of those deserves recording because it looks like it should not be
+needed: Fastify's `forceCloseConnections: 'idle'` appears to be the native replacement for
+the explicit `closeIdleConnections()` call, but it only fires for a server built by a user
+`serverFactory`, so setting it here would have been a no-op wearing the costume of a
+mechanism. The option is not set and the explicit call stayed.
+
+**2.3.** `console.error` was not the only one. The server also held a `console.warn` — the
+latency recorder's budget breach in `metrics.ts`, which is exactly the line you want tied to
+a request id — and a `console.log` per boot and shutdown message. All three are gone from
+`server/`. The routes pass their `request.log` into `metrics.record`, whose injectable
+`warn` parameter already existed for tests and turned out to be the right seam for this too;
+the root logger is the default, for callers outside a request.
+
+A JSON-only logger made `npm run dev` worse before it made it better. One object per event
+is right for a container and wrong for a person watching a terminal, and Fastify emits two
+per request, so the first thing 2.3 delivered was a noisier development loop than the
+`console.log` it replaced. `pino-pretty` renders the same events one readable line each, as
+a devDependency and a `transport` block in `logger.ts`. The gate is
+`nodeEnv === 'development'` and not `!== 'production'`, which is the narrower claim and buys
+two things: the package is not installed in a production image, so the target must never be
+resolved there, and Vitest's `NODE_ENV=test` therefore does not spawn a transport worker for
+every module that imports the logger. Worth knowing that this was checked after wiring —
+a transport moves writing to a worker thread, and a process exiting on a signal is exactly
+where a buffered last line goes missing; `shutdown complete` still reaches the terminal.
+
+Most of the new routing coverage in `app.test.ts` uses `app.inject()` rather than a socket.
+It runs the whole Fastify lifecycle — routing, content-type parsing, hooks, the error
+handler, serialisation — so it is an integration test in every sense that matters here, and
+it does not leave a listener behind when an assertion fails. The two cases that genuinely
+need the wire, the NDJSON stream and the keep-alive drain, bind an ephemeral port through
+the new `testHarness.ts`.
+
+**4.1.** `server/config.ts` reads and validates the environment once, at import, so nothing
+in the service can observe a half-valid configuration. The plan's list of variables was
+short and its list of files was wrong: `devDataset.ts` reads `MARKETDATA_DIR` and
+`devImport.ts` reads `EOD_DATA_DIR`, neither of which the phase named, `devDataset.ts` was
+not in its file list at all, and `LOG_LEVEL` joined them for 2.3. More to the point, "one
+surface" is only true if the other modules stop reading the environment, so `universe.ts`,
+`devImport.ts` and `devDataset.ts` now take a `ServerConfig` where they took a
+`NodeJS.ProcessEnv` — otherwise `config.ts` would have been one more reader rather than the
+only one. `providerFromEnv` and `sourceFromEnv` are renamed `providerFromConfig` and
+`sourceFromConfig` for the same reason, and `devToolsEnabled` is deleted. Two silent
+defaults became boot failures: `PORT=eight` used to serve 8787, and `DEV_TOOLS=yes` used to
+mean "off".
+
+The production guard changed shape rather than only address. In `universe.ts` it refused to
+build a dev/test adapter; in `config.ts` it refuses the configuration outright, because with
+only dev/test adapters in existence there is no narrower statement left to make. The
+observable behaviour is unchanged — `universe.ts` built its default provider at module
+scope, so `NODE_ENV=production` already failed the boot — but it is now stated once and
+tested in `config.test.ts` instead of being inferred from where an import happened to land.
+
+`ANTHROPIC_API_KEY` is treated as a secret from the first line that reads it, which is the
+habit phase 4.2 is about: only its shape is checked, the value never appears in the error
+when the check fails, and `ServerConfig.toJSON` reports `"[set]"` in its place so the boot
+log cannot leak it. The shape check is deliberately weaker than the first implementation's.
+That version also demanded twenty or more characters of `[A-Za-z0-9_-]`, which is true of
+every key we have seen and is still a guess about a format Anthropic owns; the failure mode
+of guessing too much is the worse one, a valid key rejected at boot by a message insisting
+it is malformed. The rule is now `sk-ant-` plus a non-empty unspaced tail, which still
+catches an empty variable, an unsubstituted placeholder and another vendor's key. Failing
+late against the real API beats failing wrong against our own regex.
+
+**Where the plan was wrong, and what was corrected in it.** The verify line for stage 2 said
+"existing server tests pass unchanged", and they did not and could not have: they built the
+server with `createScreenServer(store)` and drove `http.Server.listen/close`, both of which
+Fastify replaces. Every one of them asserts the same thing it asserted before, through
+`buildApp`/`startApp`, and the plan now says so. Two assertions genuinely moved — 415 for a
+non-JSON content type and 413 for an oversized body, both previously 400. The stage 2 and
+stage 4 touch scopes were widened in the plan for the files listed below, and the 4.1
+paragraph was corrected for the two environment variables and the file it did not know
+about. `.claude/rules/server.md` was wrong the moment this landed — it told an agent to keep
+HTTP details in `index.ts` and left `console` unmentioned — so it now points at `app.ts` and
+`routes/*`, and adds two rules: read the environment through `config.ts`, and log through
+`request.log` or `logger.ts`, never `console`, never a request or response body.
+
+### Where it lives
+- `server/app.ts` — the Fastify instance: the single JSON content-type parser, the one-shape
+  error handler, the 404, and which route plugins are registered.
+- `server/routes/` — `system.ts` (`/health`, `/metrics`), `screen.ts` (`/facts`, `/screen`,
+  `/signals`, `/backtest`), `instrument.ts`, `dev.ts`, and `deps.ts` for what they are handed.
+- `server/index.ts` — now only the entry script: validate the environment by importing
+  `config.ts`, warm the universe, listen, install the signal handlers.
+- `server/shutdown.ts` / `server/shutdown.test.ts` — the phase-1.2 shutdown, moved out of
+  `index.ts`; `server/index.test.ts` is deleted, its contents are here.
+- `server/config.ts` / `server/config.test.ts` — every environment variable, the production
+  guard (`assertDevTestAdaptersAllowed`), and the secret-safe `toJSON`.
+- `server/logger.ts` — the root pino logger and the development-only `pino-pretty` transport.
+- `server/app.test.ts` — routing, request bodies, error mapping, the structural `DEV_TOOLS`
+  gate; `server/testHarness.ts` — `startApp`, for the tests that need a real socket.
+- `server/universe.ts`, `server/devImport.ts`, `server/devDataset.ts`, `server/metrics.ts` —
+  take a `ServerConfig` or a logger instead of reading `process.env` or calling `console`.
+- `server/README.md` — a layout table, the logging section, the full status table
+  (400/404/413/415/500), and the endpoint prose brought up to date.
+- `docs/platform-hardening-plan.md` — status line, the implementation notes under 2.1, 2.3
+  and 4.1, the widened touch scopes and the corrected verify line.
+- `.claude/rules/server.md`; `package.json` — `fastify`, `pino`, and `pino-pretty` as a
+  devDependency.
+
+### How to test
+```bash
+/verify                     # typecheck, lint and the suite, all three even if one fails
+npm run test -- server/app.test.ts server/config.test.ts server/shutdown.test.ts
+```
+
+By hand, which is where the status codes are easiest to believe. Start the service with the
+dev surface on and hit the edges:
+
+```bash
+DEV_TOOLS=1 PORT=8799 npm run dev:server
+curl -s localhost:8799/health
+curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:8799/screen                    # 200, no body at all
+curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'content-type: text/plain' \
+     -d 'x' localhost:8799/dev/import                                                     # 415, not 400
+curl -s -X POST -H 'content-type: application/json' -d '{ not json' localhost:8799/screen # 400
+curl -s localhost:8799/nope                                                               # 404 {"error":"not found"}
+curl -s -N -X POST -H 'content-type: application/json' \
+     -d '{"strategy":"onset","horizons":[5]}' localhost:8799/backtest                     # NDJSON, progress then result
+```
+
+With `DEV_TOOLS` unset, `/dev/databases` must be a 404 and not a 403 — the plugin is not
+registered, so the path does not exist. `kill -TERM` on the process should log
+`shutdown complete` and free the port within a second even while a browser tab holds a
+keep-alive socket open.
+
+The config surface is tested by refusing to boot: `PORT=eight`, `DEV_TOOLS=yes`,
+`LOG_LEVEL=chatty`, `ANTHROPIC_API_KEY=xyz` and `NODE_ENV=production` must each fail with a
+message naming the variable, and the last two must not print the key. `LOG_LEVEL=debug`
+against a normal run shows the per-request `reqId` threading through every line.
+
 ## 2026-09-21 — Hardening 1.2–1.3: a shutdown that actually ends, and a server README that is true
 
 ### What changed
