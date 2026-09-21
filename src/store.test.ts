@@ -74,6 +74,12 @@ function fakeClient(overrides: Partial<MarketClient> = {}): FakeClient {
       },
     })),
     signals: async () => ({ universe: 0, elapsedMs: 1, strategy: 'onset', strategyName: 'Fan onset (baseline)', rows: [] }),
+    portfolioStatus: async () => null,
+    extractPortfolio: async () => ({
+      extraction: { accountLabel: null, holdings: [], warnings: [] },
+      attempts: 1,
+      problems: [],
+    }),
     devImportOptions: async () => null,
     devImport: async () => ({ files: 0, instruments: 0, bars: 0, skipped: 0, errors: [], targetDb: '', universe: 0 }),
     databases: async () => null,

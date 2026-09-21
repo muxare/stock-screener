@@ -86,6 +86,54 @@ export interface DevImportReport {
   universe: number;
 }
 
+// ---- portfolio screenshot reader (hardening stage 3) transport DTOs ----
+// Mirrors `server/claude/portfolio/schema.ts`. It is restated rather than
+// imported because this file is the client side of an HTTP boundary and must
+// not reach into the service's modules — the same reason the screen and signal
+// DTOs are restated here. When the schema changes, both ends change.
+export type HoldingConfidence = 'high' | 'medium' | 'low';
+
+/** A row as Claude read it. Every readable-or-not field may be null. */
+export interface ExtractedHolding {
+  ticker: string | null;
+  name: string | null;
+  shares: number | null;
+  averagePrice: number | null;
+  lastPrice: number | null;
+  marketValue: number | null;
+  /** What the prices on the row are quoted in. */
+  currency: string | null;
+  /** What `marketValue` is in — not always the same; see the server schema. */
+  valueCurrency: string | null;
+  confidence: HoldingConfidence;
+  note: string | null;
+}
+
+export interface PortfolioExtraction {
+  accountLabel: string | null;
+  holdings: ExtractedHolding[];
+  warnings: string[];
+}
+
+export interface ExtractPortfolioResp {
+  extraction: PortfolioExtraction;
+  /** 1 or 2 — the service retries a failed validation exactly once. */
+  attempts: number;
+  /** Meaning checks still failing when the attempts ran out. Usually empty. */
+  problems: string[];
+}
+
+export interface PortfolioStatusResp {
+  available: boolean;
+  model: string;
+}
+
+/** The image as the browser read it: base64 without a data-URL prefix. */
+export interface ScreenshotUpload {
+  mediaType: string;
+  dataBase64: string;
+}
+
 // ---- dev-only DB-selector (STORY-035) transport DTOs ----
 // Lists already-built market-data DBs and switches the active one at runtime.
 export interface DatabaseEntry {
@@ -122,6 +170,8 @@ export interface MarketClient {
     onProgress?: (p: FanBacktestProgress) => void,
     signal?: AbortSignal,
   ): Promise<FanBacktestResult & { elapsedMs: number }>;
+  portfolioStatus(): Promise<PortfolioStatusResp | null>;
+  extractPortfolio(image: ScreenshotUpload, signal?: AbortSignal): Promise<ExtractPortfolioResp>;
   devImportOptions(): Promise<ImportOptionsResp | null>;
   devImport(body: DevImportRequest): Promise<DevImportReport>;
   databases(): Promise<DatabasesResp | null>;
@@ -251,6 +301,41 @@ export function httpMarketClient(opts: MarketClientOptions = {}): MarketClient {
       if (tail?.type === 'result') result = tail;
       if (!result) throw new Error('backtest failed: stream ended without result');
       return result;
+    },
+
+    // Portfolio screenshot reader (hardening stage 3). `status` is the same
+    // capability probe the dev tooling uses: a service with no ANTHROPIC_API_KEY
+    // reports `available: false` and the UI does not offer the button, which is
+    // better than a button that answers 503 when pressed.
+    async portfolioStatus() {
+      try {
+        const res = await fetch('/portfolio/status');
+        if (!res.ok) return null;
+        return (await res.json()) as PortfolioStatusResp;
+      } catch {
+        return null; // service down: the feature stays hidden, like /dev/*
+      }
+    },
+
+    async extractPortfolio(image, signal) {
+      const res = await fetch('/portfolio/extract', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ image }),
+        signal,
+      });
+      // The service answers a failure with `{ error, errorCategory, isRetryable }`.
+      // Only the message is surfaced here; the category is the service's own
+      // vocabulary and the store has nothing to branch on it for yet.
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error || 'extraction failed: ' + res.status);
+      }
+      try {
+        return (await res.json()) as ExtractPortfolioResp;
+      } catch {
+        throw new Error('extraction failed: response body was not valid JSON');
+      }
     },
 
     // Dev-only EOD import (STORY-031). These hit the DEV_TOOLS-gated /dev/import

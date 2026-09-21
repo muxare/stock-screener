@@ -25,6 +25,7 @@ import { DEFAULT_COLUMNS, type ScreenView } from './lib/screen/columns';
 import { setSectorOptions, type FieldId } from './lib/screen/fields';
 import type { SortState } from './lib/screen/sort';
 import { createScreenSlice, DEFAULT_SORT, type ScreenSlice } from './store/screenSlice';
+import { createPortfolioSlice, type PortfolioSlice } from './store/portfolioSlice';
 import type { SavedScreen } from './lib/screen/storage';
 import {
   DEFAULT_FAN_BACKTEST_CONFIG,
@@ -37,6 +38,7 @@ import {
 
 export type { FanRow, FanSignalRow, ImportConfigOption, ImportDataEntry, DevImportReport, DatabaseEntry };
 export type { Clause, ScreenFilters, ScreenSlice };
+export type { PortfolioSlice, PortfolioState, EditableHolding } from './store/portfolioSlice';
 export type { FanBacktestConfig, FanBacktestProgress, FanBacktestResult, FanEntryEvent };
 export type { StrategyDef, ExitSpec };
 export type { ScreenView, FieldId, SortState, SavedScreen };
@@ -106,7 +108,7 @@ const EMPTY_DB: DbSelectorState = {
   switching: false, error: null,
 };
 
-export interface ScreenerState extends ScreenSlice {
+export interface ScreenerState extends ScreenSlice, PortfolioSlice {
   ready: boolean;
   matches: FanRow[];
   near: FanRow[];
@@ -188,6 +190,8 @@ export function makeScreenerState(
     ...createScreenSlice(set, get, () => {
       if (get().signalStrategy) void get().runSignals();
     }, storage),
+    // A third key space in the same storage object: the confirmed portfolio.
+    ...createPortfolioSlice(set, get, client, storage),
     ready: false,
     matches: [],
     near: [],
@@ -215,6 +219,9 @@ export function makeScreenerState(
       get().applyDefaultScreen();
       void get().bootstrap();
       void get().runScreen();
+      // Not gated on DEV: the screenshot reader is a product feature, and the
+      // probe is what decides whether the UI offers it at all.
+      void get().probePortfolio();
       if (import.meta.env.DEV) {
         void get().probeDevImport();
         void get().probeDatabases();

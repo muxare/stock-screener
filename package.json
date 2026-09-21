@@ -9,11 +9,12 @@
   "scripts": {
     "dev": "concurrently -n server,client -c blue,green \"npm:dev:server\" \"npm:dev:client\"",
     "dev:client": "vite",
-    "dev:server": "DEV_TOOLS=1 node --watch server/index.ts",
+    "dev:server": "DEV_TOOLS=1 node --env-file-if-exists=.env --watch server/index.ts",
     "eod:import": "node tools/eod-import/index.ts",
     "yahoo:fetch": "node tools/yahoo-fetch/index.ts",
     "yahoo:backfill": "node tools/yahoo-fetch/backfill.ts",
     "yahoo:daily": "node tools/yahoo-fetch/daily.ts",
+    "portfolio:backfill": "node --env-file-if-exists=.env tools/portfolio-backfill/index.ts",
     "build": "npm run typecheck && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
@@ -22,11 +23,13 @@
     "typecheck": "tsc -b && tsc -p server/tsconfig.json && tsc -p tools/tsconfig.json"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.127.0",
     "fastify": "^5.12.5",
     "pino": "^10.3.1",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-router-dom": "^7.18.0",
+    "zod": "^4.6.5",
     "zustand": "^5.0.14"
   },
   "devDependencies": {

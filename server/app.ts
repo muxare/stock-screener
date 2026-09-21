@@ -28,7 +28,9 @@ import type { Logger } from './logger.ts';
 import { systemRoutes } from './routes/system.ts';
 import { screenRoutes } from './routes/screen.ts';
 import { instrumentRoutes } from './routes/instrument.ts';
+import { portfolioRoutes } from './routes/portfolio.ts';
 import { devRoutes } from './routes/dev.ts';
+import type { RouteDeps } from './routes/deps.ts';
 
 export interface AppOptions {
   /** The warm universe to serve. Defaults to the process-wide singleton. */
@@ -37,6 +39,8 @@ export interface AppOptions {
   devTools?: boolean;
   /** `false` silences the app; tests use it, or pass a pino instance to capture. */
   logger?: Logger | false;
+  /** Overrides how `/portfolio/extract` reaches the model. Tests only. */
+  portfolioCaller?: RouteDeps['portfolioCaller'];
 }
 
 // Every error leaves by this door, in one shape: `{ "error": "<message>" }`.
@@ -106,6 +110,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   app.register(systemRoutes, { store });
   app.register(screenRoutes, { store });
   app.register(instrumentRoutes, { store });
+  app.register(portfolioRoutes, { store, portfolioCaller: opts.portfolioCaller });
   // DEV/TEST ONLY (SAD#8.7). The gate is the registration itself.
   if (devTools) app.register(devRoutes, { store });
 
