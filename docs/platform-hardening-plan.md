@@ -1,6 +1,6 @@
 # Platform hardening plan — from dev tool to research + signal platform
 
-Status (2026-09-14): **in progress — stage 1: phase 1.1 landed, 1.2–1.3 open**. Follows the
+Status (2026-09-21): **in progress — stage 1 complete (1.1, 1.2, 1.3 landed); stage 2 next**. Follows the
 Option C decision recorded in `docs/server-migration-plan.md`: the server stays TypeScript and gets hardened rather than
 ported. This document is the executable half. The CCA-F track (stages 3 and 7 here) is
 expanded, with the Claude Code, MCP and Agent SDK gaps filled, in `docs/cca-f-learning-plan.md`.
@@ -56,20 +56,47 @@ matrix rather than 24 alone — 24 is the `engines` floor, 25 is what developmen
 This was the single biggest gap in the repo — `.github/workflows` did not exist, so tests and
 lint were manual.
 
-**Phase 1.2 — Graceful shutdown.** `UniverseStore.close()` exists and is **never called**;
-there is no `SIGTERM`/`SIGINT` handler in `server/index.ts`, so the SQLite handle leaks on
-every restart. Wire signals to `server.close()` + `productionUniverse.close()`. This matters
-more than it looks: everything from stage 4 onward runs in a container, where `SIGTERM` is
-how the process is asked to stop.
+**Phase 1.2 — Graceful shutdown. Landed 2026-09-21.** `UniverseStore.close()` exists and is
+**never called**; there is no `SIGTERM`/`SIGINT` handler in `server/index.ts`, so the SQLite
+handle leaks on every restart. Wire signals to `server.close()` +
+`productionUniverse.close()`. This matters more than it looks: everything from stage 4 onward
+runs in a container, where `SIGTERM` is how the process is asked to stop.
 
-**Phase 1.3 — Fix the README drift.** `server/README.md` documents a `POST /screen` taking
-`preset`/`rules`/`limit`/`offset` and returning `total`/`count`/`tickers`/`results`. The real
-handler takes **no body** and returns `{universe, elapsedMs, matches, near}`. Rewrite against
-the real handlers; stage 2 then replaces the prose with generated OpenAPI so it cannot drift
-again.
+*Two things the text above did not account for.* `server.close()` alone is not enough to
+end the process: it waits for every open connection, and the Vite dev proxy holds an idle
+keep-alive socket open indefinitely, so a shutdown built from `close()` and nothing else
+would hang until the socket happened to time out. The implementation therefore closes idle
+connections immediately and cuts whatever is still running after a ten-second grace window,
+which also bounds the shutdown for `docker stop`, whose own default patience is ten seconds
+before SIGKILL. And the ordering is a decision rather than an accident: the listener stops
+first, in-flight requests get the window, and the provider closes last, so a `/backtest`
+still streaming bars is not reading from a database that has already been closed.
 
-- Touch scope: `.github/`, `server/index.ts`, `server/README.md`.
+**Phase 1.3 — Fix the README drift. Landed 2026-09-21.** `server/README.md` documents a
+`POST /screen` taking `preset`/`rules`/`limit`/`offset` and returning
+`total`/`count`/`tickers`/`results`. The real handler takes **no body** and returns
+`{universe, elapsedMs, matches, near}`. Rewrite against the real handlers; stage 2 then
+replaces the prose with generated OpenAPI so it cannot drift again.
+
+*The drift was wider than the one endpoint named here.* `/facts`, `/metrics`, `/signals` and
+the whole `DEV_TOOLS`-gated `/dev/*` surface were undocumented, `/backtest` was described
+with a request and a result shape from a rule engine that was never built, and the file
+pointed at a `server/backtest.test.ts` that does not exist. The rewrite was therefore done
+against live responses captured from a running service rather than against the types alone,
+and it documents the environment variables and the dataset precedence too, since those are
+what a reader actually needs before the container work in stage 4.
+
+- Touch scope: `.github/`, `server/index.ts`, `server/README.md`, and — added 2026-09-21 —
+  `server/index.test.ts`, `docs/platform-hardening-plan.md`. The phase as written declared no
+  test file, but shutdown ordering and the grace-period cut-off are exactly the behaviour
+  that regresses silently, and a `kill -TERM` by hand cannot be run in CI.
 - Verify: CI green on a PR; `kill -TERM` on the dev server closes the DB handle cleanly.
+- Verify, added 2026-09-21 (the line above tests 1.2 by hand and 1.3 not at all):
+  `server/index.test.ts` pins that the provider closes after the listener and only once,
+  that an expired grace period still closes it and says so, and that a second signal exits
+  non-zero without waiting; and every endpoint, error and environment variable in
+  `server/README.md` is checked against a response from a running service or against the
+  code that reads it.
 
 ---
 
