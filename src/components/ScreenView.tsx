@@ -16,6 +16,7 @@ import {
   type ScreenView as TableView,
 } from '../lib/screen/columns';
 import { ScreenTable, type ExtraColumn } from './table/ScreenTable';
+import { heldTickers } from '../lib/portfolio/holdings';
 import { ColumnChooser } from './table/ColumnChooser';
 import { Disclosure } from './ui/Disclosure';
 import { HButton } from './ui/Hoverable';
@@ -177,6 +178,11 @@ export function ScreenView() {
   const retry = useScreener((s) => s.retry);
   const runSignals = useScreener((s) => s.runSignals);
   const selectStock = useScreener((s) => s.selectStock);
+  const confirmedPortfolio = useScreener((s) => s.portfolio.confirmed);
+
+  // Recomputed only when the confirmed portfolio changes, not on every render:
+  // the set is read once per cell and the lists are long.
+  const held = useMemo(() => heldTickers(confirmedPortfolio), [confirmedPortfolio]);
 
   const matches = useMemo(() => filterRows(matchesAll, search, filters), [matchesAll, search, filters]);
   const near = useMemo(() => filterRows(nearAll, search, filters), [nearAll, search, filters]);
@@ -233,6 +239,7 @@ export function ScreenView() {
         onSort={onSort}
         selected={selected}
         onSelect={selectStock}
+        held={held}
         rowTitle={(r) => `${r.ticker} — entry ${r.entryDate ?? 'latest bar'}, open ${r.openR >= 0 ? '+' : ''}${nf(r.openR, 2)}R. Click for the chart.`}
         empty={signalsLoading ? 'Scanning…' : narrowed ? 'No open entries pass the current filters.' : `No names currently have an open ${label} entry.`}
       />
@@ -254,6 +261,7 @@ export function ScreenView() {
         onSort={onSort}
         selected={selected}
         onSelect={selectStock}
+        held={held}
         empty={narrowed ? 'No near names pass the current filters.' : 'No names are approaching the fan.'}
       />
     );
@@ -273,6 +281,7 @@ export function ScreenView() {
         onSort={onSort}
         selected={selected}
         onSelect={selectStock}
+        held={held}
         empty={narrowed ? 'No matches pass the current filters.' : 'No names currently stacked 18 > 50 > 100 > 200.'}
       />
     );

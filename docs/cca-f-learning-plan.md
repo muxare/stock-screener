@@ -1,6 +1,7 @@
 # CCA-F learning plan — applying the Claude Certified Architect material to this repo
 
-Status (2026-09-21): **in progress — phases A (A.1–A.5) and B landed; phase C is next**. Written from Mikael's question of
+Status (2026-09-21): **in progress — phases A (A.1–A.5), B and C landed, C verified against a
+real account; phase D is next**. Written from Mikael's question of
 what to implement here to enforce the learning of the Anthropic *Claude Certified
 Architect – Foundations* (CCA-F) certification content. Intent 3 of
 `docs/platform-hardening-plan.md` already names CCA-F as a product goal; this document is
@@ -342,12 +343,170 @@ stage 3 text does not mention, each a named exam objective:
 This phase also writes the fourth rule deferred from A.1: `.claude/rules/claude.md`,
 scoped to `server/claude/**`, carrying the stage 7 standing rules.
 
-- Touch scope: as stage 3 (`server/routes/portfolio.ts`, `server/claude/`,
-  `src/components/`), plus `tools/portfolio-backfill/` (new) and `.claude/rules/claude.md`.
+- Touch scope, as declared before the work: as stage 3 (`server/routes/portfolio.ts`,
+  `server/claude/`, `src/components/`, `package.json`), plus `tools/portfolio-backfill/` (new)
+  and `.claude/rules/claude.md`.
+- Touch scope, corrected 2026-09-21 to what the phase actually needed — the reasoning is in
+  the amendment below, and the line is restated here so a scope check run against this phase
+  reads the true one: the six paths above, plus `server/app.ts` and `server/routes/deps.ts`
+  (registering the plugin, and the injectable caller that makes the route testable without a
+  key), `server/portfolio.test.ts` (the route's test, beside the other route tests at the
+  `server/` root), `src/lib/client/marketClient.ts`, `src/store.ts`,
+  `src/store/portfolioSlice.ts`, `src/lib/portfolio/holdings.ts`, `src/AppScreener.tsx`,
+  `src/help/glossary.ts`, `vite.config.ts`, `package-lock.json`, `.gitignore`, the tests beside each new
+  module (`src/store.test.ts`, `src/store/portfolioSlice.test.ts`,
+  `src/lib/portfolio/holdings.test.ts`, `server/claude/portfolio/extract.test.ts`,
+  `tools/portfolio-backfill/backfill.test.ts`), and `docs/platform-hardening-plan.md`, whose
+  stage 3 this phase closes and whose status line therefore moves with it.
 - Verify: as stage 3, plus: a blurred screenshot yields `null` fields rather than numbers;
   an injected schema violation triggers exactly one retry; the batch script round-trips
   three fixtures and reports per-item status; `.claude/rules/claude.md` exists and loads
   when a file under `server/claude/` is opened.
+
+**What the implementation changed (2026-09-21).** Seven claims above, and one in stage 3 of
+the hardening plan, were wrong or underspecified once the code existed.
+
+*Zod is now this repository's schema library, and phase 2.2 inherits that.* The plan left
+the choice to hardening 2.2 ("Zod (or TypeBox, which Fastify consumes natively)"), but
+structured outputs need a schema *now*, and the SDK's supported path is `zodOutputFormat`
+with `messages.parse()`. The alternative was a hand-written JSON Schema literal plus a
+hand-written shape validator, to avoid pre-empting a decision that was going to be made two
+phases later anyway. Zod is a dependency of the service from this branch; if 2.2 still
+prefers TypeBox for the wire, it inherits a second schema library in one server, and that
+trade should be made knowingly rather than discovered.
+
+*Confidence is three buckets, not a number.* "Per-row confidence" left the type open. A 0–1
+float invites false precision from a model that is not calibrated to two decimal places, and
+phase D's "mean confidence on wrong fields" is answered better by three honest levels than by
+a hundred dishonest ones. `high | medium | low`, and the confirm UI sorts `low` to the top.
+
+*"Surface the failure to the user" became data beside the rows, not a thrown error.* Taken
+literally, a twelfth row whose market value does not multiply out would discard eleven good
+rows. The extraction comes back with a `problems` list attached and the UI shows it above the
+table; the only thrown failure is the one where there is nothing to show, when neither attempt
+produced an answer that fit the schema. This is a reading of the plan's sentence rather than a
+departure from it, and it holds because the rows were never a fact: every one is confirmed by
+hand before anything is stored.
+
+*There is a third meaning check, and it is the strongest one.* The plan named negative shares
+and an average price outside the bar range. The check that actually catches a misread digit is
+arithmetic: shares × last price against the printed market value, which moves by a factor of
+ten when a share count gains a zero and does not move at all when the total is read correctly.
+The tolerance is two per cent, which absorbs a rounded total struck a moment apart from the
+printed price. The bar-range check, meanwhile, only fires for tickers the universe knows — a
+holding we have no bars for is left unchecked rather than doubted — and carries a ten per cent
+band, because a broker's GAV is not always split-adjusted and our bars are.
+
+*The key must be in the environment; an `ant auth login` profile will not do.* Stage 3's text
+says `new Anthropic()` "resolves `ANTHROPIC_API_KEY`, or an `ant auth login` profile", and the
+implementation instead passes the validated key from `config.ts` and refuses without it. The
+reason is the probe below: `/portfolio/status` has to answer truthfully *before* a request is
+made, and there is no way to ask the SDK whether it would be able to authenticate without
+spending a call. A profile would make the probe report the feature as unavailable while the
+SDK could in fact have authenticated, which is a worse failure than requiring one variable.
+Phase 4.1's rule — the process reads its environment in one place — points the same way.
+
+*A `.env` file is how the key reaches a development run, and the `.gitignore` rule came
+first.* Neither plan said where the key lives day to day, and "export it in your shell" does
+not survive a new terminal. `npm run dev:server` and `npm run portfolio:backfill` therefore
+pass Node's own `--env-file-if-exists=.env`, which needs no dependency, leaves an exported
+variable winning over the file, and prints a harmless notice rather than failing when there is
+no file — so CI and a fresh clone are unaffected. The ordering matters more than the mechanism:
+this repository is public, `.gitignore` had no rule for `.env`, and the rule was added before
+any such file existed. `npm run test` deliberately gets none of this: every test in the suite
+runs without a key, and one that quietly started using a real one would cost money and fail on
+anyone else's machine.
+
+*Ignoring a file and not serving it are two different decisions.* Test screenshots of a real
+brokerage account have to live somewhere, and the obvious place — a gitignored folder inside
+the working tree — is safe from git and not safe from Vite, which serves anything under the
+project root. Measured rather than assumed: with the folder ignored,
+`http://localhost:5173/.local-screenshots/<name>.png` answered 200 with the file. So
+`vite.config.ts` now carries `server.fs.deny` for `.local-screenshots/**` and for `.env`, and
+the same request answers 403 while the app still loads. Keeping the screenshots outside the
+repository entirely remains the safer habit and is what the diary recommends; this rule exists
+because the convenient option should not be the one that quietly publishes an account
+statement to any page open on the dev origin.
+
+*The feature needs a capability probe the plan did not name.* `GET /portfolio/status` reports
+whether `ANTHROPIC_API_KEY` is set, and the UI offers the button only when it is. A feature
+that answers 503 when clicked is worse than one that is not there, and the dev tooling already
+established the pattern.
+
+*The touch scope was too narrow to build a working feature.* `src/components/` covers the
+confirm modal, but a modal with no transport, no state, no dev proxy and nothing mounting it is
+not a UI. Three of the additions are worth naming for their reasons rather than their paths:
+`src/lib/client/marketClient.ts`, because it is the one place in this repository a `fetch` may
+live; `src/components/table/ScreenTable.tsx` and `src/components/ScreenView.tsx`, for the "you
+hold this" marker, which is what stage 3 says the feature is *for* and which would otherwise
+have been left as an obvious next step nobody took; and `src/help/glossary.ts`, because every
+other affordance in this app has a help card behind it and a new button without one is the
+start of a two-tier UI. The corrected `Touch scope:` line above carries the full list — it is
+restated there rather than only here, because a scope check reads the line and not the prose,
+and a widening that is disclosed but not declared gets flagged again on every later branch.
+
+*The batch path neither retries nor confirms.* The plan said "same schema, same prompt, half
+the price", and that holds — `tools/portfolio-backfill/` imports the prompt, the schema and the
+validator rather than restating them. What it does not do is repair a failed validation in a
+second turn: nobody is waiting, a re-run is a new batch, and a half-hour round trip to fix one
+row is a worse trade than naming the file. And it writes JSON files rather than "the user-data
+store (hardening stage 5)", because stage 5 does not exist yet and writing into anything else
+would create a second, unreviewed source of truth.
+
+*Stage 3's "the API key is absent from every log line" is true by construction, not by
+inspection.* `config.ts` already reports the key as `[set]` through `toJSON`, the SDK never
+echoes it, and no error message this layer produces carries its cause. The observation worth
+recording is the neighbouring one: the request body is a picture of a brokerage account and the
+response is its holdings, and Fastify logs neither — the route logs counts, a category and a
+timing, and that was verified against a running service.
+
+**The live pass, 2026-09-21, and the three defects it found.** Run against a real Avanza ISK
+account: a full-screen browser shot (5120x2880), a crop of the holdings table, two crops of
+non-holdings cards, and a blurred copy. Every Verify clause is now met, and the interesting part
+is that none of the three defects below could have been found by any test that did not spend
+money on a real screenshot.
+
+*Two currencies, not one.* Avanza prints a position's value in the **account's** currency and
+its price in the **instrument's**. A US holding in a Swedish account therefore prints `3` and
+`375,86` beside `11 097 kr`, and the consistency check — the one added above as the strongest
+detector of a misread digit — called that perfectly-read row a misread, spent a second attempt
+on it, and the model spent that attempt correctly refusing to change its answer. The schema now
+carries `currency` (what the prices are in) and `valueCurrency` (what the value is in), the
+prompt explains the distinction, and the check runs only when the two are known and equal. An
+unknown currency is still treated as comparable, because a single-currency account usually
+prints no code at all and refusing to check those would give up the check to avoid the rarer
+false positive. After the fix the same screenshot extracts in one attempt with no problems.
+
+*The API's `custom_id` is not a file name.* `^[a-zA-Z0-9_-]{1,64}$` rejects `2026-01.png` with a
+400, and the batch tool used file names as ids. The lesson generalises past this bug: the
+scripted `BatchPort` in the tests accepted whatever it was handed, so it was testing the
+author's assumption rather than the API's rule. `customIdFor` now cleans the name and prefixes
+the index — the index is what keeps two names that clean to the same string apart — and results
+are mapped back to file names before anything is written. The test now asserts the API's pattern
+rather than the file name.
+
+*The model answers in the language of the image.* A Swedish screenshot produced Swedish notes
+and warnings, which is a reasonable default and the wrong one here: those strings render in an
+English UI and this repository writes English everywhere. The prompt now says so, and says the
+complement too — names, tickers and currency codes are copied as printed, not translated.
+
+**What the clauses actually showed.** The full-screen shot and the table crop both extract all
+four positions correctly in one attempt, exclude the `Totalt värde` summary row, and read the
+account label. The two non-holdings crops return an empty holdings list with a warning naming
+what the image actually shows, rather than inventing rows. The batch round-trips all seven
+fixtures, keyed by file name, and its answer for the table crop is identical to the interactive
+one — which is the claim about sharing the prompt and schema, checked rather than asserted. The
+server log across the whole session contains no key, no base64 and no holding name.
+
+*The supplied blurred screenshot was not blurry enough, and that is worth writing down.* Its
+digits were still legible; the model read them correctly and dropped every row from `high` to
+`medium` with a warning naming the blur, which is right but does not test the null rule. A
+genuinely illegible fixture, derived with `sips` by downscaling to 260px and back, is what tests
+it: every field on every row came back `null` with `low` confidence and a note saying which
+column was unreadable, four rows still detected because the table's structure survives what its
+contents do not, and not one invented digit. Phase D's fixture set needs both — the mild blur
+measures calibration, the heavy one measures refusal — and neither is in this repository, since
+they are a real account.
 
 ---
 

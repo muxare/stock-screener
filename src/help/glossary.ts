@@ -112,6 +112,16 @@ An option marked invalid is a database the server found but could not open.`,
     aliases: ['Import data'],
     body: `Loads CSV end-of-day bars into the dev database. It is only offered when the server runs with dev tools on and it never touches the synthetic [[data-source]].`,
   },
+  {
+    id: 'portfolio',
+    title: 'Holdings',
+    kind: 'data',
+    aliases: ['Holdings'],
+    body: `Your own positions, read by Claude from a screenshot of your broker account and then confirmed by you row by row. A name you hold is marked with a green dot beside its ticker in every list.
+
+What comes back from the screenshot is a proposal, never a fact: anything Claude could not read in full comes back blank rather than guessed, the least certain rows are shown first, and nothing is saved until you confirm it. The list lives in this browser only — the screenshot is never stored and never logged.`,
+    related: ['universe', 'live-entry'],
+  },
 
   // ---------------------------------------------------------------- indicators
   {

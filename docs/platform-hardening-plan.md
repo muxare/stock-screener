@@ -1,7 +1,8 @@
 # Platform hardening plan — from dev tool to research + signal platform
 
 Status (2026-09-21): **in progress — stage 1 complete (1.1, 1.2, 1.3 landed); stage 2 under way
-(2.1 and 2.3 landed, 2.2 open); 4.1 landed early, on the 2.1 branch**. Follows the
+(2.1 and 2.3 landed, 2.2 open); 4.1 landed early, on the 2.1 branch; stage 3 landed and
+verified against a real account**. Follows the
 Option C decision recorded in `docs/server-migration-plan.md`: the server stays TypeScript and gets hardened rather than
 ported. This document is the executable half. The CCA-F track (stages 3 and 7 here) is
 expanded, with the Claude Code, MCP and Agent SDK gaps filled, in `docs/cca-f-learning-plan.md`.
@@ -227,6 +228,16 @@ does not leave a listener behind when an assertion fails. The cases that genuine
 ---
 
 ## Stage 3 — First Claude feature: the portfolio screenshot reader *(Track: CCA-F)*
+
+**Landed 2026-09-21**, on `cca-f/phase-c-screenshot-reader`, as phase C of
+`docs/cca-f-learning-plan.md` — which is where the corrections to the text below are
+recorded, since that plan is the one that specified the phase's extra deliverables. Two
+of them matter to a reader of this stage: **Zod is now a dependency of the service**, which
+pre-empts the choice phase 2.2 was to make, and the touch scope was wider than either plan
+declared. The live pass ran the same day against a real ISK account and found three
+defects that no keyless test could have — chiefly that this broker prints a position's value in
+the account's currency and its price in the instrument's, which made the new consistency check
+call a correctly-read foreign holding a misread. All of it is recorded in phase C.
 
 Deliberately placed early. It is small, genuinely useful, dependency-light, and it is the
 cleanest possible CCA-F artifact: a single-call extraction task with structured output and a

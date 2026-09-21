@@ -21,6 +21,11 @@ dev-market.db
 # Pointer to the last-imported dev dataset (STORY-031) — local state, regenerable
 .dev-active-db
 
+# Local secrets. ANTHROPIC_API_KEY for the portfolio screenshot reader lives here
+# (hardening stage 3); the repository is public, so this rule exists before the file does.
+.env
+.env.*
+
 # Claude Code personal settings
 .claude/settings.local.json
 
@@ -52,3 +57,4 @@ venv/
 *.njsproj
 *.sln
 *.sw?
+.local-screenshots/

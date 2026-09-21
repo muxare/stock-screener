@@ -10,6 +10,9 @@ export function TopBar() {
   const devImportAvailable = useScreener((s) => s.devImport.available);
   const openDevImport = useScreener((s) => s.openDevImport);
   const openFanBacktest = useScreener((s) => s.openFanBacktest);
+  const portfolioAvailable = useScreener((s) => s.portfolio.available);
+  const heldCount = useScreener((s) => s.portfolio.confirmed?.holdings.length ?? 0);
+  const openPortfolio = useScreener((s) => s.openPortfolio);
   const dbSelector = useScreener((s) => s.dbSelector);
   const selectDatabase = useScreener((s) => s.selectDatabase);
 
@@ -72,6 +75,18 @@ export function TopBar() {
           title="Load CSV market data into the dev database"
         >
           <span style={{ fontSize: '13px' }}>↥</span> Import data
+        </HButton>
+      )}
+
+      {portfolioAvailable && (
+        <HButton
+          data-help="portfolio"
+          onClick={openPortfolio}
+          style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 12px', border: '1px solid #e7e8ea', borderRadius: '9px', background: '#fff', color: '#5b6168', fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+          hoverStyle={{ border: '1px solid #06a96b', color: '#06865a' }}
+          title="Read your holdings from a screenshot of your account"
+        >
+          <span style={{ fontSize: '13px' }}>▤</span> {heldCount > 0 ? `Holdings (${heldCount})` : 'Holdings'}
         </HButton>
       )}
 

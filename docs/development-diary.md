@@ -1,5 +1,185 @@
 # Development diary
 
+## 2026-09-21 — CCA-F C / hardening 3: reading holdings off a screenshot, and refusing to believe them
+
+### What changed
+Phase C of `docs/cca-f-learning-plan.md`, which is hardening stage 3 with three CCA-F
+deliverables added to it: nullable fields, a validation-retry loop and a Message Batches
+path. It is this repository's first Claude feature. You paste or drop a screenshot of your
+Avanza holdings, Claude returns the positions as structured data, you check every row, and
+only what you confirm is stored. The screener then marks a name you hold with a green dot
+beside its ticker in every list, which is the reason the feature exists rather than a
+decoration on it.
+
+The architecture is the boring one on purpose, and the CCA-F surface-selection material is
+what says so: extraction is fully specifiable in advance, there is nothing for a tool to do,
+so this is a **single API call** and not a workflow and certainly not an agent. The only loop
+in it is the validation-retry loop, which is control flow the code owns rather than a model
+deciding what to do next.
+
+**What the model is allowed to say.** The schema in `server/claude/portfolio/schema.ts` makes
+every readable-or-not field nullable, and the prompt states the null rule as the preferred
+outcome rather than a fallback: a share count is non-null only when every digit is legible.
+That is the whole point. A model told to avoid nulls invents a plausible digit, and a
+plausible digit in a share count changes position sizing silently. Confidence is
+`high | medium | low` rather than a 0–1 float, because a float invites precision the model
+does not have and phase D's "mean confidence on the fields that were wrong" is answered
+better by three honest buckets than by a hundred dishonest ones.
+
+**What the code refuses to believe.** Structured outputs make shape validation nearly
+uninteresting — the API will not return a string where the schema says number — and leave
+meaning entirely open. A share count of -400 validates; so does a GAV of 1 570 on an
+instrument that has never traded above 210. So `validate.ts` runs three checks, and the one
+that earns its place is the one the plan did not name: shares × last price against the
+printed market value. A misread digit moves that product by a factor of ten and does not move
+the printed total, which makes arithmetic the strongest detector of exactly the failure this
+feature is built to prevent. The tolerance is two per cent, enough to absorb a rounded total
+struck a moment apart from the printed price. The bar-range check fires only for tickers the
+universe knows — a holding we have no bars for is left unchecked rather than doubted — with a
+ten per cent band, because a broker's GAV is not always split-adjusted and our bars are.
+
+**The retry is bounded at two, hard.** A failed check goes back in a second turn with the
+specific failure spelled out, and there is no third attempt: a model that has misread a digit
+twice with the reason in front of it will not read it correctly on the fifth try, and every
+attempt re-sends the image at full price. What the second attempt cannot fix comes back as a
+`problems` list beside the rows rather than as a thrown error. The plan said "surface the
+failure to the user" and this is that reading of it: discarding eleven good rows because the
+twelfth does not multiply out would be a worse answer than showing all twelve with the
+twelfth flagged, and the rows were never a fact to begin with.
+
+**Failures are typed, and the shape is not local.** `server/claude/errors.ts` maps the SDK's
+exception classes most specific first — `BadRequestError` → `AuthenticationError` →
+`RateLimitError` → `APIError` — because all of them extend `APIError` and a broad arm placed
+first answers "upstream, try again later" to a 400 that will fail identically forever. Every
+failure leaves as a `ClaudeError` carrying a category, an `isRetryable` flag and an HTTP
+status, which is deliberately the `{ errorCategory, isRetryable, message }` triple phase E has
+to return from every MCP tool. One mapping, written once.
+
+**Nothing is logged.** The request body is a picture of a brokerage account and the response
+is its holdings. Fastify logs a method and a url and not a body, which this route depends on
+rather than merely enjoys; it logs a count, a category and a timing and never a value.
+`config.ts` already reported the key as `[set]`, and no error message here carries its cause.
+Verified against a running service: three requests, nothing in the log but statuses.
+
+**The batch path is real, not described.** `tools/portfolio-backfill/` submits a folder of
+screenshots as one Message Batch at half the price — a year of monthly account screenshots is
+fifty-odd images, none of them urgent, all the same request shape, which is precisely what
+the API exists for. It imports the prompt, the schema and the validator from `server/claude/`
+rather than restating any of them, because a second slightly different extractor would make
+phase D's eval measure something that is not what runs. Two things differ, both because
+nobody is waiting: it does not retry, and it confirms nothing. Results are keyed by
+`custom_id`, never by position — the API returns items in whatever order they finished, and
+reading them positionally is how a backfill files one month's holdings under another month's
+date, plausibly and wrongly.
+
+**Two decisions a later phase inherits.** Zod is now a dependency of the service, which
+pre-empts the Zod-or-TypeBox choice hardening 2.2 was to make; the SDK's supported
+structured-output path is `zodOutputFormat` with `messages.parse()`, and the alternative was
+hand-writing a JSON Schema literal and a shape validator to avoid deciding two phases early.
+And `.claude/rules/claude.md` now exists — the fourth path rule, deferred from phase A.1 until
+there was code for its globs to match — carrying the stage 7 standing rules for the model,
+thinking, structured outputs, typed errors, redaction and the build-an-eval-first rule that
+phase D enforces.
+
+**What the first real screenshot changed, the same day.** Three defects, none of which a
+keyless test could have found, and one of them a defect in a check that had been added that
+morning as an improvement on the plan.
+
+*Avanza prints two currencies per row.* A position's value is in the account's currency and its
+price is in the instrument's, so a US holding in a Swedish account prints `3` and `375,86`
+beside `11 097 kr`. The new consistency check compared them, called a perfectly-read Tesla row a
+misread, and spent a second attempt on it — during which the model held its answer and explained
+that the price column carried no currency code. The schema now separates `currency` (the prices)
+from `valueCurrency` (the value), the prompt explains why they differ, and the check runs only
+when both are known and equal; an unknown currency is still compared, because a single-currency
+account usually prints no code at all. The same screenshot then extracted in one attempt with
+nothing flagged.
+
+*A file name is not a `custom_id`.* The API constrains it to `^[a-zA-Z0-9_-]{1,64}$` and the
+batch tool was sending `2026-01.png`, which is a 400. The bug is small; the reason it survived
+into a real run is not. The scripted `BatchPort` in the tests accepted whatever it was handed,
+so the test asserted what the author believed rather than what the API requires — a fake more
+permissive than the thing it stands in for will pass on anything. The test now asserts the
+pattern, and `customIdFor` cleans the name and prefixes the index, because two names can clean
+to the same string and a duplicate id would file one screenshot's holdings under another's.
+
+*The model answers in the language of the picture.* A Swedish screenshot produced Swedish notes
+and warnings — reasonable, and wrong for an English UI in a repository that writes English
+everywhere. The prompt now says so, and says the other half too: names, tickers and currency
+codes are copied as printed, never translated.
+
+**And one thing that was fine and did not test what it was meant to.** The blurred screenshot
+supplied for the "nulls, not confident nonsense" clause was still legible: the model read every
+figure correctly and dropped each row from `high` to `medium` with a warning naming the blur.
+That is the right behaviour and it measures calibration, not refusal. Downscaling the table crop
+to 260px and back with `sips` produces something neither the model nor a person can read, and
+that is what tests the rule: every field `null`, every row `low`, four rows still detected
+because a table's structure outlives its contents, and not one invented digit.
+
+### Where it lives
+- `server/claude/client.ts` — the lazy Anthropic client, `MODEL` and `MAX_TOKENS`. A service
+  with no key still boots and serves everything else; the key is a per-endpoint answer.
+- `server/claude/errors.ts` — `ClaudeError`, the categories and the typed SDK chain.
+- `server/claude/portfolio/{schema,prompt,validate,extract}.ts` — the contract, the
+  instruction and the repair instruction, the meaning checks, and the two-attempt loop.
+- `server/routes/portfolio.ts` — `GET /portfolio/status` (the capability probe the UI asks
+  before offering the button) and `POST /portfolio/extract`.
+- `server/app.ts`, `server/routes/deps.ts` — the plugin registration, and the injectable
+  caller that lets the route be tested without a key.
+- `src/lib/portfolio/holdings.ts` — the confirmed list in localStorage, and `heldTickers`.
+- `src/store/portfolioSlice.ts` — the proposal, the edits, and the one function that confirms.
+- `src/components/modals/PortfolioImportModal.tsx` — the image beside the rows it produced.
+- `src/components/table/ScreenTable.tsx`, `src/components/ScreenView.tsx` — the held marker.
+- `src/lib/client/marketClient.ts`, `vite.config.ts`, `src/help/glossary.ts` — transport, the
+  dev proxy and its `fs.deny` rule, and the help card behind the new button.
+- `.gitignore` — `.env`, and `.local-screenshots/` for test images that must not be committed.
+- `tools/portfolio-backfill/` — the batch path, its CLI and its README.
+- `.claude/rules/claude.md` — the standing rules, scoped to `server/claude/**`.
+
+### How to test
+Without a key, which is most of it:
+
+```bash
+npm run test          # 635 tests, including the loop, the checks and the route
+PORT=8799 node server/index.ts
+curl -s localhost:8799/portfolio/status
+# {"available":false,"model":"claude-opus-5"}
+curl -s -X POST localhost:8799/portfolio/extract -H 'content-type: application/json' \
+  -d '{"image":{"mediaType":"image/png","dataBase64":"aGVsbG8="}}'
+# 503 {"error":"this feature needs ANTHROPIC_API_KEY…","errorCategory":"not_configured","isRetryable":false}
+```
+
+The log from that run carries a status, a category and a timing, and no body — which is the
+check worth making by eye every time this route changes.
+
+With a key: put `ANTHROPIC_API_KEY=sk-ant-…` in a `.env` at the repository root — ignored by
+git, and read by `npm run dev:server` and `npm run portfolio:backfill` through Node's own
+`--env-file-if-exists`, so an absent file is a notice rather than a failure and an exported
+variable still wins. Then `npm run dev` and the **Holdings** button in the top bar. Paste a screenshot of an account, press *Read holdings*, and the table appears with the
+least certain rows on top. Three things to look for, because they are the claims: a cropped or
+blurred row comes back with blank cells and a note rather than numbers; a row whose figures do
+not multiply out is called out above the table; and nothing is in `localStorage` under
+`stockScreener.portfolio.v1` until *Confirm holdings* is pressed. Afterwards, a name you hold
+carries a green dot beside its ticker in the fan, near and entries lists.
+
+Test screenshots are an account statement, so keep them outside the repository — the
+scratchpad, or anywhere off the working tree. If they must sit in the tree, `.local-screenshots/`
+is ignored by git **and** denied by the dev server's `server.fs.deny`; a gitignored folder alone
+is not enough, because Vite serves everything under the project root and that folder answered
+200 before the rule was added.
+
+The batch path round-tripped seven fixtures on 2026-09-21 and produced, for the holdings crop,
+an answer identical to the interactive one — which is the claim about sharing one prompt and one
+schema, checked rather than asserted. On a folder of screenshots:
+
+```bash
+MARKETDATA_DB=./yahoo-market.db npm run portfolio:backfill -- ~/screenshots --poll 15
+```
+
+It writes one JSON file per image plus a `summary.json`, and prints the ones that failed with
+the reason. Nothing it writes is confirmed; that is stage 5's job, once there is somewhere
+durable for a confirmed holding to live.
+
 ## 2026-09-21 — Hardening 2.1, 2.3 and 4.1: Fastify, pino, and one place that reads the environment
 
 ### What changed

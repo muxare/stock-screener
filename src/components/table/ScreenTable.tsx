@@ -69,7 +69,22 @@ function nameCell(row: ScreenRowLike): string {
   return row.name && row.name !== row.ticker ? row.name : '—';
 }
 
-function cellContent(id: FieldId, row: ScreenRowLike): ReactNode {
+// A dot before the ticker on a name the confirmed portfolio holds (hardening
+// stage 3). It is deliberately quiet — a marker, not a column: holding a name
+// changes how you read a signal, but it is not a figure to sort by, and the
+// portfolio is only as current as the last screenshot that was confirmed.
+function HeldMark() {
+  return (
+    <span
+      title="You hold this, according to the last portfolio you confirmed"
+      style={{ color: '#06a96b', fontSize: 9, marginRight: 4, verticalAlign: 'middle' }}
+    >
+      ●
+    </span>
+  );
+}
+
+function cellContent(id: FieldId, row: ScreenRowLike, held: boolean): ReactNode {
   if (id === 'sparkline') {
     return (
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -77,7 +92,9 @@ function cellContent(id: FieldId, row: ScreenRowLike): ReactNode {
       </div>
     );
   }
-  if (id === 'ticker') return <span style={{ fontWeight: 700 }}>{row.ticker}</span>;
+  if (id === 'ticker') {
+    return <span style={{ fontWeight: 700 }}>{held && <HeldMark />}{row.ticker}</span>;
+  }
   if (id === 'name') return <span style={{ color: '#6b7280' }}>{nameCell(row)}</span>;
   const text = formatField(id, row);
   if (id === 'changePct') {
@@ -115,6 +132,7 @@ export function ScreenTable<T extends ScreenRowLike>({
   onSelect,
   empty,
   rowTitle,
+  held,
 }: {
   rows: T[];
   columns: FieldId[];
@@ -127,6 +145,8 @@ export function ScreenTable<T extends ScreenRowLike>({
   onSelect: (ticker: string) => void;
   empty: string;
   rowTitle?: (row: T) => string;
+  /** Tickers the confirmed portfolio holds; they get a marker on the ticker. */
+  held?: ReadonlySet<string>;
 }) {
   const extraById = new Map(extra.map((c) => [c.id, c]));
   const at = extraAfter ? columns.indexOf(extraAfter) : -1;
@@ -228,7 +248,7 @@ export function ScreenTable<T extends ScreenRowLike>({
               if (!isFieldId(key)) return <div key={key} />;
               const field = fieldOf(key);
               return (
-                <div key={key} style={bodyCell(field?.align ?? 'right')}>{cellContent(key, row)}</div>
+                <div key={key} style={bodyCell(field?.align ?? 'right')}>{cellContent(key, row, held?.has(row.ticker) ?? false)}</div>
               );
             })}
           </HDiv>
