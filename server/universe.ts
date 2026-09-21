@@ -5,6 +5,11 @@
 // SAD#2.3 p95 budget is stated for.
 // Bars enter only through the MarketDataProvider port (SAD#5.10): the service
 // depends on the port, never a concrete vendor SDK.
+//
+// Environment variables are not read here any more. Phase 4.1 moved them, and
+// the production guard that used to live in `providerFromEnv`, into
+// `server/config.ts`; this module takes a validated `ServerConfig` and decides
+// only which adapter that configuration selects.
 
 import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -13,12 +18,14 @@ import type { InstrumentBars, Stock } from '../src/lib/market.ts';
 import { syntheticProvider } from '../src/lib/data/synthetic.ts';
 import { sqliteProvider } from '../src/lib/data/sqlite.ts';
 import type { MarketDataProvider } from '../src/lib/data/provider.ts';
+import { config } from './config.ts';
+import type { ServerConfig } from './config.ts';
 
 // Dev-only "active dataset" pointer (STORY-031). After an EOD import the running
 // service hot-swaps onto the imported DB (reload(), below), but that swap is
 // in-memory: a process restart — including `node --watch` firing on any server
 // edit — would otherwise revert to the synthetic generator. So the import tool
-// records the imported DB path here, and providerFromEnv() boots from it. The
+// records the imported DB path here, and providerFromConfig() boots from it. The
 // file is gitignored and only ever written by the DEV_TOOLS-gated import surface,
 // so production never creates or reads it (and MARKETDATA_DB still wins anyway).
 // Delete the pointer (or the DB) to fall back to the synthetic dataset.
@@ -40,12 +47,11 @@ export function forgetDevDb(pointerPath: string = DEV_ACTIVE_DB_POINTER): void {
 }
 
 // The persisted dev dataset, if one is recorded AND still on disk. Dev-only: the
-// pointer is honoured only when DEV_TOOLS is on (the same gate as the import
-// surface — inlined to avoid a universe<->devImport import cycle). A stale
-// pointer whose DB was deleted silently yields null → synthetic, so a cleaned-up
-// temp DB never crashes boot.
-function persistedDevDb(env: NodeJS.ProcessEnv, pointerPath: string = DEV_ACTIVE_DB_POINTER): string | null {
-  if (env.DEV_TOOLS !== '1' && env.DEV_TOOLS !== 'true') return null;
+// pointer is honoured only when DEV_TOOLS is on, the same gate as the import
+// surface. A stale pointer whose DB was deleted silently yields null → synthetic,
+// so a cleaned-up temp DB never crashes boot.
+function persistedDevDb(cfg: ServerConfig, pointerPath: string = DEV_ACTIVE_DB_POINTER): string | null {
+  if (!cfg.devTools) return null;
   try {
     const p = readFileSync(pointerPath, 'utf8').trim();
     return p && existsSync(p) ? p : null;
@@ -63,16 +69,15 @@ export type DatasetSource =
 // The dataset the service should boot against, as a descriptor (no I/O — it does
 // not open the DB, so it never throws). Mirrors the precedence below:
 // MARKETDATA_DB wins; else the persisted dev pointer (DEV_TOOLS only); else
-// synthetic. `providerFromEnv` turns this into a live provider. The MVP data
+// synthetic. `providerFromConfig` turns this into a live provider. The MVP data
 // source (a local EOD snapshot, ADR-008 / SAD#8.8) is selected as a SQLite DB
 // via MARKETDATA_DB or the dev pointer — there is no vendor-specific boot tier.
-export function sourceFromEnv(
-  env: NodeJS.ProcessEnv = process.env,
+export function sourceFromConfig(
+  cfg: ServerConfig = config,
   pointerPath: string = DEV_ACTIVE_DB_POINTER,
 ): DatasetSource {
-  const dbPath = env.MARKETDATA_DB;
-  if (dbPath) return { kind: 'sqlite', path: resolve(dbPath) };
-  const devDb = persistedDevDb(env, pointerPath);
+  if (cfg.marketDataDb) return { kind: 'sqlite', path: cfg.marketDataDb };
+  const devDb = persistedDevDb(cfg, pointerPath);
   if (devDb) return { kind: 'sqlite', path: resolve(devDb) };
   return { kind: 'synthetic' };
 }
@@ -95,28 +100,17 @@ export function providerForSource(source: DatasetSource): MarketDataProvider {
 // downgraded to synthetic: the operator asked for imported data, so masking a
 // misconfiguration by serving demo data would be worse than a clear startup error.
 //
-// PRODUCTION GUARD (SAD#8.7): both adapters above are dev/test only — there is no
-// genuine production data path yet (the licensed-vendor adapter is deferred to
-// ADR-008 / SAD#8.8). So in a production environment selecting EITHER fails fast
-// with a clear error here, rather than letting demo/imported data silently back
-// production screening traffic.
-export function providerFromEnv(
-  env: NodeJS.ProcessEnv = process.env,
+// The production guard that used to stand here now lives in `config.ts`
+// (`assertDevTestAdaptersAllowed`), because it is a statement about the
+// environment rather than about the adapter, and phase 4.1 wanted it tested once.
+export function providerFromConfig(
+  cfg: ServerConfig = config,
   pointerPath: string = DEV_ACTIVE_DB_POINTER,
 ): MarketDataProvider {
-  const source = sourceFromEnv(env, pointerPath);
-  if (env.NODE_ENV === 'production') {
-    throw new Error(
-      `Refusing to serve the '${source.kind}' dev/test market-data adapter in a ` +
-        `production environment (NODE_ENV=production): the synthetic generator (SAD#8.7) ` +
-        `and the SQLite reader (STORY-032) are dev/test only and must never back ` +
-        `production screening traffic. The production adapter is deferred to ADR-008 (SAD#8.8).`,
-    );
-  }
-  return providerForSource(source);
+  return providerForSource(sourceFromConfig(cfg, pointerPath));
 }
 
-const defaultProvider: MarketDataProvider = providerFromEnv();
+const defaultProvider: MarketDataProvider = providerFromConfig();
 
 export interface UniverseStore {
   // The warm, memoized universe. Repeated calls return the SAME Stock[] so
@@ -145,7 +139,7 @@ export interface UniverseStore {
 
 export function createUniverseStore(
   provider: MarketDataProvider = defaultProvider,
-  initialSource: DatasetSource = sourceFromEnv(),
+  initialSource: DatasetSource = sourceFromConfig(),
 ): UniverseStore {
   let cached: Stock[] | null = null;
   let active = provider;

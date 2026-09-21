@@ -10,6 +10,8 @@
 // for budget assertions in tests. Instrumentation only — it does not touch the
 // engine or the service compute (STORY-016/017 out of scope).
 
+import { logger } from './logger.ts';
+
 export type MetricPath = 'screen' | 'backtest';
 
 // SAD#2.3 / SAD#2.4 v1 latency targets, in milliseconds.
@@ -40,8 +42,10 @@ export class LatencyMetrics {
   private over: Record<MetricPath, number> = { screen: 0, backtest: 0 };
 
   // Record one server-side latency sample. A sample over its SAD budget is logged
-  // immediately (regression visible) and counted. `warn` is injectable for tests.
-  record(path: MetricPath, ms: number, warn: (msg: string) => void = (m) => console.warn(m)): void {
+  // immediately (regression visible) and counted. `warn` is injectable: the routes
+  // pass their request logger, so a breach carries the request id of the request
+  // that caused it; the default is the root logger, for callers outside a request.
+  record(path: MetricPath, ms: number, warn: (msg: string) => void = (m) => logger.warn(m)): void {
     this.samples[path].push(ms);
     if (ms > BUDGET_MS[path]) {
       this.over[path]++;

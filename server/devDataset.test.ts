@@ -18,6 +18,7 @@ import { createUniverseStore } from './universe.ts';
 import { syntheticProvider } from '../src/lib/data/synthetic.ts';
 import { sqliteProvider } from '../src/lib/data/sqlite.ts';
 import { RequestError } from './handlers.ts';
+import { loadConfig } from './config.ts';
 
 // Build a STORY-031 DB with `tickers` single-bar instruments at `path`.
 function makeDb(path: string, tickers: string[]): void {
@@ -43,12 +44,13 @@ beforeEach(() => {
 });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
-const env = (extra: Partial<NodeJS.ProcessEnv> = {}) => ({ MARKETDATA_DIR: dir, ...extra }) as NodeJS.ProcessEnv;
+const cfg = (extra: Partial<NodeJS.ProcessEnv> = {}) =>
+  loadConfig({ MARKETDATA_DIR: dir, ...extra } as NodeJS.ProcessEnv);
 
 describe('listDatabases', () => {
   it('discovers .db files in the scan dir with instrument counts', () => {
     const store = createUniverseStore(syntheticProvider(7));
-    const list = listDatabases(store, env());
+    const list = listDatabases(store, cfg());
     expect(list.scanDir).toBe(resolve(dir));
     const byName = Object.fromEntries(list.databases.map((d) => [d.name, d]));
     expect(byName['aapl.db'].instruments).toBe(1);
@@ -59,7 +61,7 @@ describe('listDatabases', () => {
 
   it('reports synthetic as active and marks no DB active when no DB is loaded', () => {
     const store = createUniverseStore(syntheticProvider(7), { kind: 'synthetic' });
-    const list = listDatabases(store, env());
+    const list = listDatabases(store, cfg());
     expect(list.activeKind).toBe('synthetic');
     expect(list.activePath).toBeNull();
     expect(list.databases.every((d) => !d.active)).toBe(true);
@@ -67,8 +69,8 @@ describe('listDatabases', () => {
 
   it('marks the active DB once one is activated', () => {
     const store = createUniverseStore(syntheticProvider(7), { kind: 'synthetic' });
-    activateDatabase({ path: aaplDb }, store, env(), pointer);
-    const list = listDatabases(store, env());
+    activateDatabase({ path: aaplDb }, store, cfg(), pointer);
+    const list = listDatabases(store, cfg());
     expect(list.activeKind).toBe('sqlite');
     expect(list.activePath).toBe(resolve(aaplDb));
     expect(list.databases.find((d) => d.name === 'aapl.db')!.active).toBe(true);
@@ -81,7 +83,7 @@ describe('listDatabases', () => {
     bad.exec('CREATE TABLE notes (id INTEGER PRIMARY KEY);');
     bad.close();
     const store = createUniverseStore(syntheticProvider(7));
-    const entry = listDatabases(store, env()).databases.find((d) => d.name === 'wrong.db')!;
+    const entry = listDatabases(store, cfg()).databases.find((d) => d.name === 'wrong.db')!;
     expect(entry.valid).toBe(false);
     expect(entry.instruments).toBeNull();
   });
@@ -90,7 +92,7 @@ describe('listDatabases', () => {
     writeFileSync(join(dir, 'aapl.db-wal'), 'x');
     writeFileSync(join(dir, 'aapl.db-shm'), 'x');
     const store = createUniverseStore(syntheticProvider(7));
-    const names = listDatabases(store, env()).databases.map((d) => d.name);
+    const names = listDatabases(store, cfg()).databases.map((d) => d.name);
     expect(names).not.toContain('aapl.db-wal');
     expect(names).not.toContain('aapl.db-shm');
   });
@@ -99,7 +101,7 @@ describe('listDatabases', () => {
 describe('activateDatabase', () => {
   it('switches the warm universe onto the chosen SQLite DB', () => {
     const store = createUniverseStore(syntheticProvider(7), { kind: 'synthetic' });
-    const result = activateDatabase({ path: twoDb }, store, env(), pointer);
+    const result = activateDatabase({ path: twoDb }, store, cfg(), pointer);
     expect(result.activeKind).toBe('sqlite');
     expect(result.activePath).toBe(resolve(twoDb));
     expect(result.universe).toBe(2);
@@ -110,7 +112,7 @@ describe('activateDatabase', () => {
   it('switches back to the synthetic generator', () => {
     const store = createUniverseStore(sqliteProvider(aaplDb), { kind: 'sqlite', path: resolve(aaplDb) });
     expect(store.get().map((s) => s.ticker)).toEqual(['AAPL']);
-    const result = activateDatabase({ synthetic: true }, store, env(), pointer);
+    const result = activateDatabase({ synthetic: true }, store, cfg(), pointer);
     expect(result.activeKind).toBe('synthetic');
     expect(result.activePath).toBeNull();
     expect(result.universe).toBeGreaterThan(2); // the synthetic fixture, not AAPL
@@ -120,8 +122,8 @@ describe('activateDatabase', () => {
   it('rejects a path outside the discovered set (no arbitrary file access)', () => {
     const store = createUniverseStore(syntheticProvider(7));
     const outside = join(tmpdir(), 'somewhere-else.db');
-    expect(() => activateDatabase({ path: outside }, store, env())).toThrow(RequestError);
-    expect(() => activateDatabase({ path: outside }, store, env())).toThrow(/unknown database/);
+    expect(() => activateDatabase({ path: outside }, store, cfg())).toThrow(RequestError);
+    expect(() => activateDatabase({ path: outside }, store, cfg())).toThrow(/unknown database/);
   });
 
   it('rejects an invalid (non-STORY-031) DB with a clear error', () => {
@@ -130,11 +132,11 @@ describe('activateDatabase', () => {
     bad.exec('CREATE TABLE notes (id INTEGER PRIMARY KEY);');
     bad.close();
     const store = createUniverseStore(syntheticProvider(7));
-    expect(() => activateDatabase({ path: wrong }, store, env())).toThrow(/could not open database/);
+    expect(() => activateDatabase({ path: wrong }, store, cfg())).toThrow(/could not open database/);
   });
 
   it('rejects a request with neither a path nor synthetic', () => {
     const store = createUniverseStore(syntheticProvider(7));
-    expect(() => activateDatabase({}, store, env())).toThrow(/provide a database path/);
+    expect(() => activateDatabase({}, store, cfg())).toThrow(/provide a database path/);
   });
 });

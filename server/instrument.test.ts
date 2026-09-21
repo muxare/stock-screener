@@ -13,7 +13,7 @@ import { buildStock } from '../src/lib/market.ts';
 import type { Bar, InstrumentBars } from '../src/lib/market.ts';
 import { syntheticProvider } from '../src/lib/data/synthetic.ts';
 import { createUniverseStore } from './universe.ts';
-import { createScreenServer } from './index.ts';
+import { startApp } from './testHarness.ts';
 
 // Same synthetic adapter (behind the port, SAD#5.10) the golden-master harness pins.
 const provider = syntheticProvider(7);
@@ -65,12 +65,9 @@ describe('HTTP/JSON endpoint (SAD#4.2)', () => {
   let close: () => Promise<void>;
 
   beforeAll(async () => {
-    const server = createScreenServer(store);
-    await new Promise<void>((resolve) => server.listen(0, resolve));
-    const addr = server.address();
-    const port = typeof addr === 'object' && addr ? addr.port : 0;
-    base = `http://127.0.0.1:${port}`;
-    close = () => new Promise<void>((resolve) => server.close(() => resolve()));
+    const running = await startApp(store);
+    base = running.base;
+    close = running.close;
   });
 
   it('GET /instrument/:ticker returns the InstrumentBars payload', async () => {

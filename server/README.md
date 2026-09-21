@@ -1,16 +1,29 @@
 # Screening service (SAD#4.2 / ADR-003)
 
-A Node host for the **same** `src/lib/market.ts` engine that runs in the browser
-— no fork. It runs full-universe screens server-side so the client stops
+A **Fastify** host for the **same** `src/lib/market.ts` engine that runs in the
+browser — no fork. It runs full-universe screens server-side so the client stops
 computing thousands of names (SAD#2.5), and exposes a small HTTP/JSON API.
 
 This file is written against the handlers as they are. It was rewritten on
-2026-09-21 (platform hardening phase 1.3) because it had drifted badly: it
-documented a `POST /screen` taking `preset` / `rules` / `limit` / `offset` and
-returning `total` / `count` / `tickers` / `results`, none of which the service has
-ever accepted or returned, and it described none of `/facts`, `/metrics`,
-`/signals` or the dev surface. Prose drifts; stage 2 replaces this section with
-OpenAPI generated from the route schemas, at which point it cannot.
+2026-09-21 (platform hardening phase 1.3) because it had drifted badly, and
+revised the same day for phases 2.1, 2.3 and 4.1, which replaced the hand-rolled
+router with Fastify, `console.error` with pino, and the scattered `process.env`
+reads with one validated config. Prose drifts; phase 2.2 replaces the endpoint
+section below with OpenAPI generated from the route schemas, at which point it
+cannot.
+
+## Layout
+
+| File | What lives there |
+|---|---|
+| `index.ts` | The entry script: warm the universe, listen, install signal handlers. |
+| `app.ts` | Builds the Fastify instance — the JSON parser, the error handler, the 404, and which route plugins are registered. |
+| `routes/` | One plugin per surface: `system.ts` (`/health`, `/metrics`), `screen.ts` (`/facts`, `/screen`, `/signals`, `/backtest`), `instrument.ts`, `dev.ts`. |
+| `handlers.ts` | The transport-agnostic seam: parsed request + warm universe → plain result. |
+| `config.ts` | Every environment variable, read and validated once. |
+| `logger.ts` | The root pino logger. |
+| `shutdown.ts` | The graceful-shutdown sequence and the signal handlers. |
+| `universe.ts` | The warm, memoized universe behind the `MarketDataProvider` port. |
 
 ## Run
 
@@ -28,18 +41,56 @@ npx tsc -p server/tsconfig.json   # or `npm run typecheck` for the whole repo
 
 ### Environment
 
+Every variable is read and validated once, in `config.ts`, at import time. An
+invalid one is a boot failure naming the variable — hardening phase 4.1, because
+`Number(process.env.PORT) || 8787` used to serve 8787 for `PORT=eight` and a
+service on the wrong port looks healthy from the inside.
+
 | Variable | Effect |
 |---|---|
-| `PORT` | Listen port. Default `8787`. |
+| `PORT` | Listen port. Default `8787`. Must be a whole number in 1–65535. |
 | `HOST` | Listen address. Default `127.0.0.1` — loopback, so the dev-tools surface is not reachable from the LAN. Set `0.0.0.0` deliberately to expose it. |
 | `MARKETDATA_DB` | Path to a SQLite market-data DB (STORY-032). When set it wins over everything else, and an unreadable or wrong-schema file fails the boot rather than silently downgrading to synthetic data. |
 | `MARKETDATA_DIR` | Directory the dev DB-selector scans for `.db` files. Default: the repo root. |
-| `DEV_TOOLS` | `1` or `true` registers the `/dev/*` surface and honours the persisted dev-dataset pointer. Off in any real deployment. |
+| `DEV_TOOLS` | `1` or `true` registers the `/dev/*` surface and honours the persisted dev-dataset pointer. `0`, `false` or unset is off; anything else is refused rather than read as "off". Off in any real deployment. |
 | `EOD_DATA_DIR` | Browsable root for the dev import file picker. |
+| `LOG_LEVEL` | One of pino's levels, or `silent`. Default `info`. |
+| `ANTHROPIC_API_KEY` | Not used yet — hardening stage 3 is the first feature that needs it. If present it must look like an Anthropic key (`sk-ant-…`); the value is never logged and never appears in an error message. |
 | `NODE_ENV` | `production` makes the boot fail on purpose: both adapters behind the port are dev/test only (SAD#8.7), and demo data must never back production screening traffic. |
 
 Dataset precedence at boot: `MARKETDATA_DB`, else the `.dev-active-db` pointer
 left by a dev import (only when `DEV_TOOLS` is on), else the synthetic generator.
+
+### Logging
+
+pino, one JSON line per event, at `LOG_LEVEL`. Fastify derives a child logger per
+request, so every line carries a `reqId` and an "incoming request" line is
+followed by a "request completed" line with the status and the duration. A 500
+adds a `request failed` line with the error and its stack under the same `reqId` —
+a 500 is never silent, which is the one thing the old `sendError` got right and
+this had to keep.
+
+Nothing serialises a request or response body, deliberately: pino will happily
+write whatever it is handed, and from stage 3 a request body is a screenshot of a
+brokerage account.
+
+In development — `NODE_ENV` unset or `development`, which is how `npm run dev`
+runs — the same events are rendered through `pino-pretty` instead: a clock time,
+the level as a word, and one line per event with `pid`, `hostname` and the
+client's address and port dropped, none of which tell you anything when the
+process is the terminal you are looking at.
+
+```
+[12:56:31.370] INFO: incoming request {"reqId":"req-1","req":{"method":"GET","url":"/health"}}
+[12:56:31.374] INFO: request completed {"reqId":"req-1","res":{"statusCode":200},"responseTime":3.37}
+```
+
+Anywhere else it is JSON, which is what a log aggregator parses and what phase 4.4
+will collect. `pino-pretty` is a devDependency and is not installed in a
+production image, so the gate is `nodeEnv === 'development'` rather than
+`!== 'production'` — the transport target must never be resolved where the package
+is absent, and the test run (`NODE_ENV=test`) does not spawn a transport worker
+either.
 
 ### Shutdown
 
@@ -47,16 +98,36 @@ left by a dev import (only when `DEV_TOOLS` is on), else the synthetic generator
 finish, and then release the provider's handle — `UniverseStore.close()`, which
 nothing called before hardening phase 1.2, so the SQLite read handle leaked on
 every restart. Idle keep-alive sockets are dropped at once rather than waited
-for; a second signal exits immediately with a non-zero code. Pinned by
-`server/index.test.ts`.
+for; whatever is still running when the window expires is cut off, and that path
+says so in the log; a second signal exits immediately with a non-zero code.
+
+Fastify's `app.close()` does the first half — it stops the listener, runs the
+close hooks and resolves when the server is down — but not the other two, so
+`shutdown.ts` still owns the grace window and the idle-socket drop. Fastify's
+`forceCloseConnections: 'idle'` option looks like it would cover the latter and
+does not: it only calls `closeIdleConnections()` for a server built by a user
+`serverFactory`, so switching it on would have been a no-op dressed as a
+mechanism. Pinned by `server/shutdown.test.ts`.
 
 ## Endpoints
 
-Everything answers JSON except `/backtest`, which streams NDJSON. Bad input is
-`400 {"error": "..."}` (a `RequestError` from the handler or the strategy parser),
-an unknown route is `404 {"error": "not found"}`, and anything else is
-`500 {"error": "internal error"}` with the real cause logged, so a 500 is never
-silent. Request bodies are capped at 1 MiB, and at 64 MiB on `/dev/import`.
+Everything answers JSON except `/backtest`, which streams NDJSON. Every error
+leaves in one shape, `{"error": "..."}`:
+
+| Status | When |
+|---|---|
+| `400` | A `RequestError` from a handler or the strategy parser; a body that is not valid JSON; a path the router cannot decode. |
+| `404` | An unknown route (`{"error": "not found"}`) or an unknown ticker. |
+| `413` | A request body over the limit: 1 MiB everywhere, 64 MiB on `/dev/import`. |
+| `415` | A `POST` whose content type is not `application/json`. |
+| `500` | Anything else — flat `{"error": "internal error"}`, with the real cause logged, so a 500 is never silent. |
+
+The service parses `application/json` and nothing else. That is what keeps a
+cross-origin form from reaching a state-changing route: `text/plain`,
+`application/x-www-form-urlencoded` and `multipart/form-data` are the three
+content types a form can send without a preflight, and all three are refused
+before a body is read. A `POST` with no body at all is legal — `/screen` has
+never read one — and an empty JSON body parses as `{}`.
 
 ### `GET /health`
 Liveness plus the warm universe size. Note that reporting the size builds the
@@ -215,9 +286,11 @@ name scanned, then exactly one `result` line.
 ```
 
 Compute runs server-side so the browser UI thread is never blocked (SAD#2.5), and
-progress is streamed so a long batch is observable. If the engine throws after the
-headers are out the stream simply ends without a `result` line, and the client
-reports "stream ended without result". Pinned by `server/fanBacktest.test.ts`.
+progress is streamed so a long batch is observable — the route hijacks its reply
+and writes the raw socket, because Fastify's serialiser would otherwise hold the
+whole run and emit it at the end. If the engine throws after the headers are out
+the stream simply ends without a `result` line, and the client reports "stream
+ended without result". Pinned by `server/fanBacktest.test.ts`.
 
 **These numbers are not yet evidence.** Transaction costs are not modelled and a
 per-trade *t* overstates significance; phase 6.2 of
@@ -225,10 +298,10 @@ per-trade *t* overstates significance; phase 6.2 of
 
 ### Dev-only: `/dev/*` (requires `DEV_TOOLS`)
 
-Registered only when `DEV_TOOLS` is set — with the flag off these paths fall
-through to the 404, so the surface cannot exist in a deployment. The two `POST`
-routes require `content-type: application/json` and reject anything else before
-reading the body, which is what keeps a cross-origin form from reaching them.
+Registered only when `DEV_TOOLS` is set — with the flag off the plugin does not
+exist and these paths fall through to the 404, so the surface cannot exist in a
+deployment. Like every other `POST`, the two here answer 415 to anything that is
+not `application/json`, before the body is read.
 
 - `GET /dev/import/options` — the configs, the browsable data root and its
   immediate CSV files and subdirectories, and the target DB (`ImportOptions`).
@@ -252,10 +325,15 @@ reading the body, which is what keeps a cross-origin form from reaching them.
   warm-cache full-universe screen stays within the p95 ≤ 3 s budget. Pinned by
   `server/screen.test.ts`.
 - **`handlers.ts` is the transport-agnostic seam.** Parsed request + warm universe
-  → plain result, with every HTTP detail in `index.ts`. New endpoints get a
-  handler first and a route that wraps it — that seam is what lets stage 2 swap
-  the router for Fastify without touching the engine, and what phase E of
+  → plain result, with every HTTP detail in `app.ts` and `routes/`. New endpoints
+  get a handler first and a route that wraps it. That seam is what let phase 2.1
+  swap the whole router for Fastify without touching the engine — `handlers.ts` is
+  byte-identical across that change — and it is what phase E of
   `docs/cca-f-learning-plan.md` wraps as MCP tools.
+- **The `DEV_TOOLS` gate is structural.** `app.ts` registers the `/dev/*` plugin or
+  it does not; with the flag off those paths do not exist. That matters more from
+  stage 5 onward, where a second user and a route that hot-swaps the dataset for
+  everyone are a bad combination.
 - **Data port (SAD#5.10).** Bars enter only through the `MarketDataProvider` port.
   Until ADR-008 (SAD#8.8) selects a licensed vendor and legal sign-off lands
   (STORY-015), the adapters behind it are dev/test only: the SQLite reader when a
@@ -266,4 +344,8 @@ reading the body, which is what keeps a cross-origin form from reaching them.
 
 - Authentication and per-user data — hardening stage 5.
 - Generated OpenAPI and schema-validated bodies — hardening stage 2.2, which
-  retires the hand-written endpoint prose above.
+  retires the hand-written endpoint prose above. Until then the bodies are parsed
+  by hand (`parseFanBacktestBody`, `parseFanSignalsBody`, and
+  `src/lib/strategy/parse.ts` for a strategy's meaning) and a 400 names the first
+  problem it found rather than every field at once.
+- A `/ready` probe separate from `/health` — hardening phase 4.4.
