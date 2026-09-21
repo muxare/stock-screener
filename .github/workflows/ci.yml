@@ -38,3 +38,122 @@ jobs:
       - run: npm run lint
 
       - run: npm run test
+
+  # CLAUDE.md and AGENTS.md are the same guidance read by two different tools, and the
+  # only way to keep them the same is to refuse the diff. No model is involved: the check
+  # is exact, mechanical and instant, and knowing when not to reach for Claude is as much
+  # the point of phase B as the job below it.
+  guidance:
+    name: guidance files identical
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: CLAUDE.md and AGENTS.md must be byte-identical
+        run: |
+          if ! diff -u CLAUDE.md AGENTS.md; then
+            echo "::error file=AGENTS.md::AGENTS.md differs from CLAUDE.md. Copy one over the other: cp CLAUDE.md AGENTS.md"
+            exit 1
+          fi
+
+  # Phase B of docs/cca-f-learning-plan.md: two advisory checks run by headless Claude
+  # Code, reported as one pull-request comment that is updated in place on every push.
+  #
+  # It runs only on pull requests from a branch in this repository. A fork's pull request
+  # gets neither the API key nor write permission, and the alternative — pull_request_target
+  # — would run with a writable token while the branch's own content is in the prompt.
+  # That trade is not worth two advisory checks, so a fork PR simply gets no comment.
+  advisory-review:
+    name: claude advisory review
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The touch-scope check compares against the merge base, so the history has to
+          # be there; the default shallow clone has only the merge commit.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # The secrets context is not available to a job-level `if`, so the gate is a step
+      # output instead. A fork of this repository with no key of its own gets a quiet
+      # skip rather than a red job.
+      - id: key
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::ANTHROPIC_API_KEY is not set; the advisory review is skipped."
+          fi
+
+      - name: Collect the facts that need git
+        if: steps.key.outputs.present == 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git diff --name-only "$BASE_SHA...$HEAD_SHA" > changed-files.txt
+          {
+            echo "CHANGED_FILES<<EOF"
+            cat changed-files.txt
+            echo "EOF"
+            echo "LATEST_COMMIT_DATE=$(git show -s --format=%cs "$HEAD_SHA")"
+          } >> "$GITHUB_ENV"
+
+      # The pull-request body reaches the renderer through the environment, never through
+      # a shell interpolation: `${{ github.event.pull_request.body }}` pasted into a run
+      # block would be executed by the shell of whoever opened the pull request.
+      - name: Render the prompt
+        if: steps.key.outputs.present == 'true'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: node .github/claude/render-prompt.mjs > prompt.txt
+
+      # One invocation per push, no resume, and a read-only tool set: this reviewer can
+      # look at the repository and nothing else. The version is pinned so a verdict that
+      # changes is a change someone made here.
+      - name: Run Claude Code headless
+        if: steps.key.outputs.present == 'true'
+        continue-on-error: true
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_MODEL: claude-sonnet-5
+        run: |
+          npx --yes @anthropic-ai/claude-code@2.1.278 \
+            --print \
+            --model "$CLAUDE_MODEL" \
+            --output-format json \
+            --json-schema "$(cat .github/claude/pr-review.schema.json)" \
+            --allowed-tools "Read,Grep,Glob" \
+            --max-budget-usd 0.75 \
+            < prompt.txt > result.json
+
+      - name: Post or update the one comment
+        if: steps.key.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CLAUDE_MODEL: claude-sonnet-5
+        run: |
+          set -euo pipefail
+          node .github/claude/format-comment.mjs result.json > comment.md
+          existing=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate \
+            --jq 'map(select(.body | contains("<!-- cca-f-phase-b-advisory -->"))) | first | .id // empty')
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$existing" -F body=@comment.md --silent
+          else
+            gh api -X POST "repos/$REPO/issues/$PR_NUMBER/comments" -F body=@comment.md --silent
+          fi
