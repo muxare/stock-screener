@@ -1,0 +1,42 @@
+{
+  "accountLabel": "ISK Global",
+  "holdings": [
+    {
+      "ticker": "NORDV",
+      "name": "Nordvik Industri AB",
+      "shares": 120,
+      "averagePrice": 184.5,
+      "lastPrice": 212.4,
+      "marketValue": 25488,
+      "currency": "SEK",
+      "valueCurrency": "SEK",
+      "confidence": "high",
+      "note": null
+    },
+    {
+      "ticker": "HFS",
+      "name": "Halliford Systems Inc",
+      "shares": 15,
+      "averagePrice": 128.4,
+      "lastPrice": 142.75,
+      "marketValue": 23108,
+      "currency": "USD",
+      "valueCurrency": "SEK",
+      "confidence": "high",
+      "note": null
+    },
+    {
+      "ticker": "EKFA",
+      "name": "Ekenäs Fastigheter AB",
+      "shares": 300,
+      "averagePrice": 58.25,
+      "lastPrice": 63.8,
+      "marketValue": 19140,
+      "currency": "SEK",
+      "valueCurrency": "SEK",
+      "confidence": "high",
+      "note": null
+    }
+  ],
+  "warnings": []
+}

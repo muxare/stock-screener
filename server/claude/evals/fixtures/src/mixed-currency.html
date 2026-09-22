@@ -1,0 +1,148 @@
+<!doctype html>
+<!--
+  mixed-currency — the defect phase C's live pass found, reproduced on purpose.
+
+  A Swedish account holding one US name. Avanza quotes the position's prices in
+  the instrument's own currency and its value in the account's, so the middle row
+  prints USD in the GAV and Senast columns and kronor in the Värde column. Reading
+  that as one currency is what made server/claude/portfolio/validate.ts call a
+  correctly-read row a misread on 2026-09-21, and it is why the schema carries
+  both `currency` and `valueCurrency`.
+
+  The two Swedish rows multiply out exactly; the US row deliberately does not,
+  because 15 x 142,75 USD is not 23 108 and no reader should expect it to be. That
+  is the point of the case, and the consistency check skips rows whose price and
+  value currencies differ.
+-->
+<html lang="sv">
+  <head>
+    <meta charset="utf-8" />
+    <title>ISK Global — Innehav</title>
+    <style>
+      :root {
+        --ink: #101820;
+        --muted: #667380;
+        --line: #dfe4ea;
+        --brand: #0a3d33;
+        --page: #f4f6f8;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: var(--page);
+        color: var(--ink);
+        font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      .page { padding: 24px; }
+      .card {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .bar {
+        background: var(--brand);
+        color: #fff;
+        padding: 14px 20px;
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+      }
+      .bar h1 { font-size: 19px; font-weight: 600; margin: 0; letter-spacing: 0.2px; }
+      .bar .sub { font-size: 13px; opacity: 0.8; }
+      table { width: 100%; border-collapse: collapse; font-size: 15px; }
+      th, td { padding: 12px 20px; text-align: right; white-space: nowrap; }
+      th:first-child, td:first-child { text-align: left; }
+      thead th {
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+        color: var(--muted);
+        border-bottom: 1px solid var(--line);
+        padding-top: 14px;
+        padding-bottom: 8px;
+      }
+      tbody tr + tr td { border-top: 1px solid var(--line); }
+      .name { font-weight: 600; }
+      .ticker {
+        display: block;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 1px;
+        color: var(--muted);
+        margin-top: 3px;
+      }
+      .num { font-variant-numeric: tabular-nums; }
+      .up { color: #14804a; }
+      .down { color: #b3261e; }
+      tfoot td {
+        border-top: 2px solid var(--ink);
+        background: #eef1f4;
+        font-weight: 700;
+        padding-top: 14px;
+        padding-bottom: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="card">
+        <div class="bar">
+          <h1>ISK Global</h1>
+          <span class="sub">Innehav · 3 värdepapper · kontovaluta SEK</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Värdepapper</th>
+              <th>Antal</th>
+              <th>GAV</th>
+              <th>Senast</th>
+              <th>Utveckling</th>
+              <th>Värde</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="name">Nordvik Industri AB</span><span class="ticker">NORDV</span></td>
+              <td class="num">120</td>
+              <td class="num">184,50&nbsp;kr</td>
+              <td class="num">212,40&nbsp;kr</td>
+              <td class="num up">+15,12&nbsp;%</td>
+              <td class="num">25&nbsp;488&nbsp;kr</td>
+            </tr>
+            <tr>
+              <td><span class="name">Halliford Systems Inc</span><span class="ticker">HFS</span></td>
+              <td class="num">15</td>
+              <td class="num">128,40&nbsp;USD</td>
+              <td class="num">142,75&nbsp;USD</td>
+              <td class="num up">+11,18&nbsp;%</td>
+              <td class="num">23&nbsp;108&nbsp;kr</td>
+            </tr>
+            <tr>
+              <td><span class="name">Ekenäs Fastigheter AB</span><span class="ticker">EKFA</span></td>
+              <td class="num">300</td>
+              <td class="num">58,25&nbsp;kr</td>
+              <td class="num">63,80&nbsp;kr</td>
+              <td class="num up">+9,53&nbsp;%</td>
+              <td class="num">19&nbsp;140&nbsp;kr</td>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr>
+              <td>Totalt värde</td>
+              <td class="num"></td>
+              <td class="num"></td>
+              <td class="num"></td>
+              <td class="num"></td>
+              <td class="num">67&nbsp;736&nbsp;kr</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  </body>
+</html>

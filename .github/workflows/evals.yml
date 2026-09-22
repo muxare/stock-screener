@@ -1,0 +1,90 @@
+# The portfolio extraction eval — phase D of docs/cca-f-learning-plan.md.
+#
+# **Why this is a separate workflow file rather than a job in `ci.yml`.** The eval
+# spends real money, and a run that is cancelled half way through has bought
+# answers nobody will ever read. `ci.yml` sets `cancel-in-progress: true` at the
+# workflow level, which is exactly right for a free gate whose verdict the next
+# push supersedes — and a job-level `concurrency` block does **not** exempt a job
+# from it: workflow-level concurrency cancels the whole workflow run, and every
+# job inside it goes down with it. There is no way to opt one job out from inside
+# the same file. So the eval gets its own workflow, with its own concurrency rule,
+# and `ci.yml` is left byte-identical to what it was.
+#
+# The second benefit is that `ci.yml` needs no `types:` list. Adding `labeled` to
+# a `pull_request` trigger replaces GitHub's default set for every job in that
+# file, which would have meant guarding `check`, `guidance` and `advisory-review`
+# against an event they have nothing to say about. Here the trigger belongs to one
+# job and affects nothing else.
+name: Evals
+
+on:
+  pull_request:
+    # `labeled` is why this list exists; the other three are GitHub's defaults,
+    # spelled out because naming `types` at all replaces them. `synchronize` is
+    # deliberately included: a prompt change is exactly when the numbers need to
+    # move, and having to re-apply the label to see them would mean they were not
+    # seen.
+    types: [opened, synchronize, reopened, labeled]
+
+# Not cancellable, unlike ci.yml. A second run on the same ref queues behind the
+# first rather than killing it: the run in flight has already paid for part of its
+# answer, and queueing is also what keeps two paid runs off the rate limit at the
+# same time.
+concurrency:
+  group: evals-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Opt-in everywhere: `npm run eval` locally, and here only on a pull request
+  # carrying the `run-evals` label. Never on a push to main — main is not where a
+  # prompt change is reviewed.
+  #
+  # The label is checked with `contains(...labels.*.name)` rather than by reacting
+  # to the `labeled` action alone, so the eval re-runs on each push to an
+  # already-labelled pull request.
+  #
+  # Same fork rule as ci.yml's advisory review: a pull request from a fork gets
+  # neither this repository's key nor its billing account.
+  portfolio:
+    name: portfolio eval (run-evals label)
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository
+      && contains(github.event.pull_request.labels.*.name, 'run-evals')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # The secrets context is not available to a job-level `if`, so the gate is a
+      # step output — the same pattern ci.yml's advisory review uses. A fork of
+      # this repository with no key of its own gets a quiet skip rather than a red
+      # job.
+      - id: key
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::ANTHROPIC_API_KEY is not set; the portfolio eval is skipped."
+          fi
+
+      # The report goes to the job log rather than to a pull-request comment. It
+      # prints case ids, counts and rates and never an extracted value, but the
+      # fixtures are the only thing keeping that true today, and a job log is read
+      # by someone who went looking while a comment is pushed at everyone.
+      - name: Run the portfolio eval
+        if: steps.key.outputs.present == 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: npm run eval

@@ -1,0 +1,54 @@
+{
+  "accountLabel": "ISK Basportfölj",
+  "holdings": [
+    {
+      "ticker": "NORDV",
+      "name": "Nordvik Industri AB",
+      "shares": 120,
+      "averagePrice": 184.5,
+      "lastPrice": 212.4,
+      "marketValue": 25488,
+      "currency": "SEK",
+      "valueCurrency": "SEK",
+      "confidence": "high",
+      "note": null
+    },
+    {
+      "ticker": "LYSH",
+      "name": "Lysholm Teknik AB",
+      "shares": 45,
+      "averagePrice": 1042,
+      "lastPrice": 978.6,
+      "marketValue": 44037,
+      "currency": "SEK",
+      "valueCurrency": "SEK",
+      "confidence": "high",
+      "note": null
+    },
+    {
+      "ticker": "EKFA",
+      "name": "Ekenäs Fastigheter AB",
+      "shares": 300,
+      "averagePrice": 58.25,
+      "lastPrice": 63.8,
+      "marketValue": 19140,
+      "currency": "SEK",
+      "valueCurrency": "SEK",
+      "confidence": "high",
+      "note": null
+    },
+    {
+      "ticker": "BRGK",
+      "name": "Bergslagen Kraft AB",
+      "shares": 80,
+      "averagePrice": 310,
+      "lastPrice": 344.2,
+      "marketValue": 27536,
+      "currency": "SEK",
+      "valueCurrency": "SEK",
+      "confidence": "high",
+      "note": null
+    }
+  ],
+  "warnings": []
+}

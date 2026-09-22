@@ -1,7 +1,8 @@
 # CCA-F learning plan — applying the Claude Certified Architect material to this repo
 
-Status (2026-09-21): **in progress — phases A (A.1–A.5), B and C landed, C verified against a
-real account; phase D is next**. Written from Mikael's question of
+Status (2026-09-22): **in progress — phases A (A.1–A.5), B, C and D landed; C verified against
+a real account, D measured over ten paid runs and the prompt gap it found fixed; phase E is
+next**. Written from Mikael's question of
 what to implement here to enforce the learning of the Anthropic *Claude Certified
 Architect – Foundations* (CCA-F) certification content. Intent 3 of
 `docs/platform-hardening-plan.md` already names CCA-F as a product goal; this document is
@@ -502,7 +503,9 @@ server log across the whole session contains no key, no base64 and no holding na
 digits were still legible; the model read them correctly and dropped every row from `high` to
 `medium` with a warning naming the blur, which is right but does not test the null rule. A
 genuinely illegible fixture, derived with `sips` by downscaling to 260px and back, is what tests
-it: every field on every row came back `null` with `low` confidence and a note saying which
+it (260px is a ninefold reduction of *this* retina capture, not a recipe — phase D measured that
+the same width leaves a 1000px rendered fixture readable and uses 160px instead): every field on
+every row came back `null` with `low` confidence and a note saying which
 column was unreadable, four rows still detected because the table's structure survives what its
 contents do not, and not one invented digit. Phase D's fixture set needs both — the mild blur
 measures calibration, the heavy one measures refusal — and neither is in this repository, since
@@ -527,9 +530,145 @@ This is that phase, and it is the reliability answer for phases C, F, G and H.
   call grades the first against a rubric — cheaper than hand-labelling, and the exam's
   "multi-pass review" objective.
 
-- Touch scope: `server/claude/evals/` (new), `package.json`, `.github/workflows/ci.yml`.
+- Touch scope, as declared before the work: `server/claude/evals/` (new), `package.json`,
+  `.github/workflows/ci.yml`.
+- Touch scope, as it ended up (2026-09-21), with the reasons in the paragraphs below:
+  `server/claude/evals/` (new), `package.json`, `vitest.eval.config.ts` (new, the opt-in
+  suite), `tsconfig.node.json` (which owns the root build-tool configs and would otherwise
+  type-check none of the new one), `.claude/rules/claude.md` (which this phase's own text says
+  it extends, and which the declared scope forgot to name), `server/claude/portfolio/prompt.ts`
+  (phase C's production prompt, widened into on 2026-09-22 after the eval found a real gap in
+  it — the paragraph below has the measurement) and — instead of the declared
+  `.github/workflows/ci.yml` — a new `.github/workflows/evals.yml`. The widening was declared
+  before the work; the last item narrowed during it, and `ci.yml` and `vite.config.ts` both
+  end this phase byte-identical to `main`.
 - Verify: `npm run eval` prints a table; a deliberately weakened prompt lowers the score;
-  the fixtures contain no real account numbers (synthetic or redacted screenshots only).
+  the fixtures contain no real account numbers (synthetic or redacted screenshots only);
+  `npm test` collects none of the eval files and needs no key.
+
+**Decided before the work (2026-09-21).** Three choices that the text above leaves open, and
+that the phase cannot start without.
+
+*The fixtures are rendered, not redacted.* Phase C's live pass was run against a real Avanza
+ISK account, and those screenshots are the only ones this repository has ever seen — they live
+outside git on purpose. Redacting them is the cheap route and the wrong one: the digits are
+precisely what the eval measures, so a redacted screenshot has no expected answer left in it.
+The fixtures are therefore built the other way round, from an expected answer outwards: an HTML
+page per case with invented names and quantities, rendered to PNG by the copy of Chrome already
+on the machine (`--headless --screenshot`), with the expected holdings written beside each image
+as JSON. Nothing about the fixture set is a secret, the renderer is checked in, and a case can
+be added by writing a table and its answer. Headless Chrome is a macOS-and-a-browser
+dependency rather than an `npm` one, which is the right trade for something that runs when a
+fixture changes and never in CI: the PNGs are committed, about 321 kB of them (corrected
+2026-09-22 from 392 kB, which counted something other than the five files' bytes; the
+fixtures README's "under 350 kB" was the accurate figure).
+
+One correction to that sentence, measured 2026-09-21: `--headless --screenshot` is not a
+one-shot command. Chrome 153.0.8010.48 writes a complete and correct PNG and then never exits,
+in both headless modes and with or without `--virtual-time-budget`, so a synchronous spawn
+blocks forever. `render.ts` therefore deletes the target first, spawns Chrome, polls until the
+file's size is non-zero and unchanged across two consecutive 150 ms samples, and kills the
+process — with the reasoning on `waitForScreenshot`, because from the outside that loop looks
+like a bug rather than a workaround.
+
+*The set has to contain both blurs, and C is why.* A mild blur measures calibration — the model
+reads the digits and should lower its confidence — and a heavy one measures refusal, where every
+field must come back `null` rather than invented. C found that a supplied "blurred" screenshot
+was not blurry enough to test the null rule at all, and that downscaling to 260px and back made
+one that was. Both variants are derived from the rendered originals with `sips`, in the same
+script, so the relationship between an image and its degraded copy stays mechanical.
+
+The 260px is **wrong as a recipe, and corrected here 2026-09-21**: it was measured against a
+retina screenshot some 2400 device pixels wide, a ninefold reduction, and these fixtures render
+at 1000px, where the same width is a fourfold one and leaves most digits legible — which would
+have quietly turned the refusal case into a second calibration case. What matters is the
+reduction, not the number, and 160px is where the glyphs stop resolving on a 1000px source while
+the table's structure survives. `render.ts` carries that measurement in a comment beside the
+constant.
+
+**What the paid runs showed, 2026-09-21 and 2026-09-22 — including the gap the eval found in
+phase C's prompt.** Ten runs of five fixtures, one turn per case, no retry anywhere.
+
+The first run met every floor, and that was luck. The illegible fixture came back 100% null at
+`low` confidence; the next two runs of the same unchanged fixture and prompt scored 0.875,
+below the 0.950 floor, because the model filled in `valueCurrency` on all four rows — and in the
+weakened control, `currency` as well. **It was inferring a currency from a layout it recognised
+rather than from anything it could read**, which is precisely the invention the null rule exists
+to prevent, on the one field nobody thought to write the rule about. Phase C's prompt said
+"legible in full, or null" in a bullet about digits, said of the currency fields only that each
+is "the ISO code when the row, its column header or the account's own heading shows one, and null
+otherwise", and the model read the legibility rule as being about numbers. The prompt now says
+that a currency field obeys the legibility rule exactly as a number does, and that a familiar
+layout is not evidence about this image.
+
+The delta, which is the first one this repository has cited rather than asserted: three runs
+before the change scored 1.000, 0.875 and 0.875; three after it scored 1.000, 1.000 and 1.000,
+with all four rows at `low` confidence and no invented field. The weakened control, run after the
+change against the same fixtures, still scores 0.750 — so the eval moves with the prompt and not
+with the fixtures, which is the only thing that makes a future "the eval says this helped"
+worth reading. Everything else held throughout: 11 of 11 rows exact across the three legible
+cases, including the mixed-currency row, zero spurious rows, zero second attempts, and the
+not-holdings card refused in every run.
+
+Two limits are worth recording against the phase rather than celebrating past. **The set
+discriminates prompts only on refusal.** Both the careful prompt and the gutted one read all
+three legible tables perfectly, so the exact-match number cannot currently detect a prompt
+regression; the set needs a harder legible case — overlapping columns, a currency code printed
+only in a header, a five-digit share count — before this eval can claim to measure prompt quality
+in general, and phase F should not tune against it until that exists. **And the calibration case
+is not yet measuring calibration**: `mild-blur` is a 460px round trip that leaves every digit
+readable, and the model returns every row correct at `high` confidence, so a degradation that
+moves neither the answer nor the confidence measures nothing. The report now prints a per-case
+`high/medium/low` count, so the signal is at least visible when it appears; finding the width
+where confidence actually falls is a measurement for a later branch, somewhere between 460px and
+the 160px that destroys the glyphs. No floor is set on confidence, because nobody has measured
+what a good value would be.
+
+A third thing the runs settled, and the reading of it changed once the cause was known. The
+spread looked at first like sampling noise, which is a reason to distrust any single run. It was
+not: 0.875 is exactly 28 of 32 scored fields, four fabrications across four rows — one per row —
+which is the currency-field gap firing, not a draw. What was genuinely intermittent was whether
+it fired at all: the same prompt against the same image scored 1.000 once and 0.875 twice. So
+both lessons hold, and neither is the one that was first written down. A single run is never a
+result, because the clean one came first and would have hidden the defect. And a spread with a
+shape — the same amount wrong, every time it is wrong — is a bug to find rather than variance to
+absorb into a wider floor.
+
+That is also why the floor changed form. `nullRate >= 0.95` was tolerable at four rows, where
+one fabricated field is 31/32 and passes; at two rows the same single fabrication is 0.9375 and
+fails, and at one row 0.875. The strictness moved with the row count — the one quantity the
+`all-null` mode deliberately does not assert — so the floor is now `maxFabricatedFields: 1`,
+which says what it means in the units of the failure it is trying to catch and stops moving when
+the answer's shape does. One unit of slack rather than zero, because three clean runs is thin
+evidence for zero. The control's separation is untouched by the reshaping, and both runs were
+repeated against the final code to make sure the record describes what would merge: the
+production prompt meets every floor, and the weakened one fails with `8 fabricated field(s) on
+an illegible image, at most 1 allowed`.
+
+*Opt-in is enforced by a test, and the first attempt at enforcing it was a no-op.* The files
+that call the API are named `*.eval.ts` and `vitest.eval.config.ts` includes nothing else, which
+is how `npm run eval` finds them. Keeping them out of `npm test` looked like it needed a
+matching `test.exclude` in `vite.config.ts`, and that exclusion was written, reviewed and found
+to be dead: Vitest's default include is `**/*.{test,spec}.?(c|m)[jt]s?(x)`, which never matched
+`*.eval.ts` in the first place. Deleting it changed nothing, which is the proof. The real risk
+it claimed to cover — someone adding a paid eval named `*.test.ts` under
+`server/claude/evals/`, which the ordinary suite *would* collect and bill on every push — is now
+covered by `server/claude/evals/naming.test.ts`: a keyless test in the ordinary suite that fails
+when a file in that tree is named `*.test.ts` outside a two-name allowlist, when an allowlisted
+file starts importing the SDK, or when a file that calls `apiCaller()` is not named `*.eval.ts`.
+It was checked by planting a violation and watching it go red. The scorer itself is pure and its
+test is an ordinary `*.test.ts` that runs with no key, because the arithmetic that turns
+extractions into a report is the part most likely to be quietly wrong.
+
+*The eval is its own workflow file, because a job cannot opt out of its workflow's
+cancellation.* The declared plan put the label-gated job in `ci.yml`, which sets
+`cancel-in-progress: true` — right for a free gate whose verdict the next push supersedes, and
+wrong for a run that has already bought half an answer. A job-level `concurrency` block does not
+exempt a job from it: workflow-level concurrency cancels the whole run and every job in it. So
+the eval moved to `.github/workflows/evals.yml` with `cancel-in-progress: false`, which also
+keeps `labeled` out of `ci.yml`'s trigger — naming `types` at all replaces GitHub's defaults,
+and the first version of this had to guard three existing jobs against an event they have
+nothing to say about. One file that needs the trigger now carries it.
 
 ---
 

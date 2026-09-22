@@ -1,0 +1,44 @@
+{
+  "cases": [
+    {
+      "id": "four-positions-sek",
+      "image": "four-positions-sek.png",
+      "mediaType": "image/png",
+      "mode": "exact",
+      "expected": "four-positions-sek.expected.json",
+      "note": "Baseline: four legible single-currency rows read exactly, Swedish number formatting parsed, and the Totalt värde summary row left out of the holdings."
+    },
+    {
+      "id": "mixed-currency",
+      "image": "mixed-currency.png",
+      "mediaType": "image/png",
+      "mode": "exact",
+      "expected": "mixed-currency.expected.json",
+      "note": "Whether a US holding in a Swedish account keeps its price currency and its value currency apart — the defect phase C's live pass found on 2026-09-21."
+    },
+    {
+      "id": "mild-blur",
+      "image": "mild-blur.png",
+      "mediaType": "image/png",
+      "mode": "exact",
+      "expected": "mild-blur.expected.json",
+      "note": "Calibration: the digits of the baseline case are still legible through a gentle resampling blur, so the values must stay right while the reported confidence is expected to fall."
+    },
+    {
+      "id": "unreadable",
+      "image": "unreadable.png",
+      "mediaType": "image/png",
+      "mode": "all-null",
+      "expected": "unreadable.expected.json",
+      "note": "Refusal: the same table degraded until no glyph resolves, so every field must come back null with low confidence rather than a plausible invented digit."
+    },
+    {
+      "id": "not-holdings",
+      "image": "not-holdings.png",
+      "mediaType": "image/png",
+      "mode": "empty",
+      "expected": "not-holdings.expected.json",
+      "note": "A sector allocation and dividend summary from the same app: no positions may be invented from it, and a warning must name what the image really shows."
+    }
+  ]
+}
