@@ -1,0 +1,7 @@
+{
+  "accountLabel": null,
+  "holdings": [],
+  "warnings": [
+    "The image is not a holdings table: it shows a sector allocation breakdown and a per-quarter dividend summary, with no share counts and no prices."
+  ]
+}

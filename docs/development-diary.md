@@ -1,5 +1,193 @@
 # Development diary
 
+## 2026-09-22 — CCA-F D: an eval for the screenshot reader, and the prompt gap it found
+
+### What changed
+Phase D of `docs/cca-f-learning-plan.md`. Hardening stage 7 has said since it was written
+that an eval comes before any prompt tuning, and `.claude/rules/claude.md` has said since
+phase C that a diary entry claiming a prompt change helped must cite the eval delta. Neither
+sentence was executable, because there was no eval. There is now: five fixed screenshots go
+through the production extraction path — the same prompt bytes, the same schema, the same
+two-attempt repair loop — and `npm run eval` prints a table of exact-match rate, field
+accuracy, null rate, low-confidence rate, the confidence distribution, the mean confidence of
+the fields that were *wrong*, and how many model turns the run spent. The floors in
+`score.ts` are what turns that table into a pass or a fail.
+
+**The fixtures are rendered, not redacted, and that decision is the reason this set exists at
+all.** The only screenshots this repository has ever seen are phase C's real Avanza ISK
+account, kept outside git. Redacting them was the cheap route and the wrong one: the digits
+are precisely what the eval measures, so a redacted screenshot has no expected answer left in
+it. The set is therefore built from the answer outwards — an HTML page per case with invented
+names and quantities, rendered to PNG by the copy of Chrome already on the machine, with the
+expected holdings written beside each image. Headless Chrome is a macOS-and-a-browser
+dependency rather than an `npm` one, which is the right trade for a script that runs when a
+fixture changes and never in CI; the PNGs are committed, about 321 kB of them. The rule that
+follows is now in `.claude/rules/claude.md`: no real account material enters that folder, and
+a defect found against a real screenshot becomes a new synthetic case — which is what
+`mixed-currency` is.
+
+Two things about the renderer are worth knowing before reading it. `chrome --headless
+--screenshot` is documented as one-shot and is not: Chrome 153.0.8010.48 writes a complete,
+correct PNG and then never exits, in both headless modes and with or without
+`--virtual-time-budget`, so a synchronous spawn blocks forever. `render.ts` deletes the
+target, spawns Chrome, polls until the file's size is non-zero and unchanged across two
+consecutive 150 ms samples, and kills the process — with the reasoning written on
+`waitForScreenshot`, because from the outside that loop reads as a bug rather than a
+workaround. And phase C's "downscale to 260px and back" is wrong as a recipe, which this
+phase measured and corrected in the plan where the claim was made: 260px was a ninefold
+reduction of a retina capture some 2400 device pixels wide, while these fixtures render at
+1000px, where the same width is a fourfold reduction and leaves most digits legible. What
+matters is the reduction, not the number. The refusal fixture is derived at 160px, where the
+glyphs stop resolving but the table's structure survives.
+
+**The eval found a real gap in phase C's prompt on its second run, which is the first thing
+in this repository to be changed by a measurement rather than by a reading.** The first paid
+run met every floor, and that was luck. Two further runs of the same unchanged fixture and
+prompt scored a null rate of 0.875 on the illegible image, because the model filled in
+`valueCurrency` on all four rows — and in the weakened control, `currency` too. It was
+inferring a currency from a layout it recognised rather than from anything it could read,
+which is exactly the invention the null rule exists to prevent, on the one field nobody
+thought to write the rule about: phase C's prompt stated "legible in full, or null" in a
+bullet about digits, and the model read the rule as being about numbers. `prompt.ts` now says
+that a currency field obeys the legibility rule exactly as a number does, and that a familiar
+layout is not evidence about this image. The delta, which is the point of the phase: three
+runs before the change scored 1.000, 0.875 and 0.875; three after scored 1.000, 1.000 and
+1.000, every row at `low` confidence with no invented field. The weakened control, re-run
+against the same fixtures after the change, still scores 0.750 — so the harness moves with
+the prompt and not with the fixtures. Everything else held throughout: 11 of 11 rows exact
+across the three legible cases including the mixed-currency row, zero spurious rows, zero
+second attempts, and the not-holdings card refused every time.
+
+The spread also changed the floor's *form*. It looked like sampling noise and was not: 0.875
+is exactly 28 of 32 scored fields, one fabrication per row, the currency gap firing rather
+than a draw. What was genuinely intermittent was whether it fired at all. So a single run is
+never a result — the clean one came first and would have hidden the defect — and a spread
+with a shape is a bug to find rather than variance to absorb into a wider floor. The
+`all-null` floor was `nullRate >= 0.95`, whose strictness moves with the row count, which is
+the one quantity that mode is documented *not* to assert: one fabricated field is 31/32 and
+passes at four rows, 15/16 and fails at two. It is now `maxFabricatedFields: 1`, stated in
+the units of the failure it is trying to catch. One unit of slack rather than zero, because
+three clean runs is thin evidence for zero. Both runs were repeated against the final code:
+the production prompt meets every floor, and the weakened one fails with `8 fabricated
+field(s) on an illegible image, at most 1 allowed`.
+
+**Opt-in is enforced by a test, and the first attempt at enforcing it was a no-op.** Keeping
+the paid files out of `npm test` looked like it needed a `test.exclude` in `vite.config.ts`,
+and that exclusion was written, reviewed and found to be dead: Vitest's default include is
+`**/*.{test,spec}.?(c|m)[jt]s?(x)`, which never matched `*.eval.ts` in the first place.
+Deleting it changed nothing, which is the proof, and `vite.config.ts` ends this phase
+byte-identical to `main`. The hazard it claimed to cover is real, though — a *paid* eval
+added here and named `*.test.ts` would be collected by the ordinary suite and bill the
+account on every push — so it is covered by `server/claude/evals/naming.test.ts`, a keyless
+test in `npm test` that fails on a `*.test.ts` outside a two-name allowlist, on an allowlisted
+file that starts importing the SDK, and on a file that calls `apiCaller()` without the
+`*.eval.ts` name. It was checked by planting a violation and watching it go red. The scorer
+and the report renderer are pure and covered by an ordinary keyless `score.test.ts`, because
+the arithmetic that turns extractions into a report is the part most likely to be quietly
+wrong: a scoring bug does not crash, it just prints a number that is not the number.
+
+**CI runs it from its own workflow file, not from `ci.yml` as the plan declared.** `ci.yml`
+sets `cancel-in-progress: true` at the workflow level — right for a free gate whose verdict
+the next push supersedes, ruinous for a run that has already bought four of five answers —
+and a job-level `concurrency` block does **not** exempt a job from it: workflow-level
+concurrency cancels the whole run and every job in it. A separate file is the only way out.
+`.github/workflows/evals.yml` therefore carries `cancel-in-progress: false`, and the second
+benefit is that `ci.yml` needs no `types:` list: naming `types` at all replaces GitHub's
+defaults, so adding `labeled` there would have meant guarding three existing jobs against an
+event they have nothing to say about. The job runs only on a pull request from this
+repository carrying the `run-evals` label, never on a push to `main`, never from a fork, and
+prints the report to the job log rather than to a pull-request comment — a log is read by
+someone who went looking, a comment is pushed at everyone.
+
+Two limits are recorded against the phase rather than celebrated past, both in the plan and
+in `server/claude/evals/README.md`. **The set discriminates prompts only on refusal:** the
+careful prompt and the gutted one both read all three legible tables perfectly, so the
+exact-match number cannot currently detect a prompt regression, and phase F must not tune
+against this eval until there is a harder legible case. **And the calibration case is not yet
+measuring calibration:** `mild-blur` is a 460px round trip that leaves every digit readable,
+and the model returns every row correct at `high` confidence, so it currently moves neither
+the answer nor the confidence. The report prints a per-case `high/medium/low` count so the
+signal is visible when it appears; finding the width where confidence actually falls,
+somewhere between 460px and 160px, is a later branch. No floor is set on confidence, because
+nobody has measured what a good value would be.
+
+One thing this phase did not produce, and the record should not imply otherwise: **a measured
+cost.** `server/claude/evals/README.md` estimates $0.30–$0.60 for a five-fixture run and says
+the first real figure belongs in a diary entry, and ten paid runs have now happened — but no
+token or spend figure was captured from any of them, so the estimate is still only an
+estimate. Capturing it is a line for whoever runs the eval next.
+
+The touch scope widened, and the plan now records both the declared and the landed version.
+Beyond `server/claude/evals/` and `package.json` it took `vitest.eval.config.ts` (the opt-in
+suite, new), `tsconfig.node.json` (which owns the root build-tool configs and would otherwise
+type-check none of it), `.claude/rules/claude.md` (which this phase's own text says it
+extends, and which the declared scope forgot to name) and `server/claude/portfolio/prompt.ts`
+(the change the eval asked for). `.github/workflows/ci.yml` was declared and not touched.
+
+### Where it lives
+- `server/claude/evals/portfolio.eval.ts` — the only file that spends money: I/O, one call
+  per fixture, and the assertion that the floors held.
+- `server/claude/evals/score.ts` — row matching on ticker then name (never position), the
+  per-field comparison, the three modes and `FLOORS`. Pure.
+- `server/claude/evals/report.ts` — the table, the failure detail and the floor verdict, as
+  one string. Pure, and it prints ids, counts and rates but never a value read off an image.
+- `server/claude/evals/score.test.ts`, `server/claude/evals/naming.test.ts` — the two keyless
+  tests that run in `npm test`; the second is the guard on the `*.eval.ts` naming rule.
+- `server/claude/evals/weakened.ts` — the control prompt and the one client seam used to send
+  it, so `prompt.ts` is neither touched nor branched by the control run.
+- `server/claude/evals/fixtures/` — the five PNGs, their expected JSON, `manifest.json`, the
+  HTML sources under `src/`, and `render.ts` (Chrome + `sips`, with the polling workaround).
+- `server/claude/evals/README.md` and `server/claude/evals/fixtures/README.md` — what each
+  metric and each floor means, and why the set is rendered rather than redacted.
+- `vitest.eval.config.ts` — the opt-in suite: the eval suffix and nothing else, no file
+  parallelism, no console interception, no retries.
+- `.github/workflows/evals.yml` — the label-gated, non-cancellable paid job.
+- `server/claude/portfolio/prompt.ts` — the currency-legibility sentence, with the measurement
+  recorded in the comment block above the prompt.
+- `package.json` — `eval`, `eval:weakened`, `eval:fixtures`.
+- `tsconfig.node.json`, `.claude/rules/claude.md`, `docs/cca-f-learning-plan.md` — the
+  type-check include, the standing rules phase D extends, and the plan's phase D text.
+
+### How to test
+Free and keyless, which is most of it:
+
+```bash
+npm run test        # includes score.test.ts and naming.test.ts; collects no *.eval.ts
+npm run typecheck
+npm run lint
+```
+
+The naming guard is worth breaking on purpose once: rename `portfolio.eval.ts` to
+`portfolio.test.ts` and `npm run test` goes red with the file named in the message. Rename it
+back — the fix is never to extend the allowlist.
+
+Paid, and opt-in:
+
+```bash
+npm run eval             # production prompt; needs ANTHROPIC_API_KEY
+npm run eval:weakened    # the control; it fails if it meets every floor
+```
+
+The key is read from `.env` at the repository root through `node --env-file-if-exists`, the
+same way `npm run dev:server` and `npm run portfolio:backfill` read it; with no key the run
+stops immediately with a sentence saying so rather than a 401 five fixtures deep. Read the
+printed table, not the pass/fail: the delta between two runs is the result, and either table
+alone is a number without a baseline. In CI, put the `run-evals` label on a pull request from
+this repository and the `Evals` workflow runs the same thing, re-running on each subsequent
+push while the label stays on.
+
+Re-rendering the fixtures needs macOS, `sips` and Chrome at the path in `render.ts`:
+
+```bash
+npm run eval:fixtures
+```
+
+It is idempotent — each run deletes its outputs and rebuilds them — and it fails with a named
+path if either tool is missing rather than producing a partial set. After adding a case, look
+at the PNG: Chrome has no fit-to-content flag, so a window a few pixels too short silently
+crops the table, which is how the first run of this set cut the `Totalt värde` row off the
+bottom of two fixtures.
+
 ## 2026-09-21 — CCA-F C / hardening 3: reading holdings off a screenshot, and refusing to believe them
 
 ### What changed

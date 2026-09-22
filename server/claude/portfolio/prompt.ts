@@ -28,6 +28,18 @@
 //   - **No few-shot examples.** They would have to be images, every one of them
 //     would be paid for on every request, and the schema already carries the
 //     shape that examples would otherwise teach.
+//   - **The legibility rule has to name the currency fields explicitly** (added
+//     2026-09-22, and the first change to this string that phase D's eval asked
+//     for rather than a reader's taste). The rule "legible in full, or null" was
+//     written about digits, and the model read it as being about digits: against
+//     the illegible fixture it filled in `valueCurrency` — sometimes both
+//     currency fields — on every row, inferring SEK from a layout it recognised
+//     rather than from anything it could actually read. Three runs before the
+//     change scored null rates of 1.000, 0.875 and 0.875 against a floor of
+//     0.950; three after it scored 1.000, and the deliberately weakened control
+//     still scores 0.750, so the eval is measuring the prompt and not the
+//     fixtures. A rule that covers a class of fields has to say which fields are
+//     in the class.
 
 export const SYSTEM_PROMPT = `You read a screenshot of a brokerage account's holdings and return the positions as structured data.
 
@@ -41,6 +53,7 @@ Criteria for every field:
 - Report the market value as printed. Do not compute it from the share count and the price, and do not correct a printed value that disagrees with them — if they disagree, report both as printed and say so in the row's note.
 - There are two currency fields and they are different questions. "currency" is what the prices on the row are quoted in — the GAV and the last price. "valueCurrency" is what the market value is denominated in. Avanza prints a position's value in the account's currency and its price in the instrument's own, so a US holding in a Swedish account shows a price in USD beside a value in kronor; report USD and SEK respectively rather than forcing one answer.
 - Each is the ISO code when the row, its column header or the account's own heading shows one, and null otherwise. A "kr" suffix on the value column is SEK. Do not infer a currency from the instrument's name alone; a country flag beside the name is enough to say the price is quoted in that market's currency only when the column itself does not contradict it.
+- A currency field obeys the legibility rule exactly as a number does: it is non-null only when you can actually read the code or the suffix that says so. That a screenshot looks like a Swedish broker's, that the layout is familiar, or that most accounts you see are in kronor are not evidence about this image. If the text is too degraded to read, every currency field on every row is null, the same as every price.
 - A row's confidence is "high" when every field you filled in is unambiguous, "medium" when the row is readable but something about it made you hesitate, and "low" when you would not want the reader to act on it without checking the image.
 - Use the warnings list for anything true of the image rather than of one row: a table cut off at the top or bottom, a column obscured, a total that does not match the rows, a screenshot that shows something other than a holdings table.
 

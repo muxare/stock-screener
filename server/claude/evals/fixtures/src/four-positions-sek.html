@@ -1,0 +1,155 @@
+<!doctype html>
+<!--
+  four-positions-sek — the baseline fixture.
+
+  A plain single-currency holdings view: four positions, every column legible, a
+  "Totalt värde" summary row that is not a position, and an "Utveckling" column
+  the extractor is told to ignore. Every name, ticker and number here is invented;
+  see ../README.md for why no real account material may enter this folder.
+
+  The market value of each row is exactly shares x last price, so the internal
+  consistency check in server/claude/portfolio/validate.ts has nothing to complain
+  about and a failing eval run means the model misread something rather than that
+  the fixture is arithmetically odd.
+-->
+<html lang="sv">
+  <head>
+    <meta charset="utf-8" />
+    <title>ISK Basportfölj — Innehav</title>
+    <style>
+      :root {
+        --ink: #101820;
+        --muted: #667380;
+        --line: #dfe4ea;
+        --brand: #0a3d33;
+        --page: #f4f6f8;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: var(--page);
+        color: var(--ink);
+        font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      .page { padding: 24px; }
+      .card {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .bar {
+        background: var(--brand);
+        color: #fff;
+        padding: 14px 20px;
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+      }
+      .bar h1 { font-size: 19px; font-weight: 600; margin: 0; letter-spacing: 0.2px; }
+      .bar .sub { font-size: 13px; opacity: 0.8; }
+      table { width: 100%; border-collapse: collapse; font-size: 15px; }
+      th, td { padding: 12px 20px; text-align: right; white-space: nowrap; }
+      th:first-child, td:first-child { text-align: left; }
+      thead th {
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+        color: var(--muted);
+        border-bottom: 1px solid var(--line);
+        padding-top: 14px;
+        padding-bottom: 8px;
+      }
+      tbody tr + tr td { border-top: 1px solid var(--line); }
+      .name { font-weight: 600; }
+      .ticker {
+        display: block;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 1px;
+        color: var(--muted);
+        margin-top: 3px;
+      }
+      .num { font-variant-numeric: tabular-nums; }
+      .up { color: #14804a; }
+      .down { color: #b3261e; }
+      tfoot td {
+        border-top: 2px solid var(--ink);
+        background: #eef1f4;
+        font-weight: 700;
+        padding-top: 14px;
+        padding-bottom: 14px;
+      }
+      tfoot td:first-child { text-transform: none; }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="card">
+        <div class="bar">
+          <h1>ISK Basportfölj</h1>
+          <span class="sub">Innehav · 4 värdepapper</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Värdepapper</th>
+              <th>Antal</th>
+              <th>GAV</th>
+              <th>Senast</th>
+              <th>Utveckling</th>
+              <th>Värde</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="name">Nordvik Industri AB</span><span class="ticker">NORDV</span></td>
+              <td class="num">120</td>
+              <td class="num">184,50&nbsp;kr</td>
+              <td class="num">212,40&nbsp;kr</td>
+              <td class="num up">+15,12&nbsp;%</td>
+              <td class="num">25&nbsp;488&nbsp;kr</td>
+            </tr>
+            <tr>
+              <td><span class="name">Lysholm Teknik AB</span><span class="ticker">LYSH</span></td>
+              <td class="num">45</td>
+              <td class="num">1&nbsp;042,00&nbsp;kr</td>
+              <td class="num">978,60&nbsp;kr</td>
+              <td class="num down">−6,08&nbsp;%</td>
+              <td class="num">44&nbsp;037&nbsp;kr</td>
+            </tr>
+            <tr>
+              <td><span class="name">Ekenäs Fastigheter AB</span><span class="ticker">EKFA</span></td>
+              <td class="num">300</td>
+              <td class="num">58,25&nbsp;kr</td>
+              <td class="num">63,80&nbsp;kr</td>
+              <td class="num up">+9,53&nbsp;%</td>
+              <td class="num">19&nbsp;140&nbsp;kr</td>
+            </tr>
+            <tr>
+              <td><span class="name">Bergslagen Kraft AB</span><span class="ticker">BRGK</span></td>
+              <td class="num">80</td>
+              <td class="num">310,00&nbsp;kr</td>
+              <td class="num">344,20&nbsp;kr</td>
+              <td class="num up">+11,03&nbsp;%</td>
+              <td class="num">27&nbsp;536&nbsp;kr</td>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr>
+              <td>Totalt värde</td>
+              <td class="num"></td>
+              <td class="num"></td>
+              <td class="num"></td>
+              <td class="num"></td>
+              <td class="num">116&nbsp;201&nbsp;kr</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  </body>
+</html>

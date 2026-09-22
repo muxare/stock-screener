@@ -20,5 +20,8 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["vite.config.ts"]
+  // vitest.eval.config.ts joins vite.config.ts here rather than under the server
+  // program: it is a build-tool config at the repo root, not server code, and the
+  // server program's include is relative to server/ and cannot see it.
+  "include": ["vite.config.ts", "vitest.eval.config.ts"]
 }
