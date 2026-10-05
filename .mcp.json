@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "screener": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${CLAUDE_PROJECT_DIR:-.}/server/mcp/stdio.ts"],
+      "env": { "DEV_TOOLS": "1" }
+    }
+  }
+}
