@@ -1,5 +1,137 @@
 # Development diary
 
+## 2026-10-05 — CCA-F E: the screener as an MCP server, with errors a model can act on
+
+### What changed
+Phase E of `docs/cca-f-learning-plan.md`. The screener's existing transport-agnostic seam in
+`server/handlers.ts` is now also an MCP server over stdio, so a Claude Code session in this
+repository can ask the live screener a question instead of reading the code that answers it.
+Three tools wrap existing handlers and touch no engine code: `screen_fan` is `handleScreen`,
+`scan_signals` is `handleSignals` behind the same body parser as the `/signals` route (so the
+tool and the HTTP route accept and refuse exactly the same strategies), and `get_instrument`
+is `UniverseStore.getInstrument`. The help glossary is published as 102 `glossary://<topic>`
+resources, the strategy presets and the dataset names as two `screener://` resources, and the
+two canned research prompts the plan named are registered as prompts. Each tool description
+says what the tool is for, when not to call it, the units of every field and an example call,
+and the results are paginated with the per-row sparkline dropped, because sixty closes per
+row across a large dataset is context spent on numbers nobody asked for. The two prompts
+carry the backtest caveats from phase 6.2 of the hardening plan (open entries are not
+performance, costs are not modelled), since a comparison prompt without them invites the
+encouraging wrong answer.
+
+**Every failure, argument validation included, leaves as `{ errorCategory, isRetryable,
+message }`, and that is why the tools bypass the SDK's own registration.** The obvious route,
+`McpServer.registerTool`, validates arguments against the Zod schema before any tool code runs
+and answers a violation with plain text. That would make the structured-error rule false for
+the failure a model makes most often, a string where a number belongs. So the tool list and
+call handlers are installed on the underlying `Server`, over plain definitions in
+`server/mcp/tools.ts` that validate their own arguments. Resources and prompts still go
+through `McpServer`, where the SDK's behaviour is what we want. The plain definitions are
+also the shape phase G needs in order to reuse the same tools in its tool runner. The four
+categories carry the retry flags the plan fixed: `invalid_input` and `unknown_ticker` are not
+retryable, `universe_cold` is, and `internal` is retryable once, with a message that tells the
+model not to loop. `universe_cold` needed a definition the plan did not give it. It now means a
+failure *reading* the dataset, such as a SQLite file that is locked or mid-import, and is told
+apart from an engine failure by wrapping the data provider. An empty dataset is not an error.
+
+The stdio entry point does not log through `logger.ts`, which looks like a breach of
+`.claude/rules/server.md` and is not one in spirit: stdout is the JSON-RPC channel, and the
+root logger writes to stdout, so a single log line there corrupts the stream. It writes pino
+JSON to stderr instead, which Claude Code keeps as the server's log. The universe is warmed
+after the handshake rather than before it, because a build of the larger datasets takes about
+two seconds and a client waiting on `initialize` for that long may give up.
+
+**The landed phase differs from its plan text in five places, and the plan now records each
+correction where the claim was made** (the 2026-09-23 amendment in the phase E section, which
+has the reasoning and the documentation it was checked against). In short: a project MCP
+server is declared in `.mcp.json`, not under a `mcpServers` key in `.claude/settings.json`,
+which has no such key. The settings file carries only the approval, as
+`enabledMcpjsonServers: ["screener"]`, never `enableAllProjectMcpServers`, which in a public
+repository would approve whatever a later `.mcp.json` change adds. `list_runs`/`get_run` and the
+`backtest-reviewer` grant wait for hardening stage 5, because there is no runs table yet, so no
+agent file changed. The agents' explicit `tools:` lines already keep them from seeing the
+screener's tools, whereas an agent written without a `tools:` line would inherit all of them.
+The tools take an optional `dataset` argument, limited to what the dev DB-selector offers with
+at most one non-default dataset kept warm, because without it the "compare across datasets"
+prompt had nothing to compare. And the HTTP transport is deferred to stage 5. It needs session
+handling and a route beside `/dev/*` in `server/app.ts`, which is outside this phase's scope, and
+stage 5 brings the auth the plan wanted before exposing it anyway. The touch scope is recorded
+twice in the plan, as declared and as landed. The landed scope adds `.mcp.json` and
+`package-lock.json` and drops `.claude/agents/*`.
+
+One file in `server/mcp/` is not about MCP. `dom-events.d.ts` declares only the three
+modifier-key flags of `KeyboardEvent` and `MouseEvent`. It exists because the glossary resource
+imports `src/help/glossary.ts`, which imports `src/help/trigger.ts` for a key label, and one
+function there is typed against browser events. The alternative, adding the DOM library to
+the server project, was rejected because the server compiles without it on purpose, so that a
+server module cannot reach for `window` by accident. The lockfile grows by about a thousand
+lines, mostly the SDK's transitive dependencies for its HTTP transports (`express`, `hono`,
+`cors`, `jose` among them), which the stdio server does not load. They arrive with
+`@modelcontextprotocol/sdk` 1.30.0 regardless, and are recorded here so the size of that diff
+does not need a second investigation.
+
+All three Verify clauses hold, and the plan's Verified paragraph has the details. On
+2026-09-23 the MCP inspector listed the three tools, 104 resources and both prompts, and
+`get_instrument` with `ticker=NOPE` returned `unknown_ticker` with `isRetryable: false`. The
+third clause needed a session started after the server was registered. It ran on 2026-10-05 as
+a fresh headless `claude -p "which names are in the fan today?"`, which called `ToolSearch`
+(MCP tools are deferred and have to be loaded first) and then `mcp__screener__screen_fan`
+without being told to. It answered with 14 of 44 names in the full stack and noted, also
+unprompted, that the default dataset was `synthetic`, so the answer was not "today" in any
+market sense. That remark matters because a stdio session sees whatever dataset the dev UI
+last selected, and the tool output plus `screener://datasets` were enough for the model to say
+which one it was. On the same day `/verify` passed all three gates: typecheck, lint with 0
+errors and 0 warnings, and 714 tests passed across 53 files.
+
+### Where it lives
+- `server/mcp/tools.ts` holds the three tool definitions (descriptions, Zod inputs,
+  pagination) and `runTool`, which validates the arguments, runs the tool and never throws.
+- `server/mcp/errors.ts` holds the four categories, their retry flags, the mapping from
+  `ToolError`, `RequestError` and `DatasetUnavailableError`, and the MCP error result.
+- `server/mcp/server.ts` builds the server. Tools are installed on the underlying
+  `Server`, resources and prompts through `McpServer`, and the server instructions say
+  that it is advisory only.
+- `server/mcp/datasets.ts` holds the default dataset, the allow-listed others, the
+  one-warm-extra cache and the guarded provider that produces `universe_cold`.
+- `server/mcp/resources.ts` publishes `glossary://<topic>`, `screener://strategies/presets`
+  and `screener://datasets`.
+- `server/mcp/prompts.ts` holds `compare_strategy_across_datasets` and
+  `explain_ticker_match`.
+- `server/mcp/stdio.ts` is the entry point. It logs to stderr and warms the universe after
+  the handshake.
+- `server/mcp/dom-events.d.ts` holds the two event shapes the glossary import needs.
+- `server/mcp/tools.test.ts` (12 tests) covers the handler layer, and
+  `server/mcp/stdio.test.ts` (3 tests) covers the real entry point over stdio with the SDK
+  client, pinned to the synthetic dataset.
+- `.mcp.json` declares the server for Claude Code, and `.claude/settings.json` pre-approves
+  it by name.
+- `package.json` adds `@modelcontextprotocol/sdk` and `npm run mcp:stdio`, and
+  `package-lock.json` locks them.
+- `docs/cca-f-learning-plan.md` has the phase E text, the 2026-09-23 amendment, the
+  corrected touch scope and the Verified paragraph.
+
+### How to test
+Free, keyless and offline:
+
+```bash
+npm run test        # includes server/mcp/tools.test.ts and server/mcp/stdio.test.ts
+npm run typecheck
+npm run lint
+```
+
+Against the real server, with the inspector:
+
+```bash
+npx @modelcontextprotocol/inspector --cli node server/mcp/stdio.ts --method tools/list
+npx @modelcontextprotocol/inspector --cli node server/mcp/stdio.ts \
+  --method tools/call --tool-name get_instrument --tool-arg ticker=NOPE
+```
+
+The second command should return `unknown_ticker` with `isRetryable: false`. In Claude Code,
+trust the folder so that `enabledMcpjsonServers` takes effect, then check that `claude mcp get
+screener` reports the server as connected. A new session asked "which names are in the fan
+today?" should call `screen_fan` on its own and name the dataset it ran against.
+
 ## 2026-09-22 — CCA-F D: an eval for the screenshot reader, and the prompt gap it found
 
 ### What changed
