@@ -5,14 +5,19 @@
 // it is a liveness probe doing readiness work; hardening phase 4.4 splits the two
 // and this file is where that split will land.
 
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { metrics } from '../metrics.ts';
+import { HealthResponseSchema, MetricsResponseSchema } from '../schemas/system.ts';
 import type { RouteDeps } from './deps.ts';
 
-export const systemRoutes: FastifyPluginAsync<RouteDeps> = async (app, deps) => {
-  app.get('/health', async () => ({ ok: true, universe: deps.store.get().length }));
+export const systemRoutes: FastifyPluginAsyncZod<RouteDeps> = async (app, deps) => {
+  app.get('/health', {
+    schema: { summary: 'Liveness, with the universe size', response: { 200: HealthResponseSchema } },
+  }, async () => ({ ok: true as const, universe: deps.store.get().length }));
 
   // Latency snapshot (STORY-021): per-path p50/p95/max and over-budget counts
   // measured against the SAD#2.3/2.4 budgets, for observability/assertions.
-  app.get('/metrics', async () => metrics.snapshot());
+  app.get('/metrics', {
+    schema: { summary: 'Latency percentiles per path', response: { 200: MetricsResponseSchema } },
+  }, async () => metrics.snapshot());
 };

@@ -4,6 +4,7 @@ import { createUniverseStore } from './universe.ts';
 import { runFanBacktest, parseFanBacktestBody } from './fanBacktest.ts';
 import { startApp } from './testHarness.ts';
 import { RequestError } from './handlers.ts';
+import { parseFanSignalsBody } from './signals.ts';
 import { presetById } from '../src/lib/strategy/presets.ts';
 
 const store = createUniverseStore(syntheticProvider(7));
@@ -68,6 +69,27 @@ describe('parseFanBacktestBody', () => {
     expect(cfg.riskPct).toBe(1);
     expect(cfg.maxPositions).toBe(4);
     expect(cfg.windowMonths).toBe(3);
+  });
+
+  it('clamps and defaults out-of-range values through the schema path, as before 2.2', () => {
+    // The schema accepts these (right type, or null), and the config builder
+    // applies the same caps, floors and defaults the hand-written parser did.
+    const cfg = parseFanBacktestBody({ riskPct: 500, maxPositions: 99.7, startCash: null, minAvgVol: -5, windowMonths: 2.9 });
+    expect(cfg.riskPct).toBe(100);
+    expect(cfg.maxPositions).toBe(50);
+    expect(cfg.startCash).toBe(10_000);
+    expect(cfg.minAvgVol).toBe(0);
+    expect(cfg.windowMonths).toBe(2);
+  });
+});
+
+describe('parseFanSignalsBody', () => {
+  it('defaults negative and null floors, and floors the lookback, through the schema path', () => {
+    const cfg = parseFanSignalsBody({ strategy: 'tag50', minAvgVol: -5, minMarketCap: null, ema200RisingBars: 62.8 });
+    expect(cfg.minAvgVol).toBe(0);
+    expect(cfg.minMarketCap).toBe(0);
+    expect(cfg.ema200RisingBars).toBe(62);
+    expect(parseFanSignalsBody({ strategy: 'tag50', ema200RisingBars: null }).ema200RisingBars).toBe(21);
   });
 });
 

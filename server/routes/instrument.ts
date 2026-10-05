@@ -11,13 +11,19 @@
 // itself and answer 400 from the handler; the status is the same and the check
 // now happens before any handler runs.
 
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
+import { errorResponses } from '../schemas/common.ts';
+import { TickerParamsSchema, InstrumentResponseSchema } from '../schemas/instrument.ts';
 import type { RouteDeps } from './deps.ts';
 
-interface TickerParams { ticker: string }
-
-export const instrumentRoutes: FastifyPluginAsync<RouteDeps> = async (app, deps) => {
-  app.get<{ Params: TickerParams }>('/instrument/:ticker', async (request, reply) => {
+export const instrumentRoutes: FastifyPluginAsyncZod<RouteDeps> = async (app, deps) => {
+  app.get('/instrument/:ticker', {
+    schema: {
+      summary: "One instrument's adjusted daily bars",
+      params: TickerParamsSchema,
+      response: { 200: InstrumentResponseSchema, ...errorResponses },
+    },
+  }, async (request, reply) => {
     const bars = deps.store.getInstrument(request.params.ticker);
     if (!bars) return reply.code(404).send({ error: 'unknown ticker' });
     return bars;

@@ -13,28 +13,50 @@
 // without a preflight are refused with 415 before a body is read. The old
 // `requireJson` check did that by hand and answered 400.
 
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { listImportOptions, runDevImport } from '../devImport.ts';
-import type { DevImportRequest } from '../devImport.ts';
 import { listDatabases, activateDatabase } from '../devDataset.ts';
-import type { ActivateRequest } from '../devDataset.ts';
+import { errorResponses } from '../schemas/common.ts';
+import {
+  ImportOptionsResponseSchema,
+  DevImportRequestSchema,
+  DevImportResponseSchema,
+  DatabasesResponseSchema,
+  ActivateRequestSchema,
+  ActivateResponseSchema,
+} from '../schemas/dev.ts';
 import type { RouteDeps } from './deps.ts';
 
 // CSV uploads arrive inline in the JSON body, so this one route needs far more
 // than the 1 MiB the rest of the service allows.
 const MAX_IMPORT_BODY_BYTES = 64 << 20; // 64 MiB
 
-export const devRoutes: FastifyPluginAsync<RouteDeps> = async (app, deps) => {
+export const devRoutes: FastifyPluginAsyncZod<RouteDeps> = async (app, deps) => {
   // EOD CSV import from the UI (STORY-031): build a SQLite DB and switch onto it.
-  app.get('/dev/import/options', async () => listImportOptions());
+  app.get('/dev/import/options', {
+    schema: { summary: 'DEV: import configs and browsable CSV input', response: { 200: ImportOptionsResponseSchema } },
+  }, async () => listImportOptions());
 
-  app.post('/dev/import', { bodyLimit: MAX_IMPORT_BODY_BYTES }, async (request) =>
-    runDevImport((request.body ?? {}) as DevImportRequest, deps.store));
+  app.post('/dev/import', {
+    bodyLimit: MAX_IMPORT_BODY_BYTES,
+    schema: {
+      summary: 'DEV: import EOD CSVs into a SQLite DB and switch onto it',
+      body: DevImportRequestSchema,
+      response: { 200: DevImportResponseSchema, ...errorResponses },
+    },
+  }, async (request) => runDevImport(request.body, deps.store));
 
   // DB-selector (STORY-035): list already-built DBs and switch the active one
   // at runtime (no import, no restart) — a provider swap behind the port.
-  app.get('/dev/databases', async () => listDatabases(deps.store));
+  app.get('/dev/databases', {
+    schema: { summary: 'DEV: the market-data DBs that can be activated', response: { 200: DatabasesResponseSchema } },
+  }, async () => listDatabases(deps.store));
 
-  app.post('/dev/databases/activate', async (request) =>
-    activateDatabase((request.body ?? {}) as ActivateRequest, deps.store));
+  app.post('/dev/databases/activate', {
+    schema: {
+      summary: 'DEV: switch the active dataset for everyone',
+      body: ActivateRequestSchema,
+      response: { 200: ActivateResponseSchema, ...errorResponses },
+    },
+  }, async (request) => activateDatabase(request.body, deps.store));
 };
