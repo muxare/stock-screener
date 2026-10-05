@@ -1,8 +1,8 @@
 # Platform hardening plan — from dev tool to research + signal platform
 
-Status (2026-09-21): **in progress — stage 1 complete (1.1, 1.2, 1.3 landed); stage 2 under way
-(2.1 and 2.3 landed, 2.2 open); 4.1 landed early, on the 2.1 branch; stage 3 landed and
-verified against a real account**. Follows the
+Status (2026-10-05): **in progress — stage 1 complete (1.1, 1.2, 1.3 landed); stage 2 complete
+(2.1 and 2.3 landed 2026-09-21, 2.2 landed 2026-10-05); 4.1 landed early, on the 2.1 branch;
+stage 3 landed and verified against a real account**. Follows the
 Option C decision recorded in `docs/server-migration-plan.md`: the server stays TypeScript and gets hardened rather than
 ported. This document is the executable half. The CCA-F track (stages 3 and 7 here) is
 expanded, with the Claude Code, MCP and Agent SDK gaps filled, in `docs/cca-f-learning-plan.md`.
@@ -159,12 +159,27 @@ serialiser would hold the whole run and emit it at the end, which is the opposit
 stream; that route logs its own completion, since a hijacked reply is outside the normal
 response path.
 
-**Phase 2.2 — Schemas and OpenAPI.** Introduce Zod (or TypeBox, which Fastify consumes
+**Phase 2.2 — Schemas and OpenAPI. Landed 2026-10-05.** Introduce Zod (or TypeBox, which Fastify consumes
 natively). Define every request and response shape once. Replace `parseFanBacktestBody` and
 `parseFanSignalsBody` with schema parsing — the schema validates *shape*, the existing
 `src/lib/strategy/parse.ts` keeps validating *meaning*. Generate OpenAPI via
 `@fastify/swagger`. Optionally emit a typed client for `src/lib/client/marketClient.ts` from
 the same schemas, so a route change breaks the client at compile time.
+
+*What the implementation changed (2026-10-05).* Zod, because stage 3 had already made it a
+dependency of the service; the choice was pre-empted rather than taken, and is wired through
+`fastify-type-provider-zod` with `@fastify/swagger` and `@fastify/swagger-ui`. The two parsers
+were **not replaced**. Each was split into a meaning half (`backtestConfigFromBody`,
+`signalsConfigFromBody`), which the routes call on a body Fastify has already validated, and a
+thin wrapper under the old name that runs the schema and then that half. The wrappers stay
+because the MCP `scan_signals` tool (CCA-F phase E) calls `parseFanSignalsBody` outside the
+router, and it must keep accepting and refusing exactly what `/signals` does. The text above
+also did not foresee that the engine's `NaN` ("not computable") would meet a schema:
+`JSON.stringify` writes it as `null`, plain `z.number()` refuses it, and a naive response schema
+would have turned every short-history row into a 500. `wireNumber` in
+`server/schemas/common.ts` accepts any JS number and documents `number | null`. The optional
+typed client was done, by `import type` from the schemas rather than by code generation; it
+makes `src/lib/client/marketClient.ts` depend on `server/schemas/` at the type level only.
 
 **Phase 2.3 — Structured logging and integration tests. Landed 2026-09-21.** pino with a
 per-request id (Fastify ships it), replacing `console.error`. Add tests that drive the real app
@@ -208,7 +223,15 @@ does not leave a listener behind when an assertion fails. The cases that genuine
   `fanBacktest.test.ts`, `instrument.test.ts`, `tests/store.client.test.ts`), plus
   `package-lock.json` and the removal of `server/index.test.ts`, whose contents became
   `server/shutdown.test.ts`. `fanBacktest.ts`, `signals.ts` and `marketClient.ts` were in fact
-  **not** touched — the wire format did not change, which was the point.
+  **not** touched by 2.1 or 2.3 — the wire format did not change, which was the point.
+  (Qualified 2026-10-05: phase 2.2 did touch all three, as the scope line always said it would.)
+- Touch scope, as landed for 2.2 (2026-10-05): `server/schemas/*` (new, including
+  `server/schemas/schemas.test.ts`, which pins the schema types to the engine and handler types
+  in both directions), `server/app.ts`, `server/routes/*`, `server/fanBacktest.ts`,
+  `server/signals.ts`, `src/lib/client/marketClient.ts`, `server/README.md`, `server/app.test.ts`,
+  `server/fanBacktest.test.ts`, and `package.json` / `package-lock.json` for three new
+  dependencies: `fastify-type-provider-zod`, `@fastify/swagger` and `@fastify/swagger-ui`.
+  `server/handlers.ts` and the MCP code did not change.
 - Touch scope: also on this branch, because phase 4.1 landed with 2.1 rather than after it —
   `server/universe.ts`, `server/universe.test.ts`, `server/devImport.ts`,
   `server/devImport.test.ts`, `server/devDataset.ts`, `server/devDataset.test.ts` and
@@ -224,6 +247,18 @@ does not leave a listener behind when an assertion fails. The cases that genuine
   rather than 400. Verified live on 2026-09-21 against a running service on port 8799: every
   endpoint, the NDJSON stream with its `application/x-ndjson` header, the 404/400/415 shapes, the
   `DEV_TOOLS` gate, and a `kill -TERM` that logs `shutdown complete` and frees the port.
+- Verified for 2.2 on 2026-10-05, all three clauses. Malformed bodies: every POST route answers a
+  wrong-shaped body with a 400 that names the field (`server/app.test.ts`, block
+  `schemas (hardening 2.2)`). `/docs`: 200 HTML with its bundle, and `/docs/json` is OpenAPI 3.1.0
+  with exactly 9 paths without `DEV_TOOLS` and 13 with it. The response-shape clause: renaming
+  `changePct` in `FanRowSchema` made `npm run typecheck` fail in `ScreenView.tsx`,
+  `store.test.ts` and `screenSlice.ts`. Wire output was checked identical to the handlers' own
+  for `/screen`, `/signals` (every preset) and every `/instrument` in `dev-market.db` (491
+  names), `kaggle-market.db` (1500) and `yahoo-market.db` (0). Three wire changes are deliberate
+  and recorded in the diary entry of the same date: a body field of the wrong type is now a 400
+  rather than silently defaulted, a `null` inside `horizons` is now a 400 rather than dropped, and
+  a `/portfolio/extract` body without an `image` object gets the schema's field-naming 400 in
+  place of the route's own message.
 
 ---
 

@@ -18,6 +18,9 @@ import { buildApp } from './app.ts';
 import { createUniverseStore } from './universe.ts';
 import type { UniverseStore } from './universe.ts';
 import { syntheticProvider } from '../src/lib/data/synthetic.ts';
+import { handleScreen, handleSignals } from './handlers.ts';
+import type { ScreenResponse, SignalsResponse } from './handlers.ts';
+import { parseFanSignalsBody } from './signals.ts';
 
 const store = createUniverseStore(syntheticProvider(7));
 beforeAll(() => { store.get(); });
@@ -213,5 +216,127 @@ describe('the DEV_TOOLS gate is structural', () => {
       const res = await on.inject({ method: 'POST', url, headers: { 'content-type': 'text/plain' }, payload: 'x' });
       expect(res.statusCode, url).toBe(415);
     }
+  });
+});
+
+describe('schemas (hardening 2.2)', () => {
+  // Each POST route, with a body that is valid JSON of the wrong shape. Every one
+  // is refused before its handler runs, in the service's one error shape, and
+  // the message names the field — Zod's default does not, so `validate.ts` adds it.
+  const malformed = [
+    ['/screen', '{ not json', 'invalid JSON body'],
+    ['/signals', JSON.stringify({ strategy: 'tag50', minAvgVol: 'lots' }), 'minAvgVol: Invalid input: expected number, received string'],
+    ['/backtest', JSON.stringify({ strategy: 7 }), 'strategy must be a preset id or a definition object'],
+    ['/backtest', JSON.stringify([1, 2]), 'body: Invalid input: expected object, received array'],
+    ['/portfolio/extract', JSON.stringify({ image: { dataBase64: 42 } }), 'image.dataBase64: Invalid input: expected string'],
+    ['/dev/import', JSON.stringify({ configName: 'x', uploads: 'nope' }), 'uploads: Invalid input: expected array'],
+    ['/dev/databases/activate', JSON.stringify({ synthetic: 'yes' }), 'synthetic: Invalid input: expected boolean'],
+  ] as const;
+
+  it('answers a malformed body on every POST route with a 400 that names the field', async () => {
+    const on = buildApp({ store, logger: false, devTools: true });
+    for (const [url, payload, message] of malformed) {
+      const res = await on.inject({ method: 'POST', url, headers: { 'content-type': 'application/json' }, payload });
+      expect(res.statusCode, url).toBe(400);
+      expect(Object.keys(res.json<object>()), url).toEqual(['error']);
+      expect(res.json<{ error: string }>().error, url).toContain(message);
+    }
+  });
+
+  it('still answers a body-less /backtest with the default strategy, as before the schema', async () => {
+    // A POST with no content type has no body at all; `app.ts` turns that into
+    // `{}` before validation, which is the tolerance the routes used to spell
+    // `request.body ?? {}`. The stream itself is covered in fanBacktest.test.ts.
+    const res = await app().inject({ method: 'POST', url: '/backtest' });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('ndjson');
+  });
+
+  it('treats a literal JSON null body as an empty object, as `request.body ?? {}` did', async () => {
+    const a = app();
+    const backtest = await a.inject({ method: 'POST', url: '/backtest', headers: { 'content-type': 'application/json' }, payload: 'null' });
+    expect(backtest.statusCode).toBe(200);
+    expect(backtest.headers['content-type']).toContain('ndjson');
+    // /signals reaches its own wording for the missing strategy, not "expected object".
+    const signals = await a.inject({ method: 'POST', url: '/signals', headers: { 'content-type': 'application/json' }, payload: 'null' });
+    expect(signals.statusCode).toBe(400);
+    expect(signals.json()).toEqual({ error: 'unknown or missing strategy' });
+  });
+
+  it('serialises the engine rows unchanged — the response schemas strip nothing', async () => {
+    // The serialiser drops keys a schema does not name. Comparing against the
+    // handler's own result, round-tripped through JSON, is the check that the
+    // schemas name every key the engine emits (and that NaN still goes as null).
+    const a = app();
+    const screen = (await a.inject({ method: 'POST', url: '/screen' })).json<ScreenResponse>();
+    const direct = JSON.parse(JSON.stringify(handleScreen(store.get()))) as ScreenResponse;
+    expect(screen.matches).toEqual(direct.matches);
+    expect(screen.near).toEqual(direct.near);
+
+    const signals = (await a.inject({ method: 'POST', url: '/signals', ...json({ strategy: 'tag50' }) })).json<SignalsResponse>();
+    const directSignals = JSON.parse(JSON.stringify(
+      handleSignals(store.get(), parseFanSignalsBody({ strategy: 'tag50' })),
+    )) as SignalsResponse;
+    expect(signals.rows).toEqual(directSignals.rows);
+  });
+
+  it('serialises a non-finite engine number as null, as JSON.stringify always did', async () => {
+    const nanStore: UniverseStore = {
+      ...store,
+      getInstrument: () => ({ ticker: 'X', name: 'X', sector: 'S', bars: [{ o: 1, h: 1, l: 1, c: 1, v: NaN }] }),
+    };
+    const res = await buildApp({ store: nanStore, logger: false, devTools: false })
+      .inject({ method: 'GET', url: '/instrument/X' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json<{ bars: { v: unknown }[] }>().bars[0].v).toBeNull();
+  });
+
+  it('catches a response that violates its schema as a logged 500, not a different payload', async () => {
+    const lines: Record<string, unknown>[] = [];
+    const sink = new Writable({
+      write(chunk: Buffer, _enc, cb) { lines.push(JSON.parse(chunk.toString()) as Record<string, unknown>); cb(); },
+    });
+    const wrongStore: UniverseStore = {
+      ...store,
+      // A price as a string is the kind of drift a provider change produces.
+      getInstrument: () => ({ ticker: 'X', name: 'X', sector: 'S', bars: [{ o: '1', h: 1, l: 1, c: 1, v: 1 }] }) as never,
+    };
+    const res = await buildApp({ store: wrongStore, devTools: false, logger: pino({ level: 'info' }, sink) })
+      .inject({ method: 'GET', url: '/instrument/X' });
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({ error: 'internal error' });
+    const failure = lines.find((l) => l.msg === 'request failed');
+    expect((failure?.err as { code?: string } | undefined)?.code).toBe('FST_ERR_RESPONSE_SERIALIZATION');
+  });
+
+  it('publishes an OpenAPI document listing every route the instance registered', async () => {
+    const expected = [
+      '/health', '/metrics', '/facts', '/screen', '/signals', '/backtest', '/instrument/{ticker}',
+      '/portfolio/status', '/portfolio/extract',
+    ];
+    const dev = ['/dev/import/options', '/dev/import', '/dev/databases', '/dev/databases/activate'];
+
+    const off = await app().inject({ method: 'GET', url: '/docs/json' });
+    expect(off.statusCode).toBe(200);
+    const doc = off.json<{ openapi: string; paths: Record<string, object> }>();
+    expect(doc.openapi).toMatch(/^3\.1/);
+    // Exactly these: the UI's own routes are hidden, and the /dev/* plugin is
+    // not registered, so it is not documented either.
+    expect(Object.keys(doc.paths).sort()).toEqual([...expected].sort());
+
+    const on = await buildApp({ store, logger: false, devTools: true }).inject({ method: 'GET', url: '/docs/json' });
+    expect(Object.keys(on.json<{ paths: object }>().paths).sort()).toEqual([...expected, ...dev].sort());
+  });
+
+  it('serves the docs UI at /docs as GETs, leaving the JSON-only POST rule intact', async () => {
+    const a = app();
+    const page = await a.inject({ method: 'GET', url: '/docs' });
+    expect(page.statusCode).toBe(200);
+    expect(page.headers['content-type']).toContain('text/html');
+    const asset = await a.inject({ method: 'GET', url: '/docs/static/swagger-ui-bundle.js' });
+    expect(asset.statusCode).toBe(200);
+    // Registering the UI added no content-type parser: a form post still stops at 415.
+    const form = await a.inject({ method: 'POST', url: '/signals', headers: { 'content-type': 'text/plain' }, payload: 'x' });
+    expect(form.statusCode).toBe(415);
   });
 });

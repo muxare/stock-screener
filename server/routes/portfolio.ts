@@ -12,13 +12,20 @@
 // body, which is the behaviour this route depends on rather than merely enjoys,
 // so the error paths below hand pino a category and a count and never a value.
 
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { RequestError } from '../handlers.ts';
 import { config } from '../config.ts';
 import { ClaudeError, toClaudeError } from '../claude/errors.ts';
 import { MODEL } from '../claude/client.ts';
 import { extractPortfolio, apiCaller, IMAGE_MEDIA_TYPES } from '../claude/portfolio/extract.ts';
 import type { ImageMediaType, ScreenshotImage } from '../claude/portfolio/extract.ts';
+import {
+  PortfolioStatusResponseSchema,
+  ExtractRequestSchema,
+  ExtractResponseSchema,
+  PortfolioErrorResponseSchema,
+} from '../schemas/portfolio.ts';
+import type { ExtractRequest } from '../schemas/portfolio.ts';
 import type { RouteDeps } from './deps.ts';
 
 // A base64 screenshot is far larger than the 1 MiB the rest of the service
@@ -35,20 +42,16 @@ const MAX_IMAGE_BASE64_BYTES = 6 << 20;
 // field is the obvious mistake to make. Rather than fail on it, strip it.
 const DATA_URL = /^data:([a-z]+\/[a-z0-9.+-]+);base64,/i;
 
-interface ExtractBody {
-  image?: { mediaType?: unknown; dataBase64?: unknown };
-}
-
-function readImage(body: ExtractBody): ScreenshotImage {
+// The body's shape — an `image` object with a string `dataBase64` — is checked
+// by `ExtractRequestSchema` before this runs. What is left is meaning: a blank
+// string, a data URL to unwrap, a media type the API takes, a size worth sending.
+function readImage(body: ExtractRequest): ScreenshotImage {
   const image = body.image;
-  if (!image || typeof image !== 'object') {
-    throw new RequestError('body must carry an "image" object');
-  }
-  if (typeof image.dataBase64 !== 'string' || image.dataBase64.trim() === '') {
+  if (image.dataBase64.trim() === '') {
     throw new RequestError('image.dataBase64 must be a non-empty base64 string');
   }
   let data: string = image.dataBase64;
-  let mediaType: unknown = image.mediaType;
+  let mediaType: string | undefined = image.mediaType;
   const asDataUrl = DATA_URL.exec(data);
   if (asDataUrl) {
     // Trust the data URL's own media type over a caller-supplied one; they came
@@ -65,17 +68,34 @@ function readImage(body: ExtractBody): ScreenshotImage {
   return { mediaType: mediaType as ImageMediaType, dataBase64: data };
 }
 
-export const portfolioRoutes: FastifyPluginAsync<RouteDeps> = async (app, deps) => {
+export const portfolioRoutes: FastifyPluginAsyncZod<RouteDeps> = async (app, deps) => {
   // Is the feature wired up in this environment? The UI asks before offering a
   // button, the same way the dev tooling asks before showing itself — a feature
   // that answers 503 when clicked is worse than one that is not there.
-  app.get('/portfolio/status', async () => ({
+  app.get('/portfolio/status', {
+    schema: { summary: 'Whether the screenshot reader is available here', response: { 200: PortfolioStatusResponseSchema } },
+  }, async () => ({
     available: config.anthropicApiKey !== null,
     model: MODEL,
   }));
 
-  app.post('/portfolio/extract', { bodyLimit: MAX_BODY_BYTES }, async (request, reply) => {
-    const image = readImage((request.body ?? {}) as ExtractBody);
+  app.post('/portfolio/extract', {
+    bodyLimit: MAX_BODY_BYTES,
+    schema: {
+      summary: 'Read the holdings out of a brokerage screenshot',
+      body: ExtractRequestSchema,
+      response: {
+        200: ExtractResponseSchema,
+        // Unlike the other routes this one declares its 5xx, because the model
+        // layer's 502/503 carry a category worth documenting. The schema's extra
+        // fields are optional, so the error handler's flat `{ error }` 500 still
+        // satisfies it and cannot fail serialisation on the way out.
+        '4xx': PortfolioErrorResponseSchema,
+        '5xx': PortfolioErrorResponseSchema,
+      },
+    },
+  }, async (request, reply) => {
+    const image = readImage(request.body);
     const started = Date.now();
     try {
       const result = await extractPortfolio(image, deps.store, deps.portfolioCaller ?? apiCaller());

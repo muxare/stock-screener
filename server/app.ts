@@ -13,12 +13,22 @@
 //   - the `/dev/*` surface still exists only when DEV_TOOLS is set, now because
 //     the plugin is not registered rather than because a condition said no.
 //
+// Hardening 2.2 added the contract: every route declares its request and
+// response shapes as Zod schemas (`server/schemas/`), Fastify validates requests
+// and serialises responses against them, and `@fastify/swagger` turns the same
+// declarations into the OpenAPI document served at `/docs`. A response that does
+// not match its schema is a logged 500, never a silently different payload.
+//
 // `handlers.ts` did not change at all. That seam — parsed request + warm universe
 // → plain result — is why swapping the transport was a day's work, and phase E of
 // `docs/cca-f-learning-plan.md` wraps the same functions as MCP tools.
 
 import Fastify from 'fastify';
 import type { FastifyInstance, FastifyReply, FastifyRequest, FastifyServerOptions } from 'fastify';
+import fastifySwagger from '@fastify/swagger';
+import fastifySwaggerUi from '@fastify/swagger-ui';
+import { serializerCompiler, createJsonSchemaTransform, jsonSchemaTransformObject } from 'fastify-type-provider-zod';
+import { zodValidatorCompiler } from './schemas/validate.ts';
 import { RequestError } from './handlers.ts';
 import { productionUniverse } from './universe.ts';
 import type { UniverseStore } from './universe.ts';
@@ -103,6 +113,49 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     try { done(null, JSON.parse(raw)); }
     catch { done(new RequestError('invalid JSON body'), undefined); }
   });
+
+  // A POST with no body at all — no content type, nothing to parse — reaches
+  // validation as `undefined`, and a body schema would refuse it as "expected
+  // object". The routes used to read `request.body ?? {}` for exactly this
+  // case, so the tolerance moves here, once, beside the parser's identical one
+  // for an empty payload: a missing body is an empty object, and what that
+  // object lacks is reported by the schema or the parser in its own words.
+  // A literal JSON `null` body gets the same treatment, because the old
+  // `?? {}` covered it too and the wire should stay as tolerant as it was.
+  app.addHook('preValidation', async (request) => {
+    if (request.body == null && request.method === 'POST') request.body = {};
+  });
+
+  // Requests are validated by Zod with this service's messages (`validate.ts`);
+  // responses are encoded by the type provider's serialiser, which runs the
+  // response schema and throws on a mismatch. That throw is a 500 through
+  // `sendError`, logged with the Zod issues as its cause.
+  app.setValidatorCompiler(zodValidatorCompiler);
+  app.setSerializerCompiler(serializerCompiler);
+
+  // The OpenAPI document, built from the route schemas as the routes register —
+  // which is why this comes before them. `/docs` is on in every environment,
+  // not behind DEV_TOOLS: it describes exactly the routes this instance
+  // registered (the `/dev/*` entries appear only when the flag registers them),
+  // so it discloses nothing a client could not learn by calling the service,
+  // and a contract that is only published in development is one the
+  // production clients cannot check against. The UI is GETs of static assets
+  // and of the document; it adds no content-type parser and takes no body, so
+  // the JSON-only rule above still covers every POST.
+  app.register(fastifySwagger, {
+    openapi: {
+      openapi: '3.1.0',
+      info: {
+        title: 'stock-screener service',
+        description: 'Screens, live strategy entries and backtests over one warm market universe. ' +
+          'Every error is `{ "error": "<message>" }`.',
+        version: '0.0.0',
+      },
+    },
+    transform: createJsonSchemaTransform({ skipList: [] }),
+    transformObject: jsonSchemaTransformObject,
+  });
+  app.register(fastifySwaggerUi, { routePrefix: '/docs' });
 
   app.setErrorHandler(sendError);
   app.setNotFoundHandler((_request, reply) => { void reply.code(404).send({ error: 'not found' }); });

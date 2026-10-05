@@ -18,155 +18,110 @@
 // server-side market-data port).
 // ----------------------------------------------------------------------------
 
-import type { InstrumentBars } from '../market';
-import type { FanRow } from '../fan';
+// ---- transport DTOs (hardening 2.2) ----
+// Every request and response type below is inferred from the service's Zod
+// schemas in `server/schemas/`, the same declarations Fastify validates and
+// serialises against and `@fastify/swagger` publishes at `/docs`. A change to a
+// response shape on the server is therefore a compile error here, at the call
+// site that reads the field, rather than an `undefined` in the browser.
+//
+// The imports are `import type` and must stay that way: they are erased before
+// bundling, so nothing from `server/` — and in particular not `zod` — reaches
+// the browser bundle. The schema modules import only `zod` and engine types,
+// which is what lets this program type-check them at all; the service-only
+// validation helpers sit apart in `server/schemas/validate.ts`.
+//
+// The backtest result is the exception, and deliberately: the `/backtest`
+// stream is written to the socket by hand and never serialised against a
+// schema, so its result line keeps the engine's own `FanBacktestResult`, which
+// the browser and the service already share.
+
 import type { FanBacktestConfig, FanBacktestProgress, FanBacktestResult } from '../fanBacktest';
 import type { StrategyDef } from '../strategy/types';
-import type { FanSignalRow } from '../fanSignals';
+import type { InstrumentResponse } from '../../../server/schemas/instrument';
+import type {
+  FactsResponse,
+  ScreenResponse,
+  SignalsRequest as SignalsRequestWire,
+  SignalsResponse,
+  BacktestRequest as BacktestRequestWire,
+  BacktestProgressLine,
+} from '../../../server/schemas/screen';
+import type {
+  PortfolioStatusResponse,
+  ExtractRequest,
+  ExtractResponse,
+} from '../../../server/schemas/portfolio';
+import type {
+  ImportOptionsResponse,
+  DevImportRequest as DevImportRequestWire,
+  DevImportResponse,
+  DatabasesResponse,
+  ActivateRequest,
+  ActivateResponse,
+} from '../../../server/schemas/dev';
 
-export type { FanRow };
 export type { FanBacktestConfig, FanBacktestProgress, FanBacktestResult };
-export type { FanSignalRow };
 
-export interface ScreenResp {
-  universe: number;
-  elapsedMs: number;
-  matches: FanRow[];
-  near: FanRow[];
-}
+export type ScreenResp = ScreenResponse;
+export type FanRow = ScreenResp['matches'][number];
 
 // Live "current entry" screen (per strategy). The client carries the strategy
 // (a preset id, or the full definition of a saved custom strategy) and the
-// universe floors the server reuses to build the scan config.
-export interface SignalsRequest {
-  strategy: string | StrategyDef;
-  minAvgVol?: number;
-  minMarketCap?: number;
-  ema200RisingBars?: number;
-}
-export interface SignalsResp {
-  universe: number;
-  elapsedMs: number;
-  strategy: string;
-  strategyName: string;
-  rows: FanSignalRow[];
-}
+// universe floors the server reuses to build the scan config. The wire accepts
+// more than the client sends — a definition without an id, a null floor — so
+// the client's own type is the narrower one, and `signals()` below checks at
+// compile time that it still fits the schema.
+export type SignalsRequest = Omit<SignalsRequestWire, 'strategy'> & { strategy: string | StrategyDef };
+export type SignalsResp = SignalsResponse;
+export type FanSignalRow = SignalsResp['rows'][number];
+
+/** What `/backtest` accepts: a `FanBacktestConfig` fits it. */
+export type BacktestRequest = BacktestRequestWire;
 
 // Universe facts only (STORY-028): count + sector facets with NO per-name row
 // payload.
-export interface FactsResp {
-  total: number;
-  sectors: string[];
-  sample: string | null;
-}
+export type FactsResp = FactsResponse;
 
-// ---- dev-only EOD import (STORY-031) transport DTOs ----
-export interface ImportConfigOption { name: string; json: unknown }
-export interface ImportDataEntry { name: string; type: 'file' | 'dir'; path: string }
-export interface ImportOptionsResp {
-  configs: ImportConfigOption[];
-  dataDir: string;
-  dataEntries: ImportDataEntry[];
-  targetDb: string;
-}
-export interface DevImportRequest {
-  configName: string;
-  configJson?: unknown;
-  inputPath?: string;
-  uploads?: { name: string; content: string }[];
-  targetDb?: string;
-}
-export interface DevImportReport {
-  files: number;
-  instruments: number;
-  bars: number;
-  skipped: number;
-  errors: { file: string; line: number; reason: string; sample: string }[];
-  targetDb: string;
-  universe: number;
-}
+export type InstrumentBarsResp = InstrumentResponse;
 
-// ---- portfolio screenshot reader (hardening stage 3) transport DTOs ----
-// Mirrors `server/claude/portfolio/schema.ts`. It is restated rather than
-// imported because this file is the client side of an HTTP boundary and must
-// not reach into the service's modules — the same reason the screen and signal
-// DTOs are restated here. When the schema changes, both ends change.
-export type HoldingConfidence = 'high' | 'medium' | 'low';
+// ---- dev-only EOD import (STORY-031) ----
+export type ImportOptionsResp = ImportOptionsResponse;
+export type ImportConfigOption = ImportOptionsResp['configs'][number];
+export type ImportDataEntry = ImportOptionsResp['dataEntries'][number];
+export type DevImportRequest = DevImportRequestWire;
+export type DevImportReport = DevImportResponse;
 
+// ---- portfolio screenshot reader (hardening stage 3) ----
+// The extraction is the same `ExtractionSchema` the model is held to on the
+// server, so the shape Claude answers in and the shape the confirm UI reads
+// are one definition. (Before 2.2 this block restated it by hand.)
+export type ExtractPortfolioResp = ExtractResponse;
+export type PortfolioExtraction = ExtractPortfolioResp['extraction'];
 /** A row as Claude read it. Every readable-or-not field may be null. */
-export interface ExtractedHolding {
-  ticker: string | null;
-  name: string | null;
-  shares: number | null;
-  averagePrice: number | null;
-  lastPrice: number | null;
-  marketValue: number | null;
-  /** What the prices on the row are quoted in. */
-  currency: string | null;
-  /** What `marketValue` is in — not always the same; see the server schema. */
-  valueCurrency: string | null;
-  confidence: HoldingConfidence;
-  note: string | null;
-}
+export type ExtractedHolding = PortfolioExtraction['holdings'][number];
+export type HoldingConfidence = ExtractedHolding['confidence'];
+export type PortfolioStatusResp = PortfolioStatusResponse;
+/** The image as the browser read it: base64, or a data URL the service unwraps. */
+export type ScreenshotUpload = ExtractRequest['image'];
 
-export interface PortfolioExtraction {
-  accountLabel: string | null;
-  holdings: ExtractedHolding[];
-  warnings: string[];
-}
-
-export interface ExtractPortfolioResp {
-  extraction: PortfolioExtraction;
-  /** 1 or 2 — the service retries a failed validation exactly once. */
-  attempts: number;
-  /** Meaning checks still failing when the attempts ran out. Usually empty. */
-  problems: string[];
-}
-
-export interface PortfolioStatusResp {
-  available: boolean;
-  model: string;
-}
-
-/** The image as the browser read it: base64 without a data-URL prefix. */
-export interface ScreenshotUpload {
-  mediaType: string;
-  dataBase64: string;
-}
-
-// ---- dev-only DB-selector (STORY-035) transport DTOs ----
+// ---- dev-only DB-selector (STORY-035) ----
 // Lists already-built market-data DBs and switches the active one at runtime.
-export interface DatabaseEntry {
-  name: string;
-  path: string;
-  sizeBytes: number;
-  instruments: number | null; // null when not a readable STORY-031 DB
-  valid: boolean;
-  active: boolean;
-}
-export interface DatabasesResp {
-  activeKind: 'synthetic' | 'sqlite';
-  activePath: string | null;
-  scanDir: string;
-  databases: DatabaseEntry[];
-}
+export type DatabasesResp = DatabasesResponse;
+export type DatabaseEntry = DatabasesResp['databases'][number];
 // Switch to a SQLite DB by path, OR back to the synthetic generator.
-export interface ActivateDbRequest { path?: string; synthetic?: boolean }
-export interface ActivateDbReport {
-  activeKind: 'synthetic' | 'sqlite';
-  activePath: string | null;
-  universe: number;
-}
+export type ActivateDbRequest = ActivateRequest;
+export type ActivateDbReport = ActivateResponse;
 
 // The client-side read seam. Exposes exactly today's calls and nothing
 // speculative (STORY-035 AC#1).
 export interface MarketClient {
   facts(signal?: AbortSignal): Promise<FactsResp>;
-  instrument(ticker: string): Promise<InstrumentBars | null>;
+  instrument(ticker: string): Promise<InstrumentBarsResp | null>;
   screen(signal?: AbortSignal): Promise<ScreenResp>;
   signals(body: SignalsRequest, signal?: AbortSignal): Promise<SignalsResp>;
   backtest(
-    config: FanBacktestConfig,
+    config: BacktestRequest,
     onProgress?: (p: FanBacktestProgress) => void,
     signal?: AbortSignal,
   ): Promise<FanBacktestResult & { elapsedMs: number }>;
@@ -206,7 +161,7 @@ export interface MarketClientOptions {
 // a known message shape is skipped rather than aborting the whole run; a stream
 // that never yields a result line still fails at the end with a clear error.
 type BacktestStreamMsg =
-  | { type: 'progress'; name: number; total: number }
+  | BacktestProgressLine
   | ({ type: 'result'; elapsedMs: number } & FanBacktestResult);
 
 function parseBacktestLine(line: string): BacktestStreamMsg | null {
@@ -240,7 +195,7 @@ export function httpMarketClient(opts: MarketClientOptions = {}): MarketClient {
       });
       if (res.status === 404) return null;
       if (!res.ok) throw new Error('instrument failed: ' + res.status);
-      return res.json() as Promise<InstrumentBars>;
+      return res.json() as Promise<InstrumentBarsResp>;
     },
 
     async screen(signal) {
@@ -255,10 +210,11 @@ export function httpMarketClient(opts: MarketClientOptions = {}): MarketClient {
     },
 
     async signals(body, signal) {
+      const wire: SignalsRequestWire = body;
       const res = await fetch('/signals', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify(wire),
         signal,
       });
       if (!res.ok) throw new Error('signals failed: ' + res.status);

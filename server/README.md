@@ -8,9 +8,13 @@ This file is written against the handlers as they are. It was rewritten on
 2026-09-21 (platform hardening phase 1.3) because it had drifted badly, and
 revised the same day for phases 2.1, 2.3 and 4.1, which replaced the hand-rolled
 router with Fastify, `console.error` with pino, and the scattered `process.env`
-reads with one validated config. Prose drifts; phase 2.2 replaces the endpoint
-section below with OpenAPI generated from the route schemas, at which point it
-cannot.
+reads with one validated config. Prose drifts, so since phase 2.2 (2026-10-05)
+the request and response *shapes* are not authoritative here: every route
+declares them as Zod schemas in `schemas/`, Fastify validates and serialises
+against them, and the OpenAPI document generated from the same declarations is
+served at **`/docs`**. The endpoint section below is kept for what a schema
+cannot say — what a field means, why a default is what it is, what a backtest
+number is not evidence of.
 
 ## Layout
 
@@ -18,7 +22,8 @@ cannot.
 |---|---|
 | `index.ts` | The entry script: warm the universe, listen, install signal handlers. |
 | `app.ts` | Builds the Fastify instance — the JSON parser, the error handler, the 404, and which route plugins are registered. |
-| `routes/` | One plugin per surface: `system.ts` (`/health`, `/metrics`), `screen.ts` (`/facts`, `/screen`, `/signals`, `/backtest`), `instrument.ts`, `dev.ts`. |
+| `routes/` | One plugin per surface: `system.ts` (`/health`, `/metrics`), `screen.ts` (`/facts`, `/screen`, `/signals`, `/backtest`), `instrument.ts`, `portfolio.ts`, `dev.ts`. Each route names its schemas. |
+| `schemas/` | Every request and response shape, once, in Zod. Imports only `zod` and engine types, because the browser client takes its types from here (`import type`). `validate.ts` is the service-only half: the validator compiler and the 400 wording. |
 | `handlers.ts` | The transport-agnostic seam: parsed request + warm universe → plain result. |
 | `config.ts` | Every environment variable, read and validated once. |
 | `logger.ts` | The root pino logger. |
@@ -116,7 +121,7 @@ leaves in one shape, `{"error": "..."}`:
 
 | Status | When |
 |---|---|
-| `400` | A `RequestError` from a handler or the strategy parser; a body that is not valid JSON; a path the router cannot decode. |
+| `400` | A body that is not valid JSON; a body of the wrong shape (the message names each field, e.g. `minAvgVol: Invalid input: expected number, received string`); a `RequestError` from a handler or the strategy parser; a path the router cannot decode. |
 | `404` | An unknown route (`{"error": "not found"}`) or an unknown ticker. |
 | `413` | A request body over the limit: 1 MiB everywhere, 64 MiB on `/dev/import`. |
 | `415` | A `POST` whose content type is not `application/json`. |
@@ -128,6 +133,37 @@ cross-origin form from reaching a state-changing route: `text/plain`,
 content types a form can send without a preflight, and all three are refused
 before a body is read. A `POST` with no body at all is legal — `/screen` has
 never read one — and an empty JSON body parses as `{}`.
+
+**Shape versus meaning.** The schemas check that a body is the right kind of
+thing: an object, a strategy that is a preset id or an object with a `steps`
+array, numbers where numbers go. Everything else — whether the preset exists,
+whether the steps make sense, what an out-of-range number becomes — is still
+the strategy parser (`src/lib/strategy/parse.ts`) and the config builders in
+`fanBacktest.ts` and `signals.ts`, as before. The one change on the wire is for
+bodies of the wrong *type*: before 2.2 a string where a number goes was silently
+replaced by the default, and it is now a 400. Out-of-range numbers are still
+defaulted or clamped, and `null` is still accepted wherever a number is (an
+emptied input in the UI is `NaN`, which JSON sends as `null`).
+
+**Responses are checked too.** The serialiser runs each response through its
+schema, so a handler that returns the wrong shape is a logged 500
+(`FST_ERR_RESPONSE_SERIALIZATION`) rather than a quietly different payload.
+Engine numbers that are `NaN` or infinite still go on the wire as `null`, as
+`JSON.stringify` always sent them; the OpenAPI document says `number | null` for
+those fields. `/backtest` is the exception: it writes its stream by hand, so its
+line shapes are documented in `/docs` but not enforced.
+
+### `GET /docs`
+The OpenAPI 3.1 document, generated from the route schemas, rendered by
+Swagger UI; the raw document is `GET /docs/json` (and `/docs/yaml`). It is on in
+every environment rather than behind `DEV_TOOLS`: it describes exactly the routes
+this instance registered — the `/dev/*` entries appear only when the flag
+registers them — so it tells a caller nothing the service would not, and a
+contract that only exists in development is not one a production client can
+check against. The UI is GETs of static assets; it adds no content-type parser,
+so the JSON-only rule above still covers every `POST`. In development, open it on
+the service's port (`http://localhost:8787/docs`); the Vite dev server does not
+proxy `/docs`.
 
 ### `GET /health`
 Liveness plus the warm universe size. Note that reporting the size builds the
@@ -343,9 +379,4 @@ not `application/json`, before the body is read.
 ## Out of scope
 
 - Authentication and per-user data — hardening stage 5.
-- Generated OpenAPI and schema-validated bodies — hardening stage 2.2, which
-  retires the hand-written endpoint prose above. Until then the bodies are parsed
-  by hand (`parseFanBacktestBody`, `parseFanSignalsBody`, and
-  `src/lib/strategy/parse.ts` for a strategy's meaning) and a 400 names the first
-  problem it found rather than every field at once.
 - A `/ready` probe separate from `/health` — hardening phase 4.4.

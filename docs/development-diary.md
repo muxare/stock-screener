@@ -1,5 +1,143 @@
 # Development diary
 
+## 2026-10-05 — Hardening 2.2: every route declares its schemas, and `/docs` publishes them
+
+### What changed
+Phase 2.2 of `docs/platform-hardening-plan.md`, which completes stage 2. Every route now
+declares its request and response shapes as Zod schemas in `server/schemas/`. Fastify validates
+each request against them before the handler runs and serialises each response through them,
+and `@fastify/swagger` turns the same declarations into an OpenAPI 3.1.0 document served at
+`/docs`. The plan left the choice open between Zod and TypeBox, but stage 3 had already made Zod
+a dependency of the service, so the choice was effectively made there. It is wired through
+`fastify-type-provider-zod` 7, with `@fastify/swagger` and `@fastify/swagger-ui`. The type
+provider's own validator compiler was replaced by a ten-line one in `server/schemas/validate.ts`.
+Zod's default messages do not say which field they are about, which makes them useless in a 400
+for a nested body, so the replacement prefixes each message with the field's path
+(`minAvgVol: Invalid input: expected number, received string`). Messages that a schema sets
+itself take precedence, which is how `/signals` keeps "unknown or missing strategy" and
+`/dev/import` keeps "configName is required".
+
+The split the plan asked for, shape in the schema and meaning in the parsers, holds. Whether a
+preset exists, whether a strategy's steps make sense, and what an out-of-range number is clamped
+to all stay in `backtestConfigFromBody`, `signalsConfigFromBody` and `src/lib/strategy/parse.ts`.
+Moving the meaning into Zod was rejected because the browser runs the same strategy parser over
+localStorage, and it would then have a second, different definition of a valid strategy. The
+plan's text said to *replace* `parseFanBacktestBody` and `parseFanSignalsBody`, and that turned
+out to be wrong. Each one now runs the schema and then the meaning half, and survives as a
+wrapper because the MCP `scan_signals` tool from CCA-F phase E calls `parseFanSignalsBody`
+outside the router. Without the wrapper, the tool and the route would drift apart on what they
+accept. The plan now says so under phase 2.2.
+
+**One problem the plan did not anticipate was `NaN`.** The engine uses `NaN` for "not
+computable", for example a 52-week high over a short history. `JSON.stringify` has always written
+it as `null`, and plain `z.number()` refuses `NaN`, so a straightforward response schema would
+have turned every short-history row into a 500. `wireNumber` in `server/schemas/common.ts`
+accepts any JS number and tells the OpenAPI document `number | null`. A second hazard is that a
+response schema silently drops any key it does not name. `server/schemas/schemas.test.ts` guards
+against that with two-way `expectTypeOf` equality between each schema's type and the engine or
+handler type it describes. The implementer also checked the wire output against the handlers'
+own output for `/screen`, `/signals` (every preset) and every `/instrument` in `dev-market.db`
+(491 names), `kaggle-market.db` (1500) and `yahoo-market.db` (0), and found it identical.
+
+Valid requests are answered exactly as before. Three things on the wire did change. First, a body
+field of the wrong type, such as a string `minAvgVol`, used to be silently replaced by its
+default and is now a 400. Second, a `null` entry inside `horizons` used to be dropped and is now
+a 400. Third, a `/portfolio/extract` body without an `image` object now gets the schema's pathed
+message instead of the route's old `body must carry an "image" object`. This one is not in the
+implementer's notes, but the diff shows it. Out-of-range numbers are still clamped or defaulted,
+and `null` is still accepted wherever a number goes, because an emptied input in the UI is `NaN`
+and goes out as `null`. A request with no body, or with a literal JSON `null` body, is still
+treated as `{}`. That tolerance used to be repeated as `request.body ?? {}` in each route. It now
+lives once, in a `preValidation` hook in `server/app.ts`, and a test covers it.
+
+`/docs` is on in every environment, not behind `DEV_TOOLS`. Gating it was considered and
+rejected. The document lists only the routes this instance registered, so the `/dev/*` entries
+appear only when the flag is set and it reveals nothing a caller could not learn by calling the
+service. A contract that is published only in development is also one that production clients
+cannot check against. The UI adds GET routes and no content-type parser, so the phase 2.1 rule
+that refuses form-type POSTs with a 415 still covers every POST, and a test confirms that a
+`text/plain` POST to `/signals` still gets 415. The Vite dev server does not proxy `/docs`, so
+open it on the service's own port. `/backtest` validates its request, but its NDJSON lines are
+documented under `application/x-ndjson` and not enforced, because the reply is hijacked and
+Fastify's serialiser never sees them. For the same reason the client keeps the engine's
+`FanBacktestResult` for the result line.
+
+The optional typed client was done, by `import type` rather than code generation. Every request
+and response type in `src/lib/client/marketClient.ts` now comes from `server/schemas/`. This
+includes the portfolio extraction, which used to be restated by hand on the stated grounds that
+the client must not reach into the service's modules. That reasoning is reversed deliberately: a
+type-only import is erased before bundling, and the built bundle was checked and contains no Zod
+or Fastify code. The cost is a new dependency from `src/lib` on `server/schemas` at the type
+level, and it carries a rule. Schema modules import only `zod` and engine types, and the
+service-only helpers live in `validate.ts`, which the client never imports. The plan's third
+Verify clause was tested on 2026-10-05 by renaming `changePct` in `FanRowSchema`. `npm run
+typecheck` then failed in `ScreenView.tsx`, `store.test.ts` and `screenSlice.ts`.
+
+`server/handlers.ts` and the MCP code are untouched. In a live run on port 8799 with `DEV_TOOLS=1`,
+`/screen` over `kaggle-market.db` took 64.7 ms through the full stack, against 63.4 ms for the
+handler alone, so serialising through the response schema costs about a millisecond. On the same
+day `npm run typecheck`, `npm run lint` and `npm run test` passed, with 732 tests across 54 files.
+
+**Plan corrections**, made in `docs/platform-hardening-plan.md` on 2026-10-05:
+
+- The status line now says stage 2 is complete.
+- Phase 2.2 is marked landed and has a paragraph on what the implementation changed: "replace"
+  became wrappers, Zod was pre-empted, and the `NaN` problem.
+- The 2.1 sentence saying `fanBacktest.ts`, `signals.ts` and `marketClient.ts` were "not
+  touched" is now qualified as true for 2.1 and 2.3 only.
+- A landed touch-scope line names the three new dependencies and the new
+  `server/schemas/schemas.test.ts`.
+- A Verified line records all three clauses.
+
+**Left undone, on purpose.** The client still types engine numbers as `number` rather than
+`number | null`. Making the UI handle `null` explicitly is a change to the engine's types, not
+the transport's. The OpenAPI document contains cosmetic `*Input` copies of some components.
+`.claude/rules/server.md` could gain "new routes declare their schemas in `server/schemas/`",
+but that was outside this phase's scope. Most important: an API contract that is validated is
+not a backtest that is validated. The gaps recorded in phase 6.2 (no transaction costs, no trial
+count, no clustered *t*) are exactly where they were.
+
+### Where it lives
+- `server/schemas/common.ts` holds `wireNumber` and the shared error shape. `rows.ts` holds the
+  fan and signal row schemas. `screen.ts`, `system.ts`, `instrument.ts`, `portfolio.ts` and
+  `dev.ts` hold one module per route plugin. `validate.ts` holds the validator compiler and
+  `parseBody`.
+- `server/schemas/schemas.test.ts` holds the two-way type equalities between schemas and engine
+  and handler types.
+- `server/app.ts` holds the validator and serialiser compilers, the `preValidation` null-body
+  hook, and the swagger and swagger-ui registration.
+- `server/routes/*.ts` contains each route's `schema` block.
+- `server/fanBacktest.ts` holds `backtestConfigFromBody` and the `parseFanBacktestBody`
+  wrapper. `server/signals.ts` holds `signalsConfigFromBody` and `parseFanSignalsBody`.
+- `src/lib/client/marketClient.ts` holds the typed client.
+- `server/README.md` covers shape versus meaning, response checking and `GET /docs`.
+- `server/app.test.ts` has the `schemas (hardening 2.2)` block. `server/fanBacktest.test.ts` has
+  the clamp regressions for backtest and signals.
+- `package.json` and `package-lock.json` add `fastify-type-provider-zod`, `@fastify/swagger`
+  and `@fastify/swagger-ui`.
+
+### How to test
+```bash
+npm run typecheck
+npm run lint
+npm run test      # 732 tests / 54 files on 2026-10-05
+```
+
+By hand:
+
+```bash
+PORT=8799 DEV_TOOLS=1 NODE_ENV=test node server/index.ts
+curl -s localhost:8799/docs/json | jq '.openapi, (.paths | keys | length)'   # "3.1.0", 13
+curl -s -XPOST localhost:8799/signals -H 'content-type: application/json' \
+  -d '{"strategy":"tag50","minAvgVol":"lots"}'    # 400 naming minAvgVol
+curl -s -o /dev/null -w '%{http_code}\n' -XPOST localhost:8799/signals \
+  -H 'content-type: text/plain' -d x               # 415
+```
+
+Open `http://localhost:8799/docs` in a browser. Without `DEV_TOOLS` the document lists 9 paths.
+To see the compile-time contract, rename a field in `FanRowSchema` (`server/schemas/rows.ts`)
+and watch `npm run typecheck` fail at the UI call sites.
+
 ## 2026-10-05 — CCA-F E: the screener as an MCP server, with errors a model can act on
 
 ### What changed

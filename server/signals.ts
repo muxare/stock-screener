@@ -10,20 +10,36 @@ import type { FanBacktestConfig } from '../src/lib/fanBacktest.ts';
 import type { Stock } from '../src/lib/market.ts';
 import { RequestError } from './handlers.ts';
 import { parseStrategyField } from './fanBacktest.ts';
+import { SignalsRequestSchema } from './schemas/screen.ts';
+import type { SignalsBody } from './schemas/screen.ts';
+import { parseBody } from './schemas/validate.ts';
 
 export type { FanSignalRow };
 
-/** Parse the /signals body into a scan config. Throws RequestError on a missing or invalid strategy. */
-export function parseFanSignalsBody(body: unknown): FanBacktestConfig {
-  const b = (body && typeof body === 'object') ? body as Record<string, unknown> : {};
-  if (b.strategy === undefined || b.strategy === '') throw new RequestError('unknown or missing strategy');
+/**
+ * The meaning half of a `/signals` body, over a body whose shape
+ * `SignalsRequestSchema` has already checked. An empty-string strategy is the
+ * one "missing" the schema cannot see, so it is refused here in the same words.
+ */
+export function signalsConfigFromBody(b: SignalsBody): FanBacktestConfig {
+  if (b.strategy === '') throw new RequestError('unknown or missing strategy');
   const strategy = parseStrategyField(b.strategy);
-  const num = (v: unknown, d = 0) => (typeof v === 'number' && v >= 0 ? v : d);
+  const num = (v: number | null | undefined, d = 0) => (v != null && v >= 0 ? v : d);
   return signalScanConfig(strategy, {
     minAvgVol: num(b.minAvgVol),
     minMarketCap: num(b.minMarketCap),
     ema200RisingBars: Math.floor(num(b.ema200RisingBars, 21)),
   });
+}
+
+/**
+ * Shape, then meaning, for a body that did not come through the router. The MCP
+ * `scan_signals` tool calls this, which is what keeps it accepting and refusing
+ * exactly the strategies `/signals` does: the same schema, then the same parser.
+ * Throws RequestError on a malformed body or a missing or invalid strategy.
+ */
+export function parseFanSignalsBody(body: unknown): FanBacktestConfig {
+  return signalsConfigFromBody(parseBody(SignalsRequestSchema, body ?? {}));
 }
 
 function subjectFromStock(s: Stock): FanSignalSubject {

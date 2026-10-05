@@ -3,7 +3,9 @@
 Status (2026-10-05): **in progress — phases A (A.1–A.5), B, C, D and E landed; C verified against
 a real account, D measured over ten paid runs and the prompt gap it found fixed, E verified on all
 three clauses with the HTTP transport and `list_runs`/`get_run` deferred to hardening stage 5;
-phase F is next**. Written from Mikael's question of
+F, G and H wait for hardening stage 5 (the user-data store), which itself follows the open
+hardening phase 2.2 — J, which needs only C, is the one phase here that can start before
+then**. Written from Mikael's question of
 what to implement here to enforce the learning of the Anthropic *Claude Certified
 Architect – Foundations* (CCA-F) certification content. Intent 3 of
 `docs/platform-hardening-plan.md` already names CCA-F as a product goal; this document is
