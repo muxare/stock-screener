@@ -10,6 +10,7 @@
     "dev": "concurrently -n server,client -c blue,green \"npm:dev:server\" \"npm:dev:client\"",
     "dev:client": "vite",
     "dev:server": "DEV_TOOLS=1 node --env-file-if-exists=.env --watch server/index.ts",
+    "mcp:stdio": "node server/mcp/stdio.ts",
     "eod:import": "node tools/eod-import/index.ts",
     "yahoo:fetch": "node tools/yahoo-fetch/index.ts",
     "yahoo:backfill": "node tools/yahoo-fetch/backfill.ts",
@@ -27,6 +28,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.127.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "fastify": "^5.12.5",
     "pino": "^10.3.1",
     "react": "^19.2.6",

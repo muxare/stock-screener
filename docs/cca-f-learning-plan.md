@@ -1,8 +1,9 @@
 # CCA-F learning plan — applying the Claude Certified Architect material to this repo
 
-Status (2026-09-22): **in progress — phases A (A.1–A.5), B, C and D landed; C verified against
-a real account, D measured over ten paid runs and the prompt gap it found fixed; phase E is
-next**. Written from Mikael's question of
+Status (2026-10-05): **in progress — phases A (A.1–A.5), B, C, D and E landed; C verified against
+a real account, D measured over ten paid runs and the prompt gap it found fixed, E verified on all
+three clauses with the HTTP transport and `list_runs`/`get_run` deferred to hardening stage 5;
+phase F is next**. Written from Mikael's question of
 what to implement here to enforce the learning of the Anthropic *Claude Certified
 Architect – Foundations* (CCA-F) certification content. Intent 3 of
 `docs/platform-hardening-plan.md` already names CCA-F as a product goal; this document is
@@ -700,18 +701,89 @@ MCP primitives, and Claude Code configuration in one phase.
 - **Prompts**: two canned research prompts ("compare this strategy across datasets",
   "explain why this ticker matched"), so the prompt primitive is exercised too.
 - **Registration**: the server in `.claude/settings.json` (`mcpServers`) so Claude Code
-  sessions in this repo can query the live screener. Also the answer to "which tools does
+  sessions in this repo can query the live screener. *(Corrected 2026-09-23: the server is
+  declared in `.mcp.json`; `.claude/settings.json` only pre-approves it — see below.)* Also the answer to "which tools does
   a subagent get" — the `backtest-reviewer` from phase A gets `list_runs`/`get_run` and
   nothing else.
 
 Transport: stdio for local Claude Code use; the same server mounted over HTTP behind the
-Fastify app once hardening 2.1 lands, gated like `/dev/*` until stage 5 brings auth.
+Fastify app once hardening 2.1 lands, gated like `/dev/*` until stage 5 brings auth. *(HTTP deferred
+2026-09-23 to stage 5 — see below.)*
 
-- Touch scope: `server/mcp/` (new), `.claude/settings.json`, `.claude/agents/*`,
-  `package.json` (`@modelcontextprotocol/sdk`).
+- Touch scope, as declared before the work: `server/mcp/` (new), `.claude/settings.json`,
+  `.claude/agents/*`, `package.json` (`@modelcontextprotocol/sdk`).
+- Touch scope, corrected 2026-09-23 to what the phase actually needed — the reasons are in
+  the amendment below: `server/mcp/` (new), `.mcp.json` (new), `.claude/settings.json`,
+  `package.json`, `package-lock.json`, and this plan. `.claude/agents/*` turned out to need
+  no change.
 - Verify: MCP inspector lists tools, resources and prompts; a bad ticker returns
   `unknown_ticker` with `isRetryable: false`; in a Claude Code session "which names are in
   the fan today?" calls `screen_fan` unprompted.
+
+**What the implementation changed (2026-09-23).** Five claims above were wrong or
+underspecified once the server existed.
+
+*Project MCP servers are declared in `.mcp.json`, not in `.claude/settings.json`.* The
+Registration bullet said `mcpServers` in `.claude/settings.json`; Claude Code's MCP
+documentation, read on 2026-09-23, has no such key in settings files. A project-scoped
+server lives in `.mcp.json` at the repository root, which is why that file is added to the
+touch scope. It runs `node ${CLAUDE_PROJECT_DIR:-.}/server/mcp/stdio.ts` with
+`DEV_TOOLS=1`, so a session sees the dataset the dev UI last selected. What
+`.claude/settings.json` does carry is the approval: a `.mcp.json` server prompts before
+first use, and `enabledMcpjsonServers: ["screener"]` pre-approves that one server by name
+(never `enableAllProjectMcpServers`, which in a public repository would approve whatever a
+future `.mcp.json` change adds) — but only once the
+folder is trusted, because a cloned repository is not allowed to approve its own servers.
+`claude mcp get screener` reported the server as connected on 2026-09-23.
+
+*The `backtest-reviewer` grant waits for stage 5, and no agent file changed.* There is no
+`runs` table yet (hardening stage 5 has not started), so `list_runs` and `get_run` are
+deferred with it and there is nothing to grant. The three agents already list their tools
+explicitly (`Read, Grep, Glob, Bash`, plus `Edit` for `diary-writer`), and an explicit
+`tools:` list is the whole grant, so none of them sees the screener's tools today. Omitting
+the field would change that: the sub-agents documentation (read 2026-09-23) says `tools`
+"inherits every tool available to subagents if omitted", and that subagents "inherit the
+built-in tools and MCP tools available in the main conversation" — so a read-only agent
+written without a `tools:` line would pick up every screener tool implicitly. When stage 5 lands, the grant is
+`mcp__screener__list_runs, mcp__screener__get_run` appended to `backtest-reviewer`'s
+`tools:` line; the `mcpServers:` frontmatter field is not needed, because the server is
+already configured for the session.
+
+*The tools do not go through `McpServer.registerTool`.* The SDK (1.30.0) validates
+arguments against the Zod schema before the tool runs and answers a violation with a
+plain-text error, which would make the structured-error rule false for the commonest model
+mistake. The tool list and call handlers are installed on the underlying `Server` instead,
+over plain definitions in `server/mcp/tools.ts` that validate their own arguments — which
+is also the shape phase G needs to reuse them for the tool runner. `universe_cold` is
+defined as a failure *reading* the dataset (a SQLite file locked or mid-import), told apart
+from an engine failure by wrapping the provider; an empty dataset is not an error, it
+returns `universe: 0`.
+
+*A `dataset` argument was needed for the "compare across datasets" prompt.* The server
+serves one dataset per process, so that prompt had nothing to compare. Each tool therefore
+takes an optional `dataset`, limited to what the dev DB-selector's `listDatabases` offers
+(no arbitrary paths), with the names readable as the `screener://datasets` resource. A
+built universe of `kaggle-market.db` is about 1.9 s and several hundred megabytes, so at
+most one non-default dataset is kept warm.
+
+*HTTP transport is deferred.* Mounting the server behind Fastify is not small: the
+streamable-HTTP transport needs session handling, and the route would have to live beside
+`/dev/*` in `server/app.ts`, outside this phase's scope. Stdio covers the Claude Code use;
+HTTP waits for stage 5, which brings the auth the plan wanted before exposing it anyway.
+
+Verified on 2026-09-23: `npx @modelcontextprotocol/inspector --cli node server/mcp/stdio.ts`
+lists the three tools, 104 resources (two `screener://` and 102 glossary topics) and both
+prompts, and `get_instrument` with `ticker=NOPE` returns `unknown_ticker` with
+`isRetryable: false`. The third clause — a Claude Code session calling `screen_fan`
+unprompted — needed a restarted session and was run on 2026-10-05 as a fresh headless
+session, `claude -p "which names are in the fan today?"` with the three screener tools
+pre-approved (approval removes the permission prompt, not the choice of tool). The session
+made two calls: `ToolSearch`, because MCP tools are deferred and have to be loaded before
+use, and then `mcp__screener__screen_fan`, after which it answered with 14 of 44 names in
+the full stack. It also said, without being asked, that the default dataset was
+`synthetic` and so not "today" in any market sense. The tool description and
+`screener://datasets` made that clear enough for the model to report it, which matters
+because a stdio session sees whatever dataset the dev UI last selected.
 
 ---
 
