@@ -3,9 +3,9 @@
 Status (2026-10-05): **in progress — phases A (A.1–A.5), B, C, D and E landed; C verified against
 a real account, D measured over ten paid runs and the prompt gap it found fixed, E verified on all
 three clauses with the HTTP transport and `list_runs`/`get_run` deferred to hardening stage 5;
-F, G and H wait for hardening stage 5 (the user-data store), which itself follows the open
-hardening phase 2.2 — J, which needs only C, is the one phase here that can start before
-then**. Written from Mikael's question of
+F, G and H wait for hardening stage 5 (the user-data store), split on 2026-10-05 into 5.1
+(store, screens, strategies), 5.2 (runs) and 5.3 (auth) — J, which needs only C, can start
+now and must land before 5.3**. Written from Mikael's question of
 what to implement here to enforce the learning of the Anthropic *Claude Certified
 Architect – Foundations* (CCA-F) certification content. Intent 3 of
 `docs/platform-hardening-plan.md` already names CCA-F as a product goal; this document is
@@ -70,11 +70,11 @@ Each phase names the domain it exercises. **Key?** marks the ones that unblock o
 | C | Portfolio screenshot reader | 4, 5 | yes | hardening 2.x (Fastify), 4.1 (config) | API |
 | D | Eval harness | 5 | yes | C | API |
 | E | MCP server over the screener | 2, 3 | yes | hardening 2.x | MCP |
-| F | Signal rationale with prompt caching | 4, 5 | — | C, D, hardening 5 | API |
-| G | Research Q&A with the tool runner | 1, 2 | — | D, E, hardening 5 + 6.1 | API |
+| F | Signal rationale with prompt caching | 4, 5 | — | C, D, hardening 5.1 | API |
+| G | Research Q&A with the tool runner | 1, 2 | — | D, E, hardening 5.2 + 6.1 | API |
 | H | Multi-agent research workflow (Agent SDK) | 1, 5 | — | G | Agent SDK |
 | I | Nightly agent — apply the gate, record the answer | 1 | — | hardening 6.3 | Agent SDK |
-| J | Reliability guidelines and cost controls | 5 | — | C | cross-cutting |
+| J | Reliability guidelines and cost controls | 5 | — | C (must precede hardening 5.3) | cross-cutting |
 
 Phases A and B need no new dependencies and no other phase; they are the first branch.
 
@@ -925,7 +925,9 @@ J guidelines + cost controls: written at C, enforced before hardening stage 5 op
 
 Phases A and B can land this week. C, D and E follow hardening stage 2 and are independent
 of each other. F, G and H wait for the user-data store (hardening stage 5), which is the
-same keystone the research and trading intents wait for.
+same keystone the research and trading intents wait for. Since 2026-10-05 stage 5 is three
+phases: F needs 5.1, G needs 5.2 (the runs table behind `list_runs`/`get_run`), and J must
+land before 5.3 lets a second user near the Claude routes.
 
 ## Tests
 

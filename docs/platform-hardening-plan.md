@@ -2,7 +2,8 @@
 
 Status (2026-10-05): **in progress — stage 1 complete (1.1, 1.2, 1.3 landed); stage 2 complete
 (2.1 and 2.3 landed 2026-09-21, 2.2 landed 2026-10-05); 4.1 landed early, on the 2.1 branch;
-stage 3 landed and verified against a real account**. Follows the
+stage 3 landed and verified against a real account; stage 5 split into phases 5.1–5.3 on
+2026-10-05, with Kysely chosen for its migrations, 5.1 next**. Follows the
 Option C decision recorded in `docs/server-migration-plan.md`: the server stays TypeScript and gets hardened rather than
 ported. This document is the executable half. The CCA-F track (stages 3 and 7 here) is
 expanded, with the Claude Code, MCP and Agent SDK gaps filled, in `docs/cca-f-learning-plan.md`.
@@ -407,7 +408,7 @@ at all.
 - A **second database** for user data, kept strictly separate from the read-only market DB.
   Start SQLite (same operational story you already know), with a schema that would survive a
   move to Postgres in stage 7.
-- **Migrations from day one** — Drizzle or Kysely. The Börsdata plan already names the
+- **Migrations from day one** — Drizzle or Kysely (Kysely, decided 2026-10-05; see the split below). The Börsdata plan already names the
   absence of a migration mechanism as a problem (`tools/eod-import/db.ts` is a
   `CREATE TABLE IF NOT EXISTS` string). Do not repeat that here.
 - `POST/GET/DELETE /screens` and `/strategies`. **`src/lib/screen/storage.ts` already injects
@@ -438,10 +439,140 @@ at all.
     user spending it is your bill. Rate-limit per user and cap it before stage 3's reader is
     reachable by anyone but you.
 
-- Touch scope: `server/db/` (new), `server/routes/screens.ts`, `server/routes/strategies.ts`,
-  `src/lib/screen/storage.ts`, `src/lib/strategy/storage.ts`, `src/store.ts`.
-- Verify: a screen saved in one browser appears in another; a run is reproducible from its
-  stored config + fingerprint; migrations run forward cleanly on an empty and a populated DB.
+- Touch scope and Verify: superseded on 2026-10-05 by the three phases below, which split the
+  stage's original touch scope (`server/db/`, `server/routes/screens.ts`,
+  `server/routes/strategies.ts`, `src/lib/screen/storage.ts`, `src/lib/strategy/storage.ts`,
+  `src/store.ts`) and its three Verify clauses between them.
+
+### Stage 5, split into phases (2026-10-05)
+
+As written above, stage 5 is one phase carrying four separable pieces of work — a database
+with migrations, two CRUD resources and their client, a reproducible-runs table, and
+authentication with owner scoping — and the last of them brings an identity provider into
+the compose file. That is several branches' worth of review in one, so the stage is split
+into three phases that each land on their own branch and each leave the application working.
+The order follows dependency: nothing can be stored before the database exists, runs are the
+first thing a later phase (CCA-F G, via the MCP `list_runs`/`get_run` tools that phase E
+deferred) reads, and authentication is last because it is only needed once a second user
+exists, and it must not arrive before the cost controls it would otherwise expose.
+
+**Decisions taken for the whole stage (2026-10-05).**
+
+- **Kysely, not Drizzle.** Kysely is a typed query builder: queries read almost exactly like
+  the SQL the repository already writes by hand, and migrations are small hand-written files
+  that review like any other diff. Drizzle's main advantage — generating migrations from a
+  schema described in TypeScript — pays off in a large schema, and stage 5 has a handful of
+  tables. Both target SQLite now and Postgres later, so the stage-7 move is not a factor
+  between them. Kysely's migrator is used for migrations; no `kysely-ctl` until a CLI is
+  actually missed.
+- **No second SQLite driver.** The market reader uses Node's built-in `node:sqlite`
+  (`src/lib/data/sqlite.ts`), and the user-data store should too. Kysely's bundled
+  `SqliteDialect` does not accept a `node:sqlite` database directly: checked on 2026-10-05
+  against `kysely@0.29.6`, its `SqliteStatement` interface requires a `readonly reader: boolean`
+  and takes parameters as one array, while `node:sqlite`'s `StatementSync` has no `reader` and
+  takes parameters spread. The gap is small — `columns().length > 0` answers `reader` — so phase
+  5.1 writes a thin adapter in `server/db/` and tests it, rather than adding `better-sqlite3`.
+- **Postgres-survivable schema.** Text UUID primary keys rather than SQLite rowids, timestamps
+  as ISO-8601 text in UTC, JSON documents as text, no SQLite-only column types or `AUTOINCREMENT`.
+  The point is that stage 7's move is a dialect swap and a data copy, not a schema redesign.
+- **`owner_id` from the first migration.** Every user-owned table carries it from phase 5.1,
+  filled with one fixed local owner until 5.3. The data-access layer takes the owner as a
+  required argument from the start, so 5.3 changes where the owner comes from, not every query
+  — and the rule "the query layer cannot return another user's row" is true before there is a
+  second user to test it with.
+- **The user-data database is its own file**, named by a new `USERDATA_DB` variable in the
+  phase-4.1 config surface, and is never the market database. The existing `*.db` ignore rule
+  already keeps it out of git.
+
+*Correction to the stage text above (2026-10-05).* The claim that `src/lib/screen/storage.ts`
+makes swapping `localStorage` for an HTTP-backed store "a genuinely contained change" is too
+optimistic. Both `ScreenStorage` and `StrategyStorage` (`src/lib/strategy/storage.ts`) are
+synchronous `getItem`/`setItem` interfaces, and an HTTP call is asynchronous, so no HTTP-backed
+object can implement them. The injected seam is still worth having — it is what lets the
+client keep a synchronous local copy — but the change is a load-then-write-through design with
+explicit loading and error states, which is this repository's known rework class, not a
+backend swap. Phase 5.1 is specified accordingly.
+
+**Phase 5.1 — The user-data store, with screens and strategies.** A second SQLite database,
+opened through Kysely over `node:sqlite`, with the migrator running pending migrations at
+startup before the service reports ready. The first migration creates `screens` and
+`strategies`, each with an id, `owner_id`, name, the JSON document the client already stores,
+and created/updated timestamps. `GET/POST/DELETE /screens` and `/strategies` (plus `PUT` for
+an update, if the client's save semantics need it) declare their schemas in `server/schemas/`
+like every route since phase 2.2, so they appear in `/docs` and the client types come from the
+same place.
+
+On the client, the server becomes the source of truth and `localStorage` a synchronous cache:
+the store loads both collections from the server at startup, renders from the cache meanwhile,
+and writes through on save and delete. A failed load or write is shown to the user, not
+swallowed — a save that silently stays local is precisely the data loss this phase exists to
+end. Existing `localStorage` entries are imported once, on the first load against an empty
+server collection, so nobody loses the screens and strategies they already have. Single-user:
+every row carries the fixed local owner.
+
+Out of this phase: runs (5.2), authentication (5.3), the portfolio holdings and the
+`tools/portfolio-backfill` output that phase C deferred to "the user-data store" — those
+follow once the store exists, as their own change.
+
+- Touch scope: `server/db/` (new: connection, `node:sqlite` adapter, migrations, data
+  access), `server/routes/screens.ts` and `server/routes/strategies.ts` (new),
+  `server/schemas/` (the two new resources), `server/app.ts` and `server/routes/deps.ts` (to
+  register and inject them), `server/config.ts` (`USERDATA_DB`), `server/shutdown.ts` (close the
+  second database), `server/README.md`, `src/lib/screen/storage.ts`,
+  `src/lib/strategy/storage.ts`, `src/lib/client/marketClient.ts`, `src/store.ts` and the store
+  slices that own screens and strategies, `package.json`/`package-lock.json` (`kysely`), and
+  tests beside each.
+- Verify: migrations run forward cleanly on an empty database and on one already at the
+  previous version (tested); a screen saved in one browser appears in another; a server that is
+  down at save time produces a visible error rather than a silent local-only save; existing
+  `localStorage` screens and strategies survive the first load; the data-access layer has no
+  query path that omits `owner_id` (tested with two owners, though only one exists in use).
+
+**Phase 5.2 — Runs, reproducible.** A `runs` table: every backtest run persisted with its full
+config, its result, and a fingerprint of the dataset it ran against — which database, the date
+range, the bar count and a content hash — because a run that cannot be reproduced is not a
+research result. `/backtest` records the run when its stream completes; `GET /runs` and
+`GET /runs/:id` read them back. The MCP `list_runs` and `get_run` tools that phase E of
+`docs/cca-f-learning-plan.md` deferred land here, over the same data-access functions, and
+`backtest-reviewer` gets its grant to them as that phase recorded. This is not phase 6.1: runs
+still execute inside the request; 6.1 turns them into jobs and the stream into a view of one.
+
+The fingerprint's content hash must be cheap enough to compute per run without making
+`/backtest` noticeably slower; how it is computed (over the bars actually used, or once per
+dataset load and cached on the universe) is the phase's first decision, measured rather than
+assumed. Phase 6.2's rules apply to what is stored: the run records its trial context so a
+later reader can tell one run from the best of forty.
+
+- Touch scope: `server/db/` (a migration and the runs data access), `server/routes/runs.ts`
+  (new), `server/routes/screen.ts` (record on completion), `server/schemas/`,
+  `server/universe.ts` (if the fingerprint is cached per dataset), `server/mcp/tools.ts` and
+  its tests, `.claude/agents/backtest-reviewer.md` (the tool grant), and tests beside each.
+- Verify: a run is reproducible from its stored config and fingerprint — re-running it against
+  the same dataset gives the same result, and against a changed dataset the fingerprints
+  differ; a run aborted mid-stream is not recorded as complete; `list_runs`/`get_run` answer
+  through the MCP inspector; `/backtest` latency with recording is measured against without.
+
+**Phase 5.3 — Authentication and owner scoping.** OIDC against an identity provider — never
+hand-rolled sessions, never a stored password. The service validates tokens on every
+user-data route and derives the owner from the token's subject, replacing the fixed local
+owner; existing rows are assigned to the first real user by a migration. The choice between
+self-hosted Keycloak in compose and a hosted provider is made at the start of this phase,
+together with phase 4.3's compose file if that has not landed. The `/dev/*` routes stay
+unreachable in any deployment with auth on, and the MCP HTTP transport phase E deferred to
+"the auth stage 5 brings" can follow this phase.
+
+**This phase does not start before CCA-F phase J** (`docs/cca-f-learning-plan.md`): the
+per-user rate limit and spend cap on the Claude routes must exist before a second user can
+reach them, since the API key and the bill are the operator's.
+
+- Touch scope: `server/auth/` (new: token validation), `server/app.ts`, `server/routes/deps.ts`,
+  `server/db/` (the owner migration), `server/config.ts` (issuer and audience),
+  `src/lib/client/marketClient.ts` and a login flow in `src/`, `compose.yaml` if Keycloak is
+  chosen, `server/README.md`, and tests beside each.
+- Verify: a request without a valid token to any user-data route is a 401; user A cannot read,
+  update or delete user B's screen, strategy or run by id, through any route (tested per verb,
+  which is the failure the stage text names); `/dev/*` is absent with auth on; the Claude routes
+  enforce J's per-user limits.
 
 ---
 
